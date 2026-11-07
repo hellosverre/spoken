@@ -225,7 +225,7 @@ function Multi({ request, targets, lang, passcode, onHome, onBook }: {
                 key={l.callId} accessibilityRole="tab" accessibilityState={{ selected: on }}
                 accessibilityLabel={`${l.name}: ${t.st[l.status] ?? l.status}${l.answer ? `, ${l.answer}` : ""}`}
                 onPress={() => setSel(i)}
-                style={{ minWidth: 120, maxWidth: 200, minHeight: 56, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, borderWidth: 1, borderColor: on ? C.accent : C.line2, backgroundColor: on ? C.surface2 : C.surface }}
+                style={{ minWidth: 136, maxWidth: 220, minHeight: 56, justifyContent: "center", paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14, borderWidth: 1, borderColor: on ? C.accent : C.line2, backgroundColor: on ? C.surface2 : C.surface }}
               >
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dot(l) }} />

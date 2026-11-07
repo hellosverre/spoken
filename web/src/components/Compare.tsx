@@ -229,7 +229,7 @@ function Multi({ request, targets, lang, onHome, onBook }: {
               aria-label={`${l.name}: ${t.st[l.status] ?? l.status}${l.answer ? `, ${l.answer}` : ""}`}
               onClick={() => setSel(i)}
               style={{
-                flex: "1 0 7.5rem", minHeight: "3.5rem", minWidth: 0, textAlign: "left", padding: "0.5rem 0.75rem", borderRadius: "0.875rem",
+                flex: "1 0 8.5rem", minHeight: "3.5rem", minWidth: 0, textAlign: "left", padding: "0.5rem 0.75rem", borderRadius: "0.875rem",
                 border: `1px solid ${on ? "var(--accent)" : "var(--line-2)"}`, background: on ? "var(--surface-2)" : "var(--surface)", color: "var(--ink)",
               }}
             >
