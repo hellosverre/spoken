@@ -504,3 +504,18 @@ button.row:hover{background:var(--surface-2)}
   .pod-wrap[data-on] .rings i{animation:none;opacity:0}
   .pod-wrap[data-on] .rings i:first-child{opacity:.5;transform:scale(1.25)}
 }
+
+/* ---------- feedback: thumbs after a call, note from Profile ---------- */
+.fb{display:flex;flex-direction:column;gap:10px;padding-top:4px;border-top:1px solid var(--line)}
+.fb-ask{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:12px}
+.fb-ask b{font-size:14px;font-weight:510}
+.fb-thumbs{display:flex;gap:8px}
+.thumb{width:48px;height:44px;border-radius:12px;border:1px solid var(--line-2);display:grid;place-items:center;color:var(--muted);transition:transform .15s var(--ease),background .15s,color .15s,border-color .15s}
+.thumb svg.i{width:20px;height:20px}
+.thumb:hover{background:var(--surface-2)}
+.thumb:active{transform:scale(.92)}
+.thumb[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.fb-thanks{display:flex;align-items:center;gap:10px;padding-top:12px;font-size:14px;color:var(--muted);animation:rise .3s var(--ease) both}
+.fb-thanks svg.i{width:18px;height:18px;color:var(--accent);flex:none}
+.fb-send{display:flex;gap:8px;align-items:stretch}
+.fb-send .input.multi{min-height:44px;height:44px;padding:11px 14px;resize:none}

@@ -5,6 +5,7 @@ import type { ThemePref } from "@/lib/store";
 import { useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { HeroDuet } from "./Art";
 import { Icon, type IconName } from "./Icon";
+import { FeedbackSheet } from "./Feedback";
 import { Field } from "./ui";
 
 const THEMES: { v: ThemePref; icon: IconName }[] = [
@@ -30,6 +31,8 @@ export function Profile() {
   const lang = useSpoken((s) => s.lang);
   const themePref = useSpoken((s) => s.themePref);
   const profile = useSpoken((s) => s.profile);
+
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // Local drafts, saved on blur. Re-sync when the stored profile changes.
   const [prev, setPrev] = useState(profile);
@@ -171,6 +174,20 @@ export function Profile() {
             </span>
           </li>
           <li>
+            <button className="row" onClick={() => setFeedbackOpen(true)}>
+              <span className="ic">
+                <Icon name="bubble" />
+              </span>
+              <span className="tx">
+                <b>{m.fbRowT}</b>
+                <span>{m.fbRowS}</span>
+              </span>
+              <span className="go">
+                <Icon name="chevron" />
+              </span>
+            </button>
+          </li>
+          <li>
             <button className="row danger" onClick={() => store.logout()}>
               <span className="ic">
                 <Icon name="logout" />
@@ -195,6 +212,7 @@ export function Profile() {
         </ul>
         <p className="about">{t.foot}</p>
       </div>
+      {feedbackOpen && <FeedbackSheet onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }
