@@ -75,3 +75,35 @@ export function isEcho(text: string, lastCallee: string): boolean {
 export function endsSentence(text: string): boolean {
   return /[.!?…]$/.test(text.trim());
 }
+
+/**
+ * After the errand was stated once, a sentence that asks for the item again («Jeg vil gjerne
+ * bestille …», «Kan jeg bestille …?») is dropped, unless the callee just asked what we want.
+ */
+export function restatesErrand(text: string, e: Errand, lastCallee: string): boolean {
+  if (!e.item || asked(lastCallee).item) return false;
+  const core = norm(e.item).replace(/^(en|ei|et|én) /, "").split(" ").filter((w) => w.length >= 4);
+  const t = norm(text);
+  const hasItem = core.length > 0 && core.every((w) => t.includes(w.slice(0, 5)));
+  return hasItem && /\b(bestille|bestilling|kjøpe|booke|ha en|ha ei|ha et|vil gjerne|ringer for å)\b/.test(t);
+}
+
+// Interjections that open almost every LLM reply (call #9: «Skjønner.», «Okei.», «Så bra.», «Takk.»).
+const FILLER_ONLY = /^(skjønner|okei|ok|så bra|takk|takk skal du ha|flott|supert|fint|perfekt|greit|javel|ja vel|ah|å|ja|aha|mhm|mm|forstått|den er grei|det er greit)[.!,]?$/i;
+const FILLER_PREFIX = /^(skjønner|okei|ok|så bra|flott|supert|perfekt|greit|javel|ah|aha|forstått)[,.!]\s+/i;
+
+/** A whole segment that is only an interjection. */
+export function isFillerOnly(text: string): boolean {
+  return FILLER_ONLY.test(text.trim());
+}
+
+/** «Skjønner, da …» → «Da …». */
+export function stripFillerPrefix(text: string): string {
+  const t = text.replace(FILLER_PREFIX, "");
+  return t === text ? text : t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** Asking the shop who/which branch it is, when the plan already says who we called. */
+export function asksWhoTheyAre(text: string): boolean {
+  return /\?\s*$/.test(text) && /\b(hvilken (filial|butikk|avdeling|restaurant)|hvem (snakker jeg med|er dette|er det)|er dette \p{L}+|hvor (er|ligger) dere)\b/iu.test(text);
+}

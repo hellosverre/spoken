@@ -8,14 +8,14 @@ import { config } from "../config.ts";
 import { mockSummary } from "../llm/mock.ts";
 import type { AgentContext, HistoryItem, LlmProvider, Tone, Usage } from "../llm/types.ts";
 import {
-  ADDRESS_REFUSAL, CARD_REFUSAL, FNR_REFUSAL, detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim,
+  ADDRESS_REFUSAL, PICKUP_NO_ADDRESS, CARD_REFUSAL, FNR_REFUSAL, detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim,
 } from "../safety.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLine, LineMetric } from "./line.ts";
 import { timeHint, timesIn } from "../time.ts";
 import { HoldFlow } from "./hold.ts";
-import { endsSentence, errandParts, isEcho, isMeta, parseErrand, shortenErrand, type Errand } from "./style.ts";
+import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 
 export const WAIT_PHRASE = "Et øyeblikk…";
@@ -57,7 +57,7 @@ const FILLER_AFTER_MS = 2500;
 // question (Sverre, call #5: «mm» after everything sounded robotic).
 const BACKCHANNELS = ["Ja.", "Okei.", "Skjønner."];
 // First backchannel of a call if the reply isn't ready at 1.2 s; later ones only past 2 s.
-const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 1200);
+
 const BACKCHANNEL_LATER_MS = 2000;
 const BACKCHANNEL_EVERY = 3;
 // Don't start talking until the callee has been quiet this long (call #5: half-sentences from
@@ -83,6 +83,7 @@ export function isContentWord(raw: string, sentenceStart = false): boolean {
   if (/\d/.test(w) || NUMBER_WORDS.test(w) || NEGATIONS.test(w)) return true;
   return !sentenceStart && /^\p{Lu}/u.test(w) && w.length >= 3; // a name mid-sentence
 }
+const COMMIT_VERBS = /^(bestill|bekreft|book|godta|avbestill|kanseller|betal|reserver|legg|takk|gjerne|bare|klokka|henting)/;
 const FILLER_WORDS = new Set(["det", "den", "jeg", "du", "vi", "de", "ha", "har", "er", "var", "ja", "nei", "og", "en", "et", "så", "bare", "da", "eh", "ehm", "øh", "mm", "hm", "ikke", "kan", "vil", "må", "med", "på", "til", "som", "nå", "jo", "okei", "ok"]);
 // Start the LLM on a partial that has been stable this long (speculative turn).
 const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
@@ -101,6 +102,9 @@ function soundsUnfinished(text: string): boolean {
   // «Det blir.» / «Det koster.» : a cut-off before the number
   return t.split(/\s+/).length <= 3 && /\b(blir|koster|er|var)[.]?$/i.test(t);
 }
+
+/** One agent turn = one transcript line, however many clauses it is spoken in. */
+interface TurnLine { id: string; at: number; parts: string[] }
 
 interface Spec {
   key: string;
@@ -205,6 +209,7 @@ export class CallSession {
   private lastApprovalAt = 0;
   private answered: { q: string; choice: string }[] = []; // approval questions the user answered
   private approvedCommit = false;
+  private approvedItems: string[] = []; // normalised texts of approved commitments
   private confirmedByCallee = false;
   private goalAsks = 0; // agent questions about the goal since the last progress
   private lastProgressAt = 0;
@@ -395,6 +400,16 @@ export class CallSession {
       this.confirmedByCallee = true;
     }
 
+    // A plain «Nei» to our own question about the errand or price: the user decides what next
+    // (call #9 ended with «jeg hører deg dessverre ikke» after a clear «Nei» about the price).
+    const lastAgent = [...this.history].reverse().find((h) => h.role === "agent")?.text ?? "";
+    if (/^(nei|nei takk|nei,? (det|den) (går|kan|blir) (vi )?ikke|det går (dessverre )?ikke|det kan vi (dessverre )?ikke|nei,? dessverre)[.!]?$/i.test(clean) &&
+        /\?\s*$/.test(lastAgent) && (this.isGoalAsk(lastAgent) || /\b(kr|kroner|koster|pris|mulig|går det)\b/i.test(lastAgent))) {
+      this.debug("callee_no_to_user", { text: clean, question: lastAgent });
+      void this.requestApproval(`${this.init.plan.callee.name || "De"} sa «${clean}» til: «${lastAgent}» Hva vil du?`, ["Prøv noe annet", "Legg på"], "stuck");
+      return;
+    }
+
     // Questions about extras the plan doesn't cover → ask the user (Nei / Ja / write), don't decide.
     const extra = clean.match(EXTRAS_Q)?.[1];
     if (extra && /\?|^(hva|vil|skal|ønsker|trenger)\b/i.test(clean) && !new RegExp(extra, "i").test(this.init.plan.goal)) {
@@ -426,6 +441,7 @@ export class CallSession {
       return;
     }
     if (ask === "address" && !this.init.plan.willShare.includes("address")) {
+      if (/\bhent/i.test(this.init.plan.goal)) { void this.say(PICKUP_NO_ADDRESS, "say", true); return; }
       void this.requestApproval("Mottakeren spør etter adressen din. Kan jeg oppgi den?", ["JA", "NEI"], "address", ADDRESS_REFUSAL);
       return;
     }
@@ -625,8 +641,8 @@ export class CallSession {
     const lastCallee = this.history.at(-1);
     const answeringCallee = lastCallee?.role === "callee";
     const askedQuestion = !!lastCallee && /\?\s*(⟨.*⟩)?$/.test(lastCallee.text);
-    const mayBackchannel = answeringCallee && !askedQuestion && turnNo - this.lastBackchannelTurn >= BACKCHANNEL_EVERY;
-    const backAfter = this.backchannels === 0 ? BACKCHANNEL_MS : BACKCHANNEL_LATER_MS;
+    const mayBackchannel = config.backchannelMs > 0 && answeringCallee && !askedQuestion && turnNo - this.lastBackchannelTurn >= BACKCHANNEL_EVERY;
+    const backAfter = this.backchannels === 0 ? config.backchannelMs : BACKCHANNEL_LATER_MS;
     // A short cached «Ja.» / «Okei.» / «Skjønner.» only if real content still isn't ready at 1.2 s.
     const backTimer = mayBackchannel ? setTimeout(() => {
       if (spokeAnything || stop || abort.signal.aborted || this.ended || this.pending) return;
@@ -648,6 +664,7 @@ export class CallSession {
       void this.say(f, "filler");
     }, FILLER_AFTER_MS);
 
+    const turnLine: TurnLine = { id: nid("a"), at: Date.now(), parts: [] };
     let waited = false;
     let sentences = 0;
     let rawText = "";
@@ -671,7 +688,11 @@ export class CallSession {
         // Style rules (call #8): no meta talk, no echoing the callee, no «done» claims before the
         // callee confirmed, the full order only once, and short turns.
         const lastCalleeText = [...this.history].reverse().find((h) => h.role === "callee")?.text.replace(/\s*⟨.*?⟩/g, "") ?? "";
-        if (isMeta(s.text) || isEcho(s.text, lastCalleeText)) { this.debug("style_dropped", { text: s.text }); return; }
+        if (isMeta(s.text) || isEcho(s.text, lastCalleeText) || asksWhoTheyAre(s.text)) { this.debug("style_dropped", { text: s.text }); return; }
+        // Interjection-only lines go (unless it is the goodbye); «Skjønner, da …» → «Da …».
+        if (isFillerOnly(s.text) && !GOODBYE.test(s.text)) { this.debug("filler_dropped", { text: s.text }); return; }
+        if (stripFillerPrefix(s.text) !== s.text) s = { ...s, text: stripFillerPrefix(s.text) };
+        if (this.errandStated && restatesErrand(s.text, this.errand, lastCalleeText)) { this.debug("errand_restatement_dropped", { text: s.text }); return; }
         if (isDoneClaim(s.text) && !this.confirmedByCallee) { this.debug("done_claim_dropped", { text: s.text }); return; }
         if (speechCapped) { this.debug("turn_capped", { text: s.text }); return; }
         if (this.errandStated && errandParts(s.text, this.errand) >= 2) {
@@ -693,7 +714,7 @@ export class CallSession {
           stop = true;
           spokeAnything = true;
           const q = "Hvilket klokkeslett mener du?";
-          if (!this.recentTurns.some((r) => r.has(norm(q)))) { said.push(q); await this.say(q, "say", false, abort.signal); }
+          if (!this.recentTurns.some((r) => r.has(norm(q)))) { said.push(q); await this.say(q, "say", false, abort.signal, turnLine); }
           return;
         }
         // Asking the shop about the goal again after 2 tries: ask the user instead (call #5 looped 5.5 min).
@@ -709,11 +730,11 @@ export class CallSession {
           this.goalAsks++;
         }
         const commitment = isCommitment(s.text);
-        if (commitment && this.approvalCredit <= 0) {
-          // Safety: the model tried to commit without a yes from the user.
+        if (commitment && (this.approvalCredit <= 0 || !this.coveredByApproval(s.text))) {
+          // Safety: the model tried to commit without a yes from the user for exactly this.
           this.note("Stoppet en forpliktelse som ikke var godkjent; spør deg først.", "warn");
           stop = true;
-          await this.requestApproval(`Skal jeg si: «${s.text}»?`, ["JA", "NEI"], "commit");
+          await this.requestApproval(`Kan jeg si ja til dette: «${s.text.replace(/[.!]$/, "")}»?`, ["JA", "NEI"], "commit");
           return;
         }
         if (commitment) this.approvalCredit--;
@@ -729,7 +750,7 @@ export class CallSession {
             stop = true;
             spokeAnything = true;
             said.push(esc.text);
-            await this.say(esc.text, "say", false, abort.signal);
+            await this.say(esc.text, "say", false, abort.signal, turnLine);
             if (esc.end) this.endTag = { outcome: "failed", summary: "Forsto ikke mottakeren; avsluttet høflig." };
             return;
           }
@@ -740,11 +761,11 @@ export class CallSession {
         if (firstAudio && this.timing && !this.timing.awaitAudio) { this.timing.awaitTts = true; this.timing.awaitAudio = true; }
         if (firstAudio) { firstAudio = false; this.latencies.push(Date.now() - t0); }
         said.push(s.text);
-        if (errandParts(s.text, this.errand) >= 2) this.errandStated = true;
+        if (errandParts(s.text, this.errand) >= 2 || restatesErrand(s.text, this.errand, "")) this.errandStated = true;
         // «Flott!» / «Ja.» don't count as the turn's sentence.
         if (endsSentence(s.text) && s.text.split(/\s+/).length >= 3 && ++sentences >= (askedQuestion ? 2 : 1)) speechCapped = true;
         if (GOODBYE.test(s.text)) saidBye = true;
-        const r = await this.say(s.text, "say", false, abort.signal);
+        const r = await this.say(s.text, "say", false, abort.signal, turnLine);
         if (r.interrupted) stop = true;
         // After a goodbye nothing more is said: the rest of the reply is dropped and we hang up.
         if (saidBye) stop = true;
@@ -805,6 +826,11 @@ export class CallSession {
       }
     } finally {
       clearTimeout(fillerTimer);
+      if (turnLine.parts.length) {
+        const full = turnLine.parts.join(" ");
+        this.emit({ type: "transcript", id: turnLine.id, who: "agent", text: full, final: true, at: Date.now() });
+        this.transcript.push({ who: "agent", text: full, at: turnLine.at });
+      }
       clearTimeout(backTimer);
       this.turnRunning = false;
       if (said.length) {
@@ -832,13 +858,13 @@ export class CallSession {
   private escalation(dup: boolean): { text: string; end?: boolean } | null {
     const name = this.init.profile.name || "brukeren";
     if (this.confusedRun >= 3) {
-      return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
+      return { text: `Beklager, jeg tror vi misforstår hverandre litt. ${name} tar kontakt igjen. Ha det bra!`, end: true };
     }
     // Don't re-introduce ourselves (the callee complained on call #5); once per call.
-    const rephrase = "Går det, ja eller nei?";
+    const rephrase = "Unnskyld, er det mulig?";
     if (this.confusedRun === 2 || dup) {
       if (this.rephrased || this.recentTurns.some((t) => t.has(norm(rephrase)))) {
-        return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
+        return { text: `Beklager, jeg tror vi misforstår hverandre litt. ${name} tar kontakt igjen. Ha det bra!`, end: true };
       }
       if (this.confusedRun === 2) this.note("Mottakeren er vanskelig å forstå; jeg prøver å spørre enklere.", "warn");
       this.rephrased = true;
@@ -848,7 +874,11 @@ export class CallSession {
   }
 
   /** Speak through the safety filter; records the line in the transcript. */
-  private async say(text: string, kind: "say" | "filler" = "say", canned = false, signal?: AbortSignal) {
+  /**
+   * Speak through the safety filter. With `group`, all clauses of one agent turn share one
+   * transcript id (the UI shows one bubble that grows); the turn's final line is emitted by runTurn.
+   */
+  private async say(text: string, kind: "say" | "filler" = "say", canned = false, signal?: AbortSignal, group?: TurnLine) {
     if (this.ended) return { interrupted: true };
     const f = filterOutgoing(text, {
       willShare: this.init.plan.willShare,
@@ -860,9 +890,10 @@ export class CallSession {
     // What the user sees never contains the fnr itself.
     const shown = text.replaceAll("{{FNR}}", "[fødselsnummer]").replaceAll("{{ADDRESS}}", this.init.profile.address ?? "[adresse]");
     const shownSafe = text.includes("{{") && f.text !== FNR_REFUSAL ? shown : f.text;
-    const id = nid("a");
-    const at = Date.now();
-    this.emit({ type: "transcript", id, who: "agent", text: shownSafe, final: false, at });
+    const id = group?.id ?? nid("a");
+    const at = group?.at ?? Date.now();
+    if (group) group.parts.push(shownSafe);
+    this.emit({ type: "transcript", id, who: "agent", text: group ? group.parts.join(" ") : shownSafe, final: false, at });
     this.speaking = true;
     let r = { interrupted: false };
     try {
@@ -874,9 +905,11 @@ export class CallSession {
     } finally {
       this.speaking = false;
     }
-    this.emit({ type: "transcript", id, who: "agent", text: shownSafe, final: true, at: Date.now() });
+    if (!group) {
+      this.emit({ type: "transcript", id, who: "agent", text: shownSafe, final: true, at: Date.now() });
+      this.transcript.push({ who: "agent", text: shownSafe, at });
+    }
     this.armSilenceNudge();
-    this.transcript.push({ who: "agent", text: shownSafe, at });
     if (kind === "say" || canned) this.history.push({ role: "agent", text });
     return r;
   }
@@ -895,6 +928,17 @@ export class CallSession {
    * The disclosure is said once, by code. After that the agent never re-introduces itself or
    * repeats «på vegne av {name}» unless the callee asks who is calling (call #5: callee complained).
    */
+  /**
+   * A commitment sentence is covered only if an approved card was about the same thing: the
+   * sentence names nothing (pronoun: «da bekrefter jeg den») or its content words appear in an
+   * approved card.
+   */
+  private coveredByApproval(text: string): boolean {
+    const words = norm(text).split(" ").filter((w) => w.length >= 4 && !COMMIT_VERBS.test(w) && !FILLER_WORDS.has(w));
+    if (!words.length) return this.approvedItems.length > 0;
+    return this.approvedItems.some((q) => words.filter((w) => q.includes(w.slice(0, 5))).length >= Math.ceil(words.length * 0.5));
+  }
+
   private progress() {
     this.lastProgressAt = Date.now();
     this.goalAsks = 0;
@@ -1069,13 +1113,17 @@ export class CallSession {
       if (yes) this.init.plan.willShare.push("address");
       this.history.push({ role: "user", text: yes ? "[godkjent] Du kan oppgi adressen: {{ADDRESS}}" : "[avslått] Ikke oppgi adressen." });
     } else if (p.kind === "stuck") {
-      if (/godta/i.test(choice)) { this.approvalCredit = 1; this.approvedCommit = true; }
+      if (/godta/i.test(choice)) { this.approvalCredit = 1; this.approvedCommit = true; this.approvedItems.push(norm(p.question)); }
       this.history.push({ role: "user", text: /godta/i.test(choice)
         ? `[godkjent] Brukeren godtar det butikken tilbyr (${p.question}). Bekreft det kort.`
         : `[svar] ${choice}. Ikke gjenta det samme spørsmålet; prøv en annen løsning eller avslutt høflig.` });
+    } else if (yes && p.kind !== "commit") {
+      // A yes to a side question (extras, delivery, a choice) is an answer, not permission to commit.
+      this.history.push({ role: "user", text: `[svar] Ja (${p.question})` });
     } else if (yes) {
       this.approvalCredit = 1;
-      if (p.kind === "commit") this.approvedCommit = true;
+      this.approvedCommit = true;
+      this.approvedItems.push(norm(p.question));
       this.history.push({ role: "user", text: `[godkjent] ${p.question}` });
     } else if (no) {
       this.history.push({ role: "user", text: `[avslått] ${p.question}` });
