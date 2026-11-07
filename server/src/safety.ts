@@ -62,8 +62,8 @@ export function checkGoal(text: string): { ok: true } | { ok: false; reason: str
 // ---------- Disclosure ----------
 
 export function disclosureLine(name: string, lang: Lang = "no"): string {
-  if (lang === "en") return `Hi, I'm an AI assistant calling on behalf of ${name.trim() || "a user"}.`;
-  return `Hei, jeg er en KI-assistent som ringer på vegne av ${name.trim() || "en bruker"}.`;
+  if (lang === "en") return `Hi, I'm an AI assistant calling on behalf of ${name.trim() || "a user"}, who is following the call.`;
+  return `Hei, jeg er en KI-assistent som ringer på vegne av ${name.trim() || "en bruker"}, som følger med på samtalen.`;
 }
 
 /** The first spoken line always starts with the disclosure, whatever the plan or model said. */

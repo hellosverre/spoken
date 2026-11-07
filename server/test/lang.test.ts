@@ -28,7 +28,7 @@ describe("picking the call language", () => {
 describe("safety rules in English", () => {
   test("disclosure is forced into the opening", () => {
     const o = ensureDisclosure("Hello there!", "Sverre", "en");
-    expect(o).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre.");
+    expect(o).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre, who is following the call.");
     expect(o).toContain("say no");
     expect(ensureDisclosure("Hei, jeg er en KI-assistent som ringer på vegne av Sverre.", "Sverre", "en")).not.toContain("KI-assistent");
   });
