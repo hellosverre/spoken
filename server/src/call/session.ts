@@ -16,7 +16,7 @@ import type { CallLine, LineMetric } from "./line.ts";
 import { timeHint, timesIn, withoutTimes } from "../time.ts";
 import { isNumberish, numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
-import { OnHoldDetector } from "./onhold.ts";
+import { HOLD_PHRASE, OnHoldDetector } from "./onhold.ts";
 import { suggestChips } from "./chips.ts";
 import { LINES, langFromText, langName, linesFor } from "./lines.ts";
 import { LangSwitcher } from "./langswitch.ts";
@@ -89,9 +89,11 @@ const OPENING_ECHO_CONF = Number(process.env.OPENING_ECHO_CONF ?? 0.6);
 const GREETING_WAIT_MS = Number(process.env.GREETING_WAIT_MS ?? 3000);
 const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
 // A recorded welcome message or phone menu answers first at many restaurants: wait it out.
-const ANNOUNCEMENT = /velkommen til|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
+const ANNOUNCEMENT = /velkommen til|gjelder (din )?henvendelse|her (vil|kan) du (alltid )?finne|for english|press \d|for norsk|beste priser|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
 const MENU = /trykk|tast(er)? \d|press \d|for (bestilling|reservasjon|å (snakke|prate))/i;
 const ANNOUNCEMENT_GAP_MS = 3500;
+// A person picking up after the recording: «Hallo», «Thon Hotel, det er Kari», «Hva kan jeg hjelpe deg med?».
+const HUMAN_PICKUP = /^(hallo|hei|god (kveld|morgen|dag|ettermiddag))\b.{0,60}$|\b(det er|du snakker med|snakker med)\s+\p{Lu}|hva kan jeg hjelpe|hvordan kan jeg hjelpe|how can i help|this is \p{Lu}/iu;
 const ANNOUNCEMENT_MAX_MS = 45_000; // a recorded message can run long; never talk over it
 const GREETING_MAX_MS = Number(process.env.GREETING_MAX_MS ?? 8000);
 // After the disclosure: give them a moment to answer («ja?», «nei takk») before stating the errand.
@@ -250,6 +252,7 @@ export class CallSession {
   private lastGreeting = "";
   private greetAll = ""; // everything said before our opening (welcome message, menu)
   private menuTries = 0;
+  private announceMode = false; // a recording played (or we pressed a menu key): wait for a person
   private ended = false;
   private endTag?: { outcome: Outcome; summary: string };
   private voicemail = false;
@@ -491,6 +494,7 @@ export class CallSession {
       this.menuTries++;
       const menu = this.greetAll.trim();
       this.greetAll = "";
+      this.announceMode = true;
       this.debug("phone_menu", { menu });
       console.log(`[call] ${this.callId} phone menu heard, choosing a key`);
       this.openingPending = false;
@@ -527,12 +531,16 @@ export class CallSession {
         const quiet = this.init.line.silenceMs?.() ?? Infinity;
         const greeted = this.lastCalleeAt >= start;
         // «Hei, dette er …» stops mid-sentence: give them twice the gap to finish it.
-        const gap = ANNOUNCEMENT.test(this.greetAll) ? ANNOUNCEMENT_GAP_MS
+        if (ANNOUNCEMENT.test(this.greetAll)) this.announceMode = true;
+        const human = this.announceMode && HUMAN_PICKUP.test(this.lastGreeting);
+        // In a recording or queue, only a line that sounds like a person ends the wait.
+        const recorded = this.announceMode && !human && (ANNOUNCEMENT.test(this.lastGreeting) || HOLD_PHRASE.test(this.lastGreeting));
+        const gap = this.announceMode && !human ? ANNOUNCEMENT_GAP_MS
           : greeted && soundsUnfinished(this.lastGreeting) ? 2 * GREETING_GAP_MS : GREETING_GAP_MS;
         const done = this.ended
-          || (greeted && quiet >= gap)
+          || (greeted && !recorded && quiet >= gap)
           || (!greeted && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
-          || waited >= (ANNOUNCEMENT.test(this.greetAll) ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
+          || waited >= (this.announceMode ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
         if (done) { clearInterval(tick); resolve(greeted); }
       }, 50);
     });
@@ -1005,7 +1013,7 @@ export class CallSession {
     }, Math.max(0, backAfter - (Date.now() - t0))) : undefined;
     // Only fill silence when the reply is genuinely slow.
     const fillerTimer = setTimeout(() => {
-      if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending || this.fillers >= MAX_FILLERS) return;
+      if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending || this.onHold.active || this.fillers >= MAX_FILLERS) return;
       this.fillers++;
       const f = this.L.fillers.find((x) => x !== this.lastFiller) ?? this.L.fillers[0]!;
       this.lastFiller = f;

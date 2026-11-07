@@ -2,7 +2,7 @@
 // Phrase-based: the callee says «et øyeblikk / vent litt / jeg setter deg på vent / hold on».
 // While on hold the agent stays silent; speech that looks like a person addressing us ends it.
 
-export const HOLD_PHRASE = /\b(et (lite )?øyeblikk|ett (lite )?øyeblikk|vent litt|et sekund|ett sekund|vent et øyeblikk|vennligst vent|jeg setter (deg|dere) på vent|setter deg over|jeg kobler deg|hold (on|the line)|one (moment|second|sec)|just a (moment|second|sec|minute)|please hold|bear with me|let me (just )?(check|transfer|put you))\b/i;
+export const HOLD_PHRASE = /\b(et (lite )?øyeblikk|ett (lite )?øyeblikk|vent litt|et sekund|ett sekund|vent et øyeblikk|vennligst vent|jeg setter (deg|dere) på vent|setter deg over|jeg kobler deg|hold (on|the line)|one (moment|second|sec)|just a (moment|second|sec|minute)|please hold|bear with me|let me (just )?(check|transfer|put you)|stor (pågang|trafikk)|takk for at du venter|du er nummer \d+|alle (våre )?(medarbeidere|linjer|operatører) er opptatt|(vi )?(vil )?hjelpe deg så snart|samtalen (din )?er viktig|your call is important|all (of )?our (agents|lines|operators) are (busy|currently)|you are (caller )?number \d+|high (call )?volume)\b/i;
 
 // A person is back: greeting, apology for the wait, or asking if we're there.
 const BACK = /\b(hei|hallo|halla|takk for (at du ventet|ventetiden)|beklager (ventetiden|at du)|der igjen|er du der|der er du|hello|hi there|thanks for (waiting|holding)|sorry for the wait|are you (still )?there|thank you for holding)\b/i;
