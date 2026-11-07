@@ -1,5 +1,8 @@
 import { useState } from "react";
+import { motion } from "motion/react";
 import { api } from "../api/index.ts";
+import { spring } from "../motion/presets.ts";
+import { Stagger, StaggerItem } from "../motion/Stagger.tsx";
 import { Button, ErrorNote, Icon, LinkButton, Screen } from "../components/ui.tsx";
 import { useT } from "../i18n/useT.ts";
 import { errorText } from "../lib/errors.ts";
@@ -56,26 +59,26 @@ export function Plan() {
 
   return (
     <Screen kind="plan" title={d.plan.title} back={href({ name: "clarify" })}>
-      <dl className="sp-plan">
-        <div className="sp-plan__row" data-row="callee">
+      <Stagger as="dl" className="sp-plan" gap={0.06}>
+        <StaggerItem as="div" className="sp-plan__row" data-row="callee">
           <dt>{d.plan.calling}</dt>
           <dd>
             <span className="sp-plan__callee">{plan.callee.name}</span>
             <span className="sp-plan__phone">{formatPhone(plan.callee.phone)}</span>
             <span className="sp-plan__source">{d.plan.source[plan.callee.source]}</span>
           </dd>
-        </div>
-        <div className="sp-plan__row" data-row="goal">
+        </StaggerItem>
+        <motion.div layoutId="task-box" className="sp-plan__row sp-morph" data-row="goal" transition={spring.page}>
           <dt>{d.plan.goal}</dt>
           <dd>{plan.goal}</dd>
-        </div>
-        <div className="sp-plan__row" data-row="opening">
+        </motion.div>
+        <StaggerItem as="div" className="sp-plan__row" data-row="opening">
           <dt>{d.plan.opening}</dt>
           <dd>
             <blockquote lang="nb">{plan.opening}</blockquote>
           </dd>
-        </div>
-        <div className="sp-plan__row" data-row="shares">
+        </StaggerItem>
+        <StaggerItem as="div" className="sp-plan__row" data-row="shares">
           <dt>{d.plan.shares}</dt>
           <dd>
             {plan.willShare.length ? (
@@ -88,8 +91,8 @@ export function Plan() {
               d.plan.sharesNone
             )}
           </dd>
-        </div>
-        <div className="sp-plan__row" data-row="approval">
+        </StaggerItem>
+        <StaggerItem as="div" className="sp-plan__row" data-row="approval">
           <dt>{d.plan.approval}</dt>
           <dd>
             <ul className="sp-plan__list">
@@ -101,18 +104,24 @@ export function Plan() {
               ))}
             </ul>
           </dd>
-        </div>
-      </dl>
+        </StaggerItem>
+      </Stagger>
       {error ? <ErrorNote message={error} onRetry={start} /> : null}
-      <div className="sp-actions">
-        <Button variant="primary" size="xl" busy={busy} onClick={start}>
+      <motion.div
+        className="sp-actions"
+        initial={{ opacity: 0, y: 32, scale: 0.94 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ ...spring.pop, delay: 0.38 }}
+      >
+        {/* This button grows into the live call screen (see CallSurface). */}
+        <Button variant="primary" size="xl" busy={busy} onClick={start} layoutId="call-surface" style={{ borderRadius: 22 }}>
           <Icon name="phone" />
           <span>{busy ? d.plan.starting : d.plan.ok}</span>
         </Button>
         <LinkButton href={href({ name: "home" })} variant="ghost">
           {d.plan.edit}
         </LinkButton>
-      </div>
+      </motion.div>
     </Screen>
   );
 }

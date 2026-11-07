@@ -1,0 +1,42 @@
+{
+  "task-morph": [
+    "morph-task-0206.jpg",
+    "morph-task-0226.jpg",
+    "morph-task-0246.jpg",
+    "morph-task-0267.jpg",
+    "morph-task-0287.jpg",
+    "morph-task-0307.jpg"
+  ],
+  "call-curtain": [
+    "morph-call-0524.jpg",
+    "morph-call-0536.jpg",
+    "morph-call-0549.jpg",
+    "morph-call-0562.jpg",
+    "morph-call-0575.jpg",
+    "morph-call-0588.jpg"
+  ],
+  "approval-spring": [
+    "approval-1490.jpg",
+    "approval-1500.jpg",
+    "approval-1510.jpg",
+    "approval-1520.jpg",
+    "approval-1530.jpg",
+    "approval-1540.jpg"
+  ],
+  "result-reveal": [
+    "result-2128.jpg",
+    "result-2141.jpg",
+    "result-2154.jpg",
+    "result-2168.jpg",
+    "result-2181.jpg",
+    "result-2194.jpg"
+  ],
+  "live-call": [
+    "call-0721.jpg",
+    "call-0801.jpg",
+    "call-0881.jpg",
+    "call-0961.jpg",
+    "call-1041.jpg",
+    "call-1121.jpg"
+  ]
+}

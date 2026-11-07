@@ -57,12 +57,8 @@ body {
   font-weight: 600;
   letter-spacing: -0.01em;
   transition:
-    transform var(--dur-fast) var(--ease-spring),
     background var(--dur-fast),
     opacity var(--dur-fast);
-}
-.sp-btn:active:not(:disabled) {
-  transform: scale(0.97);
 }
 .sp-btn[data-variant="primary"] {
   background: var(--color-text);
@@ -275,41 +271,11 @@ body {
   background: var(--color-text);
 }
 
-/* voice field: dots light up from the side that is talking */
+/* voice field: a canvas; colour comes from --color-text, idle level from --dot-idle */
 .sp-voice {
-  display: grid;
-  grid-template-columns: repeat(var(--cols), 1fr);
-  gap: 5px;
-  margin-inline: -2px;
+  display: block;
+  width: 100%;
   flex: none;
-}
-.sp-voice i {
-  --x: var(--reach);
-  --e: calc(var(--x) * var(--x) * (0.25 + 0.75 * var(--centre)));
-  aspect-ratio: 1;
-  border-radius: 1.5px;
-  background: var(--color-text);
-  opacity: var(--dot-idle);
-  transition: opacity var(--dur-slow) var(--ease-out);
-}
-.sp-voice[data-speaking="callee"] i {
-  --x: calc(1 - var(--reach));
-}
-.sp-voice:not([data-speaking="none"]) i {
-  animation: sp-voice 760ms ease-in-out infinite alternate;
-  animation-delay: calc(var(--phase) * -760ms);
-}
-@keyframes sp-voice {
-  from {
-    opacity: var(--dot-idle);
-  }
-  to {
-    opacity: calc(var(--dot-idle) + var(--e) * 1.6);
-  }
-}
-[data-motion="reduce"] .sp-voice:not([data-speaking="none"]) i {
-  animation: none;
-  opacity: calc(var(--dot-idle) + var(--e));
 }
 
 .sp-transcript__scroll {
@@ -371,9 +337,6 @@ body {
   text-decoration: underline dotted 2px;
   text-underline-offset: 0.18em;
 }
-.sp-word {
-  animation: sp-word-in var(--dur-med) var(--ease-out) both;
-}
 .sp-caret {
   width: 0.09em;
   border-radius: 1px;
@@ -419,7 +382,6 @@ body {
   padding: 0 4px;
 }
 .sp-tone__opt[data-checked] {
-  background: var(--color-text);
   color: var(--color-bg);
 }
 .sp-controls__row > .sp-btn[data-variant="danger"] {
@@ -444,7 +406,8 @@ body {
   color: var(--color-bg);
   padding: max(env(safe-area-inset-top), 28px) 20px max(env(safe-area-inset-bottom), 24px);
   gap: 0;
-  animation: sp-invert var(--dur-slow) var(--ease-out) both;
+  /* entrance and exit are motion springs (ApprovalCard) */
+  will-change: clip-path;
 }
 .sp-approval > * {
   width: 100%;
@@ -474,7 +437,6 @@ body {
   letter-spacing: -0.06em;
   line-height: 0.98;
   margin-top: var(--space-3);
-  animation: sp-rise var(--dur-slow) var(--ease-out) 80ms both;
 }
 .sp-approval__context {
   margin-top: var(--space-5);
@@ -503,27 +465,15 @@ body {
   font-size: calc(3.25rem * var(--text-scale));
   font-weight: 800;
   letter-spacing: -0.05em;
-  animation: sp-rise var(--dur-slow) var(--ease-spring) both;
-}
-.sp-approval .sp-btn[data-variant="yes"] {
-  animation-delay: 160ms;
 }
 .sp-approval .sp-btn[data-variant="no"] {
   border: 2px solid currentColor;
-  animation-delay: 220ms;
 }
 .sp-approval .sp-btn:focus-visible {
   outline-color: var(--color-bg);
   outline-offset: 4px;
 }
-@keyframes sp-invert {
-  from {
-    clip-path: inset(100% 0 0 0 round 32px);
-  }
-  to {
-    clip-path: inset(0 0 0 0 round 0);
-  }
-}
+
 
 /* ---------- result ---------- */
 .sp-result {
@@ -609,13 +559,288 @@ table.sp-models td:last-child {
   [data-screen="call"] .sp-line[data-who="agent"][data-recent] .sp-line__text {
     font-size: calc(var(--text-agent) * 1.3);
   }
-  .sp-voice {
-    gap: 7px;
-  }
   .sp-approval__question {
     font-size: calc(5rem * var(--text-scale));
   }
   .sp-approval__options {
     grid-template-columns: 1fr 1fr;
   }
+}
+
+/* =====================================================================
+   Motion. Springs (motion library) handle pages, buttons, lists, the
+   approval and the result. Here: the per-element CSS motion that has to
+   be cheap enough to run once per word. Everything below collapses to
+   instant under [data-motion=reduce] / prefers-reduced-motion (base.css).
+   ===================================================================== */
+
+/* words pop in with a little overshoot */
+.sp-word {
+  display: inline-block;
+  transform-origin: 50% 80%;
+  animation: sp-word-pop 640ms var(--spring-pop) both;
+}
+@keyframes sp-word-pop {
+  from {
+    opacity: 0;
+    transform: translateY(0.38em) scale(0.55);
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
+/* a new line slides up; a line settling into the log eases down in size */
+.sp-line {
+  animation: sp-line-in 520ms var(--spring-soft) both;
+}
+.sp-line .sp-line__text {
+  transition:
+    font-size 420ms var(--spring-soft),
+    color 300ms ease,
+    letter-spacing 420ms ease;
+}
+@keyframes sp-line-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+/* the agent's dot glyph spins up when its line arrives */
+.sp-line[data-who="agent"]::before {
+  animation: sp-glyph-in 560ms var(--spring-pop) both;
+}
+@keyframes sp-glyph-in {
+  from {
+    transform: scale(0) rotate(-90deg);
+  }
+}
+.sp-transcript-list .sp-line,
+.sp-transcript-list .sp-line::before {
+  animation: none;
+}
+
+/* the AI is about to speak: three dots hop like a wave */
+.sp-typing {
+  animation: sp-line-in 400ms var(--spring-soft) both;
+}
+.sp-typing__dots i {
+  border-radius: 2px;
+  animation: sp-hop 900ms var(--spring-soft) infinite;
+}
+.sp-typing__dots i:nth-child(2) {
+  animation-delay: 0.12s;
+}
+.sp-typing__dots i:nth-child(3) {
+  animation-delay: 0.24s;
+}
+@keyframes sp-hop {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0) rotate(0);
+  }
+  25% {
+    transform: translateY(-6px) rotate(-12deg) scaleY(1.15);
+  }
+  45% {
+    transform: translateY(1px) scaleX(1.2) scaleY(0.8);
+  }
+}
+
+/* «Et øyeblikk…»: the line is held, so the hold text breathes */
+.sp-approval__hold {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.sp-hold-dots {
+  display: inline-flex;
+  gap: 4px;
+  flex: none;
+}
+.sp-hold-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 1.5px;
+  background: currentColor;
+  animation: sp-hold 1.5s ease-in-out infinite;
+}
+.sp-hold-dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.sp-hold-dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes sp-hold {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+}
+
+/* safety notes land with a pop */
+.sp-note {
+  animation: sp-line-in 520ms var(--spring-pop) both;
+}
+.sp-note[data-level="warn"] .sp-icon {
+  animation: sp-shake 700ms var(--spring-soft) 150ms both;
+}
+@keyframes sp-shake {
+  0% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(-16deg) scale(1.2);
+  }
+  45% {
+    transform: rotate(12deg) scale(1.1);
+  }
+  70% {
+    transform: rotate(-6deg);
+  }
+}
+
+/* status dot breathes while the line is open */
+[data-status="connected"] .sp-callhead__dot {
+  animation: sp-breathe 2.4s ease-in-out infinite;
+}
+@keyframes sp-breathe {
+  50% {
+    transform: scale(1.5);
+    opacity: 0.55;
+  }
+}
+.sp-callhead__timer {
+  display: inline-block;
+  min-width: 3.2em;
+}
+
+/* the call screen's curtain: the plan button grows into this, then it lifts */
+.sp-call-surface {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: var(--color-text);
+  pointer-events: none;
+}
+
+/* shared task box: the same outlined object on home, clarify and plan */
+.sp-morph {
+  position: relative;
+}
+[data-screen="clarify"] .sp-understood,
+[data-screen="plan"] .sp-plan__row[data-row="goal"] {
+  border: 1.5px solid var(--color-text);
+  border-radius: 22px;
+  padding: var(--space-4) 18px;
+  margin-block: var(--space-2);
+}
+[data-screen="plan"] .sp-plan__row[data-row="goal"] dd {
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+.sp-morph > * {
+  animation: sp-fade-in 360ms ease 120ms both;
+}
+@keyframes sp-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* result headline: words rise out of a mask */
+.sp-reveal {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: top;
+  padding-bottom: 0.08em;
+  margin-bottom: -0.08em;
+}
+.sp-reveal__word {
+  display: inline-block;
+}
+.sp-result__outcome {
+  transform-origin: 0 50%;
+}
+.sp-result__details dd {
+  font-variant-numeric: tabular-nums;
+}
+
+/* tone: a pill slides between options (motion layoutId) */
+.sp-tone__opt {
+  position: relative;
+  isolation: isolate;
+}
+.sp-tone__opt[data-checked] {
+  background: none;
+}
+.sp-tone__pill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: var(--color-text);
+}
+
+/* inputs and choices answer touch, too */
+.sp-choice,
+.sp-lang__opt,
+.sp-place__mark {
+  transition:
+    transform 420ms var(--spring-pop),
+    background 160ms,
+    border-color 160ms,
+    color 160ms;
+}
+.sp-choice:active,
+.sp-lang__opt:active {
+  transform: scale(0.96);
+}
+.sp-choice[data-checked] {
+  animation: sp-pick 480ms var(--spring-pop);
+}
+@keyframes sp-pick {
+  from {
+    transform: scale(0.94);
+  }
+}
+.sp-place[aria-pressed="true"] .sp-place__mark {
+  transform: scale(1.08);
+}
+.sp-textarea[data-hero] {
+  transition:
+    border-color 200ms,
+    box-shadow 420ms var(--spring-soft);
+}
+.sp-textarea[data-hero]:focus {
+  box-shadow: 0 0 0 4px var(--color-surface-2);
+}
+.sp-progress__dot {
+  transition:
+    flex-basis 600ms var(--spring-pop),
+    background 200ms;
+}
+.sp-btn .sp-icon[data-icon="send"] {
+  transition: transform 420ms var(--spring-pop);
+}
+@media (hover: hover) {
+  .sp-btn:hover .sp-icon[data-icon="send"] {
+    transform: translateX(3px);
+  }
+}
+.sp-mockbadge::before {
+  animation: sp-breathe 2.4s ease-in-out infinite;
+}
+
+/* alert flash: invert the screen for a beat, so it reads on black, white and the takeover */
+.sp-flash {
+  mix-blend-mode: difference;
 }

@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from "react";
 import type { Question } from "../../../shared/contract.ts";
+import { motion } from "motion/react";
 import { api } from "../api/index.ts";
+import { spring } from "../motion/presets.ts";
 import { Button, ErrorNote, Screen, TextField } from "../components/ui.tsx";
 import { useT } from "../i18n/useT.ts";
 import { errorText } from "../lib/errors.ts";
@@ -46,10 +48,10 @@ export function Clarify() {
 
   return (
     <Screen kind="clarify" title={d.clarify.title} back={href({ name: "home" })}>
-      <div className="sp-understood">
+      <motion.div layoutId="task-box" className="sp-understood sp-morph" transition={spring.page}>
         <p className="sp-understood__label">{d.clarify.understood}</p>
         <p className="sp-understood__text">{clarify.summary}</p>
-      </div>
+      </motion.div>
       <form className="sp-form" onSubmit={submit}>
         {clarify.questions.map((q) => (
           <fieldset key={q.id} className="sp-question">
