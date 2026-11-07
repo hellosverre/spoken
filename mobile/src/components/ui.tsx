@@ -20,7 +20,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from "react-native-reanimated";
-import { ease, em, F, makeStyles, useTheme } from "../lib/theme";
+import { boldWeight, ease, em, F, makeStyles, useBoldText, useTheme } from "../lib/theme";
 
 // Shared pieces for the screens, matching the .btn, .rise and .dots rules in web/src/app/globals.css.
 
@@ -148,8 +148,9 @@ export function T({
   ...rest
 }: React.ComponentProps<typeof Text> & { size?: number; weight?: "regular" | "medium" | "semibold"; color?: string }) {
   const { C } = useTheme();
+  const bold = useBoldText();
   const track = size >= 28 ? -0.02 : size >= 20 ? -0.015 : -0.006;
-  const s: TextStyle = { fontFamily: F[weight], fontSize: size, color: color ?? C.ink, letterSpacing: em(track, size) };
+  const s: TextStyle = { fontFamily: F[boldWeight(weight, bold)], fontSize: size, color: color ?? C.ink, letterSpacing: em(track, size) };
   return <Text {...rest} style={[s, style]} />;
 }
 
@@ -183,7 +184,7 @@ export function Field({ label, error, style, ...rest }: TextInputProps & { ref?:
 }
 
 const useStyles = makeStyles((C) => ({
-  btn: { height: 44, paddingHorizontal: 18, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  btn: { minHeight: 44, paddingVertical: 8, paddingHorizontal: 18, borderRadius: 10, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   block: { alignSelf: "stretch" },
   btnText: { fontFamily: F.medium, fontSize: 15, letterSpacing: em(-0.006, 15) },
   dots: { flexDirection: "row", gap: 4, paddingVertical: 14, paddingHorizontal: 16 },
@@ -191,7 +192,7 @@ const useStyles = makeStyles((C) => ({
   fieldWrap: { gap: 6 },
   fieldLabel: { fontFamily: F.medium, fontSize: 13, color: C.muted },
   field: {
-    height: 48,
+    minHeight: 48,
     paddingHorizontal: 14,
     borderRadius: 12,
     borderWidth: 1,

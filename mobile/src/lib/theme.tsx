@@ -1,5 +1,5 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
-import { StyleSheet, useColorScheme, type ImageStyle, type TextStyle, type ViewStyle } from "react-native";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { AccessibilityInfo, StyleSheet, useColorScheme, type ImageStyle, type TextStyle, type ViewStyle } from "react-native";
 import { Easing } from "react-native-reanimated";
 import { useSpoken } from "./use-spoken";
 
@@ -110,6 +110,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ C: scheme === "light" ? LIGHT : DARK, scheme }), [scheme]);
   return <ThemeContext value={value}>{children}</ThemeContext>;
 }
+
+/** iOS Bold Text. The system only bolds its own fonts, so Inter steps up one cut when it is on. */
+export function useBoldText(): boolean {
+  const [bold, setBold] = useState(false);
+  useEffect(() => {
+    let live = true;
+    AccessibilityInfo.isBoldTextEnabled().then((v) => live && setBold(v)).catch(() => {});
+    const sub = AccessibilityInfo.addEventListener("boldTextChanged", setBold);
+    return () => {
+      live = false;
+      sub.remove();
+    };
+  }, []);
+  return bold;
+}
+
+const BOLDER = { regular: "medium", medium: "semibold", semibold: "semibold" } as const;
+export const boldWeight = (w: keyof typeof BOLDER, bold: boolean) => (bold ? BOLDER[w] : w);
 
 export function useTheme() {
   return useContext(ThemeContext);

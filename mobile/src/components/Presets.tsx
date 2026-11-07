@@ -181,10 +181,10 @@ function PresetCard({ preset: p, editing, onPress, onDelete }: { preset: Preset;
           {editing ? <Icon name="pencil" color={C.dim} size={16} /> : null}
         </View>
         <View style={styles.cardText}>
-          <T size={16} weight="semibold" numberOfLines={2} style={styles.cardTitle}>
+          <T size={16} weight="semibold" style={styles.cardTitle}>
             {p.title}
           </T>
-          <T size={13} color={C.muted} numberOfLines={1}>
+          <T size={13} color={C.muted}>
             {p.contactName || m.noContact}
           </T>
         </View>

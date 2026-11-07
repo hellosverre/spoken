@@ -57,10 +57,10 @@ function CallHead() {
   return (
     <View style={styles.callhead}>
       <View style={styles.grow}>
-        <T size={16} weight="medium" numberOfLines={1}>
+        <T size={16} weight="medium">
           {contact}
         </T>
-        <Text style={styles.num} numberOfLines={1}>
+        <Text style={styles.num}>
           {number} · <Text style={styles.timer}>{elapsed}</Text>
         </Text>
       </View>
@@ -161,6 +161,23 @@ function Transcript() {
   const { contact } = useContact();
   const lines = useSpoken((s) => s.transcript);
   const scroll = useRef<ScrollViewInstance>(null);
+
+  // VoiceOver only reads live regions on Android. Lines fill in word by word, so once the
+  // transcript has been still for a moment, say whatever has not been announced yet.
+  const announced = useRef(lines.length ? lines[lines.length - 1].id : -1);
+  useEffect(() => {
+    const id = setTimeout(() => {
+      for (const line of lines) {
+        if (line.id <= announced.current) continue;
+        if (line.kind === "sys") AccessibilityInfo.announceForAccessibility(line.text);
+        else if (line.kind !== "you" && line.words.length) {
+          AccessibilityInfo.announceForAccessibility(`${line.kind === "ai" ? m.aiLabel : contact}: ${line.words.join(" ")}`);
+        }
+        announced.current = line.id;
+      }
+    }, 1200);
+    return () => clearTimeout(id);
+  }, [lines, m.aiLabel, contact]);
 
   return (
     <ScrollView
@@ -270,6 +287,7 @@ function Sheet() {
   // Move screen-reader focus to the first choice once the sheet has slid up.
   useEffect(() => {
     if (!open || sheet?.kind !== "ask") return;
+    if (sheet.cfg.title) AccessibilityInfo.announceForAccessibility(sheet.cfg.title);
     const id = setTimeout(() => {
       const node = first.current && findNodeHandle(first.current);
       if (node) AccessibilityInfo.setAccessibilityFocus(node);
