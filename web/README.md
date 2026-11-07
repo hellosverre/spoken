@@ -45,6 +45,22 @@ The contract between the code and the design is the class names and data attribu
 
 Hooks for Glimt (motion and sound): `useAlerts().notify(kind, message)` in `src/lib/alerts.tsx` fires on connected, approval and ended. Add sound there. Each new word mounts a fresh `.sp-word`, so a CSS entrance animation runs once per word.
 
+## Motion
+
+| Layer | Where | What |
+|---|---|---|
+| Springs | `src/motion/presets.ts` | All spring constants (press, pop, page, drama) in one place |
+| Pages | `App.tsx` `Stage` / `Page` | Routes cross over in one grid cell. A leaving page is `inert`. |
+| Shared morphs | `layoutId="task-box"` (home box → clarify → plan goal), `layoutId="call-surface"` (plan button → `CallSurface` curtain) | Motion layout animations |
+| Lists, result | `motion/Stagger.tsx`, `RevealWords.tsx`, `CountUp.tsx` | Staggered springs, masked word reveal, number count-up |
+| Approval | `components/call/ApprovalCard.tsx` | A spring circle reveal from the bottom, then the question, then JA and NEI, each in turn |
+| Voice field | `components/call/VoiceField.tsx` | Canvas. Each arriving word kicks the energy, rings ripple out, and the origin springs between speakers. |
+| Per-word / ambient CSS | bottom of `theme/signal/skin.css` | Word pop, typing hop and «Et øyeblikk…» pulse, using real springs sampled into CSS `linear()` (`--spring-pop`, `--spring-soft`) |
+
+**Calm mode** (the app setting or the OS reduced-motion setting, via `useCalm()`): motion is set to `reducedMotion="always"` (fades only), the approval just fades, the canvas draws still frames, numbers don't count, and the CSS animations are cut by `base.css`.
+
+**Performance:** only transform, opacity and clip-path are animated, and the voice field is one canvas paint per frame. `node design/record.mjs` measures the live call at 60 fps average with the CPU throttled 4× (p95 frame 16.8 ms, no frames over 25 ms) and writes `design/recording/` (webm, GIF, frame strips, `fps.json`).
+
 ## Structure
 
 | Path | What |

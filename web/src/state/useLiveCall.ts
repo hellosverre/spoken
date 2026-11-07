@@ -71,6 +71,9 @@ function reduce(s: LiveCallState, a: Act): LiveCallState {
       return { ...s, notes: [...s.notes, { text: e.text, level: e.level, at: e.at }] };
     case "result":
       return { ...s, result: e.result, status: "ended", approval: undefined, agentTyping: false };
+    case "level":
+      // Voice loudness drives the visual through onEvent; it isn't reducer state.
+      return s;
   }
 }
 

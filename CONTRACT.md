@@ -45,6 +45,7 @@ Server → client `LiveEvent`, client → server `LiveCommand`. Exact shapes are
 - `agent_typing` (the AI is about to speak)
 - `approval_request` (question + options; the AI waits, saying «Et øyeblikk…»)
 - `note` (e.g. "refused to share card number")
+- `level` (who, rms 0..1, ~15 Hz): voice loudness for the live visual
 - `result` (outcome + summary)
 
 Client commands:

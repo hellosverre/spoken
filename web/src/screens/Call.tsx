@@ -1,9 +1,11 @@
+import { AnimatePresence } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 import type { LiveEvent } from "../../../shared/contract.ts";
 import { api } from "../api/index.ts";
 import { ApprovalCard } from "../components/call/ApprovalCard.tsx";
 import { CallControls, type Tone } from "../components/call/CallControls.tsx";
 import { CallHeader } from "../components/call/CallHeader.tsx";
+import { CallSurface } from "../components/call/CallSurface.tsx";
 import { VoiceField } from "../components/call/VoiceField.tsx";
 import { Transcript, UNSURE_BELOW } from "../components/call/Transcript.tsx";
 import { Button, Icon } from "../components/ui.tsx";
@@ -40,6 +42,7 @@ export function Call({ callId }: { callId: string }) {
   const lastCallee = [...state.lines].reverse().find((l) => l.who === "callee" && l.final);
   // Who the voice field lights up for: whoever has a line still arriving, or the AI about to speak.
   const speaking = last && !last.final ? last.who : state.agentTyping ? "agent" : "none";
+  const wordCount = state.lines.reduce((n, l) => n + l.words.length, 0);
   const ended = state.status === "ended" || state.status === "failed" || !!state.result;
 
   // Give the last line a moment on screen, then move to the result card.
@@ -80,7 +83,7 @@ export function Call({ callId }: { callId: string }) {
           </p>
         ) : null}
 
-        <VoiceField speaking={speaking} />
+        <VoiceField speaking={speaking} pulse={wordCount} />
 
         <Transcript lines={state.lines} calleeName={plan?.callee.name ?? ""} agentTyping={state.agentTyping} />
 
@@ -101,13 +104,16 @@ export function Call({ callId }: { callId: string }) {
           </ul>
         ) : null}
 
+        <AnimatePresence>
         {state.approval ? (
           <ApprovalCard
+            key={state.approval.id}
             approval={state.approval}
             context={lastCallee?.text}
             onChoose={(choice) => send({ type: "approval_response", id: state.approval!.id, choice })}
           />
         ) : null}
+        </AnimatePresence>
 
         {state.result ? (
           <div className="sp-actions" data-variant="ended">
@@ -117,6 +123,7 @@ export function Call({ callId }: { callId: string }) {
           </div>
         ) : null}
       </main>
+      <CallSurface />
       <footer className="sp-screen__footer">
         <CallControls
           disabled={ended}

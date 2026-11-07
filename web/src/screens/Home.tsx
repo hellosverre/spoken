@@ -1,6 +1,9 @@
 import { useRef, useState, type FormEvent } from "react";
 import type { Contact } from "../../../shared/contract.ts";
+import { motion } from "motion/react";
 import { api } from "../api/index.ts";
+import { hover, spring, tap } from "../motion/presets.ts";
+import { Stagger, StaggerItem } from "../motion/Stagger.tsx";
 import { Button, ErrorNote, Icon, Screen, Section, TextArea, TextField, type IconName } from "../components/ui.tsx";
 import { useT } from "../i18n/useT.ts";
 import { errorText } from "../lib/errors.ts";
@@ -82,6 +85,7 @@ export function Home() {
       }
     >
       <form className="sp-form" data-variant="task" onSubmit={submit} noValidate>
+        <motion.div layoutId="task-box" className="sp-morph" transition={spring.page}>
         <TextArea
           ref={box}
           hero
@@ -95,6 +99,7 @@ export function Home() {
             if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) e.currentTarget.form?.requestSubmit();
           }}
         />
+        </motion.div>
         <TextField
           label={d.home.phoneLabel}
           hint={place ? place.name : d.home.phoneHint}
@@ -115,23 +120,32 @@ export function Home() {
       </form>
 
       <Section title={d.home.shortcuts} kind="shortcuts">
-        <ul className="sp-shortcuts">
+        <Stagger className="sp-shortcuts">
           {shortcuts.map((s) => (
-            <li key={s.label}>
-              <button type="button" className="sp-shortcut" onClick={() => applyShortcut(s.text)}>
+            <StaggerItem key={s.label}>
+              <motion.button
+                type="button"
+                className="sp-shortcut"
+                onClick={() => applyShortcut(s.text)}
+                whileTap={tap}
+                whileHover={hover}
+                transition={spring.press}
+              >
                 <Icon name={s.icon} />
                 <span>{s.label}</span>
-              </button>
-            </li>
+              </motion.button>
+            </StaggerItem>
           ))}
-        </ul>
+        </Stagger>
       </Section>
 
       <Section title={d.home.places} kind="places">
-        <ul className="sp-places">
+        <Stagger className="sp-places" gap={0.07}>
           {state.places.map((p) => (
-            <li key={p.id}>
-              <button
+            <StaggerItem key={p.id}>
+              <motion.button
+                whileTap={{ scale: 0.88 }}
+                transition={spring.press}
                 type="button"
                 className="sp-place"
                 aria-pressed={place?.id === p.id}
@@ -144,10 +158,10 @@ export function Home() {
                 <span className="sp-place__name">{p.name}</span>
                 <span className="sp-place__phone">{formatPhone(p.phone)}</span>
                 <Icon name={p.kind === "business" ? "place" : "person"} />
-              </button>
-            </li>
+              </motion.button>
+            </StaggerItem>
           ))}
-        </ul>
+        </Stagger>
       </Section>
     </Screen>
   );

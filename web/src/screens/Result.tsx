@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import type { CallResult } from "../../../shared/contract.ts";
+import { motion } from "motion/react";
 import { api } from "../api/index.ts";
+import { CountUp } from "../motion/CountUp.tsx";
+import { spring } from "../motion/presets.ts";
+import { RevealWords } from "../motion/RevealWords.tsx";
+import { Stagger, StaggerItem } from "../motion/Stagger.tsx";
 import { Button, ErrorNote, Screen, Section } from "../components/ui.tsx";
 import { useT } from "../i18n/useT.ts";
 import { errorText } from "../lib/errors.ts";
@@ -50,20 +55,25 @@ export function Result({ callId }: { callId: string }) {
       {result ? (
         <>
           <article className="sp-result" data-outcome={result.outcome}>
-            <p className="sp-result__outcome">{d.result.outcome[result.outcome]}</p>
-            <p className="sp-result__summary">{result.summary}</p>
-            <dl className="sp-result__details">
-              {Object.entries(result.details).map(([k, v]) => (
-                <div key={k}>
+            <motion.p
+              className="sp-result__outcome"
+              initial={{ opacity: 0, scale: 0.4 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ ...spring.pop, delay: 0.1 }}
+            >
+              {d.result.outcome[result.outcome]}
+            </motion.p>
+            <RevealWords className="sp-result__summary" text={result.summary} delay={0.18} />
+            <Stagger as="dl" className="sp-result__details" gap={0.07}>
+              {[...Object.entries(result.details), [d.result.duration, duration(result.durationSec)] as const].map(([k, v], i) => (
+                <StaggerItem as="div" key={k}>
                   <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
+                  <dd>
+                    <CountUp value={v} delay={0.35 + i * 0.07} />
+                  </dd>
+                </StaggerItem>
               ))}
-              <div>
-                <dt>{d.result.duration}</dt>
-                <dd>{duration(result.durationSec)}</dd>
-              </div>
-            </dl>
+            </Stagger>
           </article>
 
           <details className="sp-disclosure">
@@ -96,7 +106,7 @@ export function Result({ callId }: { callId: string }) {
                   <tr key={s.key} data-vendor={s.vendor}>
                     <th scope="row">{d.result.stack[s.key]}</th>
                     <td>{`${s.vendor} ${s.model}`.trim()}</td>
-                    <td>{s.latencyMs === undefined ? "—" : `${s.latencyMs} ms`}</td>
+                    <td>{s.latencyMs === undefined ? "—" : <CountUp value={`${s.latencyMs} ms`} delay={0.6} />}</td>
                   </tr>
                 ))}
               </tbody>
