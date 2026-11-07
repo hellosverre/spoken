@@ -11,6 +11,7 @@ import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
 import { List, Row, Seg } from "./List";
 import { Field, T } from "./ui";
+import { VoicePicker } from "./VoicePicker";
 
 /**
  * The Profile tab: who you are, how the app looks, how calls are made, and the
@@ -111,6 +112,9 @@ export function Profile() {
           <Text style={styles.help}>{m.phoneS}</Text>
         </View>
       </View>
+
+      <SectionTitle icon="phone" title={lang === "no" ? "Stemme" : "Voice"} />
+      <VoicePicker />
 
       <SectionTitle icon="phone" title={m.callsH} />
       <View style={[styles.group, realOn && { borderColor: teal.fg }]}>

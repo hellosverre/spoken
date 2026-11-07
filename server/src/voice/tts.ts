@@ -4,7 +4,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.ts";
-import { elKey, elKeyFailed } from "./el-key.ts";
+import { elKey, elKeyFailed, elOnFallback } from "./el-key.ts";
 import { toSpeakable } from "./speakable.ts";
 
 const CACHE_DIR = join(import.meta.dir, "../../.cache/tts");
@@ -13,6 +13,9 @@ try { mkdirSync(CACHE_DIR, { recursive: true }); } catch { /* read-only fs: no c
 // Calm and clear on a phone line: slower than default, steady delivery (Sverre, call #1).
 const TTS_SPEED = Number(process.env.TTS_SPEED ?? 0.88);
 const TTS_STABILITY = Number(process.env.TTS_STABILITY ?? 0.7);
+
+/** Premade voice every key can use. */
+const FALLBACK_VOICE = "nPczCjzI2devNBz1zQrb";
 
 const memCache = new Map<string, Uint8Array>();
 
@@ -67,6 +70,10 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
     clearTimeout(timer);
     const body = await res.text();
     if (elKeyFailed(res.status, body)) { yield* tts(text, opts); return; }
+    // The free fallback key can't use the library voices added to the main account: say it in Brian.
+    if (elOnFallback() && voiceId !== FALLBACK_VOICE && /voice_not_found/i.test(body)) {
+      yield* tts(text, { ...opts, voiceId: FALLBACK_VOICE }); return;
+    }
     throw new Error(`ElevenLabs TTS HTTP ${res.status}: ${body.slice(0, 200)}`);
   }
   const reader = res.body!.getReader();

@@ -8,6 +8,7 @@ import { Icon, type IconName } from "./Icon";
 import { FeedbackSheet } from "./Feedback";
 import { AccountSection, useAccountCopy } from "./Account";
 import { ContactsSection, useContactCopy } from "./ContactPicker";
+import { VoicePicker } from "./VoicePicker";
 import { Field } from "./ui";
 
 const THEMES: { v: ThemePref; icon: IconName }[] = [
@@ -114,6 +115,9 @@ export function Profile() {
             <p className="help">{m.phoneS}</p>
           </div>
         </div>
+
+        <SectionTitle icon="phone">{lang === "no" ? "Stemme" : "Voice"}</SectionTitle>
+        <VoicePicker />
 
         <SectionTitle icon="lock">{ac.title}</SectionTitle>
         <AccountSection />
