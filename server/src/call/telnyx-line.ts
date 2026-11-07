@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { ScribeStream } from "../voice/scribe.ts";
 import { toSpeakable } from "../voice/speakable.ts";
 import { batchVerdict, meanConf } from "./batch-verdict.ts";
+import { peakLevel, SpeakerLevel } from "./loudness.ts";
 import { transcribeSegment } from "../voice/scribe-batch.ts";
 import { tts } from "../voice/tts.ts";
 import { alawToUlaw, g711ToPcm16, holdMusic, levelOf, pcmRms, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
@@ -117,7 +118,9 @@ export class TelnyxLine implements CallLine {
   private voicedSinceCommit = false;
   private lastCommittedNorm = "";
   // Last ~20 s of callee audio, for the batch second opinion on each segment.
-  private recent: { at: number; pcm: Int16Array }[] = [];
+  private recent: { at: number; pcm: Int16Array; rms: number }[] = [];
+  private speaker = new SpeakerLevel();
+  private lastLoudAt = 0; // last frame above the background floor
   private segOnsetAt = 0;
   private audioStartAt = 0;
   private sayFramePending = false;
@@ -262,7 +265,8 @@ export class TelnyxLine implements CallLine {
 
         // Only real, current speech may barge in: late partials of the previous utterance
         // used to cut the agent off right as it started (replay, Sat 7 Nov).
-        if (Date.now() - this.lastVoicedAt < 200 && !BACKCHANNEL_TEXT.test(text.trim())) this.ev.calleeSpeech();
+        // Background voices (below the speaker's level) never cut the agent off.
+        if (Date.now() - this.lastLoudAt < 200 && !BACKCHANNEL_TEXT.test(text.trim())) this.ev.calleeSpeech();
         this.ev.calleePartial(`c_${this.segId}`, text);
       },
       committed: (text) => {
@@ -272,13 +276,22 @@ export class TelnyxLine implements CallLine {
         this.committedIds.set(text.trim(), id);
         this.voicedSinceCommit = false;
         this.lastCommittedNorm = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+        // Window = voice onset → voice end (+ margins), not partial/commit times (both lag).
+        const end = (this.lastVoicedAt || Date.now()) + 250;
+        const from = (this.segOnsetAt || end - 4000) - 250;
+        this.segOnsetAt = 0;
+        const peak = peakLevel(this.recent.filter((f) => f.at >= from && f.at <= end).map((f) => f.rms));
+        if (this.speaker.isBackground(peak)) {
+          this.committedIds.delete(text.trim());
+          this.ev.debug?.("background_speech", { id, text, peak: Math.round(peak), speaker: Math.round(this.speaker.level) });
+          this.saveSegment({ id, startMs: from - this.audioStartAt, endMs: end - this.audioStartAt, realtime: text, background: true, peak: Math.round(peak) });
+          return;
+        }
+        if (!this.speakResolve) this.speaker.accept(peak); // not while our own voice may echo back
         // Quiet speech can stay under the energy threshold; the last partial is a later bound.
         const speechEndAt = Math.max(this.lastVoicedAt, this.lastPartialAt) || undefined;
         this.ev.calleeFinal(id, text, undefined, { speechEndAt });
-        // Window = voice onset → voice end (+ margins), not partial/commit times (both lag).
-        const end = (this.lastVoicedAt || Date.now()) + 250;
-        this.secondOpinion(id, text, (this.segOnsetAt || end - 4000) - 250, end);
-        this.segOnsetAt = 0;
+        this.secondOpinion(id, text, from, end, peak);
       },
       words: (text, words) => {
         const id = this.committedIds.get(text.trim());
@@ -311,12 +324,13 @@ export class TelnyxLine implements CallLine {
           // Voice onset of the current segment = first voiced frame after the last commit.
           if (!this.segOnsetAt) this.segOnsetAt = Date.now();
           this.lastVoicedAt = Date.now();
+          if (rms > this.speaker.floor()) this.lastLoudAt = this.lastVoicedAt;
         }
         this.localVad(rms);
         this.emitLevel("callee", rms);
         this.sttSamples += pcm.length;
         const now = Date.now();
-        this.recent.push({ at: now, pcm });
+        this.recent.push({ at: now, pcm, rms });
         if (this.recent.length > 1000) this.recent.shift();
         if (SAVE_AUDIO) {
           if (!this.audioStartAt) this.audioStartAt = now;
@@ -345,13 +359,13 @@ export class TelnyxLine implements CallLine {
   }
 
   /** Re-transcribe the finished segment with batch Scribe; report it if it differs. */
-  private secondOpinion(id: string, realtime: string, from: number, to: number) {
+  private secondOpinion(id: string, realtime: string, from: number, to: number, peak: number) {
     const frames = this.recent.filter((f) => f.at >= from && f.at <= to);
     if (!frames.length) return;
     const pcm = new Int16Array(frames.reduce((n, f) => n + f.pcm.length, 0));
     let o = 0;
     for (const f of frames) { pcm.set(f.pcm, o); o += f.pcm.length; }
-    const seg = { id, startMs: from - this.audioStartAt, endMs: to - this.audioStartAt, realtime };
+    const seg = { id, startMs: from - this.audioStartAt, endMs: to - this.audioStartAt, realtime, peak: Math.round(peak), speaker: Math.round(this.speaker.level) };
     if (!STT_BATCH) { this.saveSegment({ ...seg }); return; }
     const t0 = Date.now();
     transcribeSegment(pcm, this.o.keyterms)
@@ -375,7 +389,7 @@ export class TelnyxLine implements CallLine {
 
   private localVad(rms: number) {
     if (!this.speakResolve) { this.loudFrames = 0; return; }
-    if (rms > BARGE_RMS) {
+    if (rms > Math.max(BARGE_RMS, this.speaker.floor())) {
       if (++this.loudFrames === BARGE_FRAMES) { this.ev.debug?.("vad_loud", {}); this.ev.calleeSpeech(); }
     } else this.loudFrames = Math.max(0, this.loudFrames - 1);
   }

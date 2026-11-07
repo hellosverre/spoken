@@ -28,6 +28,7 @@ For the next agent picking this up. Read AGENTS.md → CONTRACT.md → SPEC.md f
   - If batch STT tags a segment as `[snakking i bakgrunnen]`/`(musikk)`, the line is dropped from the transcript and the history, and is not answered.
   - If batch is ≥ 0.85 sure and realtime < 0.65, batch wins (env `BATCH_SURE`, `RT_UNSURE`). Otherwise batch may only fix numbers.
   - The phone UI holds callee lines 1.2 s for that correction (`web/src/lib/real-call.ts`).
+- **Background voices** (`loudness.ts`, call c_d3457ddfdd92 in a full room): the line learns the callee's level (p90 frame RMS of kept segments, decays 10 %/segment). A segment under 30 % of it is dropped before the LLM sees it (`background_speech` in the log), and quieter voices can't barge in. Off until the callee reaches 1500 RMS. Env `BG_RATIO`, `BG_MIN_LEVEL`. Segments log `peak`/`speaker` for tuning.
 - **Prompt** (`llm/prompt.ts`): all details in the first errand sentence, one question at a time, implicit confirmation of prices and times, a read-back before ending an order, a plain Norwegian goodbye.
 
 ## Next, in priority order
