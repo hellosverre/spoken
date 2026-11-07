@@ -101,3 +101,24 @@ export interface Contact {
   phone: string;
   kind: "business" | "person";
 }
+
+// Persistence (Supabase, via the server only). Every request carries the header
+// X-Spoken-Device: <uuid> (made once in the app, localStorage "spoken-device").
+// GET /api/contacts → Contact[] · POST /api/contacts ContactInput → Contact · DELETE /api/contacts/:id
+// GET /api/calls → CallSummary[] (newest first). Summaries only: no transcript is ever stored.
+export interface ContactInput {
+  name: string;
+  phone: string;
+  kind?: "business" | "person";
+}
+
+export interface CallSummary {
+  callId: string;
+  taskId: string;
+  calleeName?: string;
+  outcome: Outcome;
+  summary: string;
+  details: Record<string, string>;
+  durationSec: number;
+  at: string; // ISO time
+}
