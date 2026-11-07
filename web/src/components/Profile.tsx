@@ -1,12 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { ThemePref } from "@/lib/store";
 import { useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
-import { Icon } from "./Icon";
+import { HeroDuet } from "./Art";
+import { Icon, type IconName } from "./Icon";
 import { Field } from "./ui";
 
-const THEMES: ThemePref[] = ["system", "light", "dark"];
+const THEMES: { v: ThemePref; icon: IconName }[] = [
+  { v: "system", icon: "auto" },
+  { v: "light", icon: "sun" },
+  { v: "dark", icon: "moon" },
+];
+
+function SectionTitle({ icon, children }: { icon: IconName; children: ReactNode }) {
+  return (
+    <h3 className="section">
+      <Icon name={icon} />
+      {children}
+    </h3>
+  );
+}
 
 /** The Profile tab: who you are, the theme, language and the rest of the old settings. */
 export function Profile() {
@@ -34,65 +48,93 @@ export function Profile() {
       .slice(0, 2)
       .map((w) => w[0]!.toUpperCase())
       .join("") || "?";
+  const first = profile.name.trim().split(/\s+/)[0] ?? "";
+  const hour = new Date().getHours();
+  const greet = m.greet[hour < 5 ? "night" : hour < 11 ? "morning" : hour < 18 ? "day" : "evening"];
 
   return (
     <div className="scroll pad">
       <div className="pane-body">
         <h2 className="pane-h">{m.profileH}</h2>
 
+        {/* Who you are: the one coloured, drawn card on the page. */}
         <div className="profile-card">
+          <HeroDuet className="profile-art" />
           <span className="avatar" aria-hidden>
             {initials}
           </span>
+          {/* The hour differs between the prerender and the visitor's clock. */}
+          <span className="hello" suppressHydrationWarning>
+            {first ? `${greet}, ${first}` : greet}
+          </span>
+          <b>{profile.name || m.you}</b>
+          <span className="handle">@demo</span>
+        </div>
+
+        <SectionTitle icon="person">{m.you}</SectionTitle>
+        <div className="group">
           <div>
-            <b>{profile.name || m.you}</b>
-            <span>@demo</span>
+            <div className="field-row">
+              <span className="tile" aria-hidden>
+                <Icon name="person" />
+              </span>
+              <Field
+                label={m.nameL}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onBlur={() => name.trim() !== profile.name && store.setProfile({ name: name.trim() })}
+                autoComplete="off"
+              />
+            </div>
+            <p className="help">{m.nameS}</p>
+          </div>
+          <div>
+            <div className="field-row">
+              <span className="tile" aria-hidden>
+                <Icon name="phone" />
+              </span>
+              <Field
+                label={m.phoneL}
+                type="tel"
+                inputMode="tel"
+                placeholder="+47"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                onBlur={() => phone.trim() !== profile.phone && store.setProfile({ phone: phone.trim() })}
+                autoComplete="off"
+              />
+            </div>
+            <p className="help">{m.phoneS}</p>
           </div>
         </div>
 
-        <h3 className="section">{m.you}</h3>
-        <div className="fields">
-          <Field
-            label={m.nameL}
-            help={m.nameS}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={() => name.trim() !== profile.name && store.setProfile({ name: name.trim() })}
-            autoComplete="off"
-          />
-          <Field
-            label={m.phoneL}
-            help={m.phoneS}
-            type="tel"
-            inputMode="tel"
-            placeholder="+47"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            onBlur={() => phone.trim() !== profile.phone && store.setProfile({ phone: phone.trim() })}
-            autoComplete="off"
-          />
-        </div>
-
-        <h3 className="section">{m.appearance}</h3>
-        <ul className="list">
-          <li className="row static">
+        <SectionTitle icon="sliders">{m.appearance}</SectionTitle>
+        <div className="group">
+          <div className="group-head">
+            <span className="tile small" aria-hidden>
+              <Icon name={THEMES.find((x) => x.v === themePref)?.icon ?? "auto"} />
+            </span>
             <span className="tx">
               <b>{m.themeL}</b>
               <span>{m.themeS}</span>
             </span>
-            <div className="seg" role="group" aria-label={m.themeL}>
-              {THEMES.map((x) => (
-                <button key={x} aria-pressed={themePref === x} onClick={() => store.setThemePref(x)}>
-                  {m.themes[x]}
-                </button>
-              ))}
-            </div>
-          </li>
-        </ul>
+          </div>
+          <div className="seg wide" role="group" aria-label={m.themeL}>
+            {THEMES.map((x) => (
+              <button key={x.v} aria-pressed={themePref === x.v} onClick={() => store.setThemePref(x.v)}>
+                <Icon name={x.icon} />
+                {m.themes[x.v]}
+              </button>
+            ))}
+          </div>
+        </div>
 
-        <h3 className="section">{m.general}</h3>
+        <SectionTitle icon="bubble">{m.general}</SectionTitle>
         <ul className="list">
           <li className="row static">
+            <span className="ic">
+              <Icon name="globe" />
+            </span>
             <span className="tx">
               <b>{t.langL}</b>
               <span>{t.langS}</span>
@@ -107,16 +149,22 @@ export function Profile() {
           </li>
           <li>
             <button className="row" onClick={() => store.replay()}>
+              <span className="ic">
+                <Icon name="replay" />
+              </span>
               <span className="tx">
                 <b>{t.replay}</b>
                 <span>{t.replayS}</span>
               </span>
               <span className="go">
-                <Icon name="replay" />
+                <Icon name="chevron" />
               </span>
             </button>
           </li>
           <li className="row static">
+            <span className="ic">
+              <Icon name="sliders" />
+            </span>
             <span className="tx">
               <b>{t.keysL}</b>
               <span>{t.keysS}</span>
@@ -124,17 +172,17 @@ export function Profile() {
           </li>
           <li>
             <button className="row danger" onClick={() => store.logout()}>
+              <span className="ic">
+                <Icon name="logout" />
+              </span>
               <span className="tx">
                 <b>{m.logout}</b>
-              </span>
-              <span className="go">
-                <Icon name="logout" />
               </span>
             </button>
           </li>
         </ul>
 
-        <h3 className="section">{m.privacyH}</h3>
+        <SectionTitle icon="lock">{m.privacyH}</SectionTitle>
         <ul className="list privacy">
           {m.privacy.map(([title, sub]) => (
             <li key={title} className="row static">

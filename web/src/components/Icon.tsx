@@ -2,17 +2,46 @@ import type { ReactNode } from "react";
 
 const PATHS = {
   phone: <path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z" />,
+  // A whole pizza with one slice pulled out, and pepperoni (a tip-down slice read as Wi-Fi when small).
   pizza: (
     <>
-      <path d="M3.5 6.5c5.7-2.7 11.3-2.7 17 0L12 21z" />
-      <path d="M5.2 9.6c4.5-1.8 9.1-1.8 13.6 0" />
-      <path d="M10 11.5h.01M14 12.5h.01M12 15.5h.01" strokeWidth={3} />
+      <path d="M11.2 12.8V4.3a8.5 8.5 0 1 0 7.36 4.25z" />
+      <path d="M13.2 10.8V2.8a8 8 0 0 1 6.93 4z" />
+      <path d="M7.5 11.5h.01M10.5 16.5h.01M15 15.5h.01" strokeWidth={3} />
     </>
   ),
+  // A stethoscope (a plus in a square read as "add").
   doctor: (
     <>
-      <rect x="4" y="4" width="16" height="16" rx="4" />
-      <path d="M12 8.5v7M8.5 12h7" />
+      <path d="M5 3.5v5a4.5 4.5 0 0 0 9 0v-5M4 3.5h2M13 3.5h2" />
+      <path d="M9.5 13v1.5a5 5 0 0 0 10 0v-2" />
+      <circle cx="19.5" cy="10.5" r="2" />
+    </>
+  ),
+  sun: (
+    <>
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2.8v2.1M12 19.1v2.1M2.8 12h2.1M19.1 12h2.1M5.5 5.5 7 7M17 17l1.5 1.5M5.5 18.5 7 17M17 7l1.5-1.5" />
+    </>
+  ),
+  moon: <path d="M19.6 14.6A8.2 8.2 0 0 1 9.4 4.4 8.2 8.2 0 1 0 19.6 14.6z" />,
+  // Auto: a circle, half filled (follows the device).
+  auto: (
+    <>
+      <circle cx="12" cy="12" r="8.2" />
+      <path d="M12 3.8a8.2 8.2 0 0 1 0 16.4z" fill="currentColor" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17M12 3.5c-2.4 2.4-3.6 5.2-3.6 8.5s1.2 6.1 3.6 8.5M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5" />
+    </>
+  ),
+  lock: (
+    <>
+      <rect x="5" y="10.5" width="14" height="10" rx="2.5" />
+      <path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
     </>
   ),
   scissors: (

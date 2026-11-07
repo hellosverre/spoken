@@ -5,6 +5,7 @@ import { fill, type Row } from "@/lib/i18n";
 import { SCENARIOS } from "@/lib/scenarios";
 import type { Sheet as SheetContent } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { DoneArt, NothingAgreedArt } from "./Art";
 import { Composer } from "./Composer";
 import { Icon } from "./Icon";
 
@@ -72,20 +73,37 @@ function Speaker() {
   return (
     <div className="speaker" data-who={who ?? ""}>
       <div className="pods">
-        <div className={cx("pod them", who === "them" && "active")}>{init}</div>
+        <div className="pod-wrap" data-on={who === "them" || undefined}>
+          <PulseRings />
+          <div className={cx("pod them", who === "them" && "active")}>{init}</div>
+        </div>
         <div className="wave" aria-hidden="true">
           {Array.from({ length: 9 }, (_, i) => (
             <i key={i} />
           ))}
         </div>
-        <div className={cx("pod ai", who === "ai" && "active")}>
-          <span className="mark" />
+        <div className="pod-wrap ai" data-on={who === "ai" || undefined}>
+          <PulseRings />
+          <div className={cx("pod ai", who === "ai" && "active")}>
+            <span className="mark" />
+          </div>
         </div>
       </div>
       <div className="speaker-label" aria-live="polite">
         {label}
       </div>
     </div>
+  );
+}
+
+/** Rings that ripple out from a pod while that side is talking (styled by .pod-wrap[data-on]). */
+function PulseRings() {
+  return (
+    <span className="rings" aria-hidden="true">
+      <i />
+      <i />
+      <i />
+    </span>
   );
 }
 
@@ -260,9 +278,7 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
 
   return (
     <>
-      <span className={cx("badge", !sheet.ok && "neutral")}>
-        <Icon name={sheet.ok ? "check" : "x"} />
-      </span>
+      {sheet.ok ? <DoneArt /> : <NothingAgreedArt />}
       <h3 id="sheetTitle">{sheet.title}</h3>
       <Rows rows={sheet.rows} />
       <div className="acts">

@@ -3,9 +3,13 @@
 import { useMemo, useState } from "react";
 import { BUILT_IN_KEYS, resolvePreset, type Preset } from "@/lib/presets";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { HeroDuet, PresetArt, hasPresetArt, tintOf } from "./Art";
 import { Icon } from "./Icon";
 import { PresetEditor, UsePresetSheet } from "./PresetSheets";
 import { Confirm } from "./ui";
+
+/** With more presets than this, the grid shows these first and a Show more button. */
+const FOLD_AT = 4;
 
 /**
  * The Home tab: presets for calls you make often, plus the scripted demos.
@@ -21,6 +25,10 @@ export function Presets() {
   const missingBuiltIn = BUILT_IN_KEYS.some((k) => !stored.some((p) => p.builtIn === k));
 
   const [editing, setEditing] = useState(false);
+  // Long lists fold to the first few; edit mode always shows them all.
+  const [expanded, setExpanded] = useState(false);
+  const folds = presets.length > FOLD_AT && !editing;
+  const shown = folds && !expanded ? presets.slice(0, FOLD_AT) : presets;
   const [using, setUsing] = useState<Preset | null>(null);
   // undefined = editor closed, null = new preset, Preset = editing that one.
   const [editorFor, setEditorFor] = useState<Preset | null | undefined>(undefined);
@@ -44,24 +52,44 @@ export function Presets() {
         <div className="pane-body">
           <div className="head-row">
             <h2 className="pane-h">{m.presetsH}</h2>
-            <button className={cx("editbtn", editing && "on")} aria-pressed={editing} onClick={() => setEditing((e) => !e)}>
-              {editing ? m.done : m.edit}
+            <button
+              className={cx("editbtn", editing && "on")}
+              aria-label={editing ? m.done : m.edit}
+              aria-pressed={editing}
+              onClick={() => setEditing((e) => !e)}
+            >
+              <Icon name={editing ? "check" : "pencil"} />
             </button>
           </div>
-          <p className="lede">{m.presetsSub}</p>
+
+          {presets.length === 0 && (
+            <div className="pempty">
+              <HeroDuet className="pempty-art" />
+              <p>{m.noPresets}</p>
+              <button className="more" onClick={() => store.restorePresets()}>
+                <Icon name="replay" />
+                {m.restore}
+              </button>
+            </div>
+          )}
 
           <ul className="pgrid">
-            {presets.map((p) => (
+            {shown.map((p) => (
               <li key={p.id}>
                 <button
                   className={cx("pcard", editing && "editing")}
+                  data-tint={tintOf(p.icon)}
                   onClick={() => open(p)}
                   aria-label={editing ? `${m.editPreset}: ${p.title}` : undefined}
                 >
                   <span className="pcard-top">
-                    <span className="pbadge">
-                      <Icon name={p.icon} />
-                    </span>
+                    {hasPresetArt(p.icon) ? (
+                      <PresetArt icon={p.icon} />
+                    ) : (
+                      <span className="pbadge">
+                        <Icon name={p.icon} />
+                      </span>
+                    )}
                     {editing && <Icon name="pencil" />}
                   </span>
                   <span className="pcard-tx">
@@ -87,6 +115,13 @@ export function Presets() {
               </button>
             </li>
           </ul>
+
+          {folds && (
+            <button className={cx("more", expanded && "open")} aria-expanded={expanded} onClick={() => setExpanded((x) => !x)}>
+              {expanded ? m.showLess : m.showMore}
+              <Icon name="chevron" />
+            </button>
+          )}
 
           {editing && missingBuiltIn && (
             <button className="restore" onClick={() => store.restorePresets()}>

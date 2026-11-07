@@ -4,6 +4,7 @@ import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { SCENARIOS } from "@/lib/scenarios";
 import type { Tab, ThreadItem } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { ChatHero } from "./Art";
 import { Composer } from "./Composer";
 import { Icon, Wordmark, type IconName } from "./Icon";
 import { Presets } from "./Presets";
@@ -52,6 +53,8 @@ function Pane({ id, active, children }: { id: Tab; active: boolean; children: Re
 function ChatPane({ active }: { active: boolean }) {
   const store = useStore();
   const t = useCopy();
+  const m = useAppCopy();
+  const lang = useSpoken((s) => s.lang);
   const thread = useSpoken((s) => s.thread);
   const draft = useSpoken((s) => s.draft);
   const focusTick = useSpoken((s) => s.focusTick);
@@ -68,13 +71,27 @@ function ChatPane({ active }: { active: boolean }) {
     <Pane id="chat" active={active}>
       <div className="scroll pad" ref={scrollRef}>
         <div className="empty">
-          <span className="mark big rise" style={{ "--i": 0 } as CSSProperties} />
-          <h1 className="greet rise" style={{ "--i": 1 } as CSSProperties}>
-            {t.ask}
-          </h1>
-          <p className="lede rise" style={{ "--i": 2 } as CSSProperties}>
-            {t.askSub}
-          </p>
+          {/* The illustration edge to edge, with the heading on its lower part, which fades into the page. */}
+          <div className="hero rise" style={{ "--i": 0 } as CSSProperties}>
+            <ChatHero />
+            <div className="hero-text">
+              <h1 className="greet">{t.ask}</h1>
+              <p className="lede">{t.askSub}</p>
+            </div>
+          </div>
+          {/* Real example requests instead of generic chips: tap one to send it. */}
+          <div className="examples rise" style={{ "--i": 1 } as CSSProperties}>
+            <p className="examples-l">{m.tryOne}</p>
+            {(["pizza", "doctor"] as const).map((k) => (
+              <button key={k} className="example" onClick={() => store.preset(k)}>
+                <span className="example-ic">
+                  <Icon name={k} />
+                </span>
+                <span className="example-tx">{SCENARIOS[k][lang].request}</span>
+                <Icon name="chevron" />
+              </button>
+            ))}
+          </div>
         </div>
         <div id="thread" aria-live="polite">
           {thread.map((item) => (
@@ -83,16 +100,6 @@ function ChatPane({ active }: { active: boolean }) {
         </div>
       </div>
       <div className="composer pad">
-        <div className="chips presets">
-          <button className="chip" onClick={() => store.preset("pizza")}>
-            <Icon name="pizza" />
-            {t.sugPizza}
-          </button>
-          <button className="chip" onClick={() => store.preset("doctor")}>
-            <Icon name="doctor" />
-            {t.sugDoctor}
-          </button>
-        </div>
         <Composer
           value={draft}
           onChange={(v) => store.setDraft(v)}
