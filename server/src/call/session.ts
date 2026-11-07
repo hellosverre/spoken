@@ -145,6 +145,8 @@ export interface SessionInit {
   profile: Profile;
   line: CallLine;
   llm: LlmProvider;
+  /** Per-call limit in seconds (≤ MAX_CALL_SEC). */
+  maxSec?: number;
   /** Approved for this call only; never put into the LLM context. */
   secrets?: { fnr?: string };
 }
@@ -293,7 +295,8 @@ export class CallSession {
     this.warmTimer = setInterval(() => {
       if (!this.ended && Date.now() - this.lastLlmAt > 20_000) void this.init.llm.warm?.();
     }, 20_000);
-    this.maxTimer = setTimeout(() => this.forceEnd("Maks samtaletid (10 min) nådd."), config.maxCallSec * 1000);
+    const maxSec = Math.min(config.maxCallSec, this.init.maxSec ?? config.maxCallSec);
+    this.maxTimer = setTimeout(() => this.forceEnd(`Maks samtaletid (${maxSec >= 60 ? `${Math.round(maxSec / 60)} min` : `${maxSec} s`}) nådd.`), maxSec * 1000);
     try {
       await this.init.line.start({
         status: (s, detail) => this.onLineStatus(s, detail),

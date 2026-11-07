@@ -128,3 +128,30 @@ describe("REST basics", () => {
     expect((await s.post("/api/tasks/nope/answers", { answers: {} })).status).toBe(404);
   });
 });
+
+describe("Telnyx balance guard", () => {
+  test("real call refused below the minimum balance, with a clear message", async () => {
+    const { config } = await import("../src/config.ts");
+    const saved = { p: config.callProvider, key: config.telnyx.apiKey, allow: config.callAllowlist, f: globalThis.fetch };
+    config.callProvider = "telnyx";
+    config.telnyx.apiKey = "test";
+    config.callAllowlist = ["+4722000001"];
+    const realFetch = saved.f;
+    globalThis.fetch = (async (url: any, init?: any) =>
+      String(url).includes("api.telnyx.com/v2/balance")
+        ? Response.json({ data: { balance: "0.21", currency: "USD" } })
+        : realFetch(url, init)) as any;
+    try {
+      const c = await s.post("/api/tasks", { text: "Bestill en stor pepperoni fra Domino's Storo til 18:00", lang: "no" });
+      const answers: Record<string, string> = {};
+      for (const q of c.data.questions) answers[q.id] = q.options?.[0] ?? "ja";
+      const p = await s.post(`/api/tasks/${c.data.taskId}/answers`, { answers });
+      config.callAllowlist = [p.data.callee.phone];
+      const call = await s.post(`/api/tasks/${p.data.taskId}/call`, { approved: true });
+      expect(call.status).toBe(402);
+      expect(call.data.error).toContain("$0.21");
+    } finally {
+      config.callProvider = saved.p; config.telnyx.apiKey = saved.key; config.callAllowlist = saved.allow; globalThis.fetch = saved.f;
+    }
+  });
+});

@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
 import { MockLine } from "./call/mock-line.ts";
 import { CallSession } from "./call/session.ts";
-import { TelnyxLine } from "./call/telnyx-line.ts";
+import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
 import { config } from "./config.ts";
 import { lookup } from "./directory.ts";
 import { createLlm } from "./llm/index.ts";
@@ -153,14 +153,23 @@ export function createApp(llm: LlmProvider = createLlm()) {
     if (config.callProvider === "telnyx" && !config.callAllowlist.includes(num.e164)) {
       return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
     }
+    if (config.callProvider === "telnyx") {
+      // Prepaid Telnyx balance: log it before every real call, refuse when it can't cover one.
+      const bal = await telnyxBalance();
+      console.log(`[telnyx] balance before call: ${bal === null ? "unknown" : `$${bal.toFixed(2)}`}`);
+      if (bal !== null && bal < config.minBalanceUsd) {
+        return err(402, `Telnyx-saldoen er for lav ($${bal.toFixed(2)}, minst $${config.minBalanceUsd.toFixed(2)} trengs). Fyll på før neste samtale.`);
+      }
+    }
     if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
 
+    const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
     const line = config.callProvider === "telnyx"
-      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name) })
+      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name), maxSec })
       : new MockLine(config.mockSpeed);
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
-    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...profile }, line, llm, secrets: { fnr } });
+    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...profile }, line, llm, secrets: { fnr }, maxSec });
     calls.set(callId, session);
     void session.start();
     return json({ callId });

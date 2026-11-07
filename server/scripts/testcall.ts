@@ -17,7 +17,8 @@ const answers: Record<string, string> = {};
 for (const q of c.questions) answers[q.id] = q.options?.[0] ?? "ja";
 const plan = await post(`/api/tasks/${c.taskId}/answers`, { answers });
 if (plan.blocked) { console.error("blocked:", plan.blocked.reason); process.exit(1); }
-const { callId } = await post(`/api/tasks/${c.taskId}/call`, { approved: true });
+// Test calls are capped at 60 s (Telnyx budget, Sat 7 Nov); MAX_SEC=… to override.
+const { callId } = await post(`/api/tasks/${c.taskId}/call`, { approved: true, maxSec: Number(process.env.MAX_SEC ?? 60) });
 
 const t0 = Date.now();
 const ts = () => `${((Date.now() - t0) / 1000).toFixed(1).padStart(5)}s`;
