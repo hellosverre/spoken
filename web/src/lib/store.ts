@@ -1,3 +1,4 @@
+import { getToken, logoutAccount, onUnauthorized } from "./account";
 import { APP_COPY } from "./copy-app";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
@@ -66,7 +67,7 @@ export interface State {
   sheetOpen: boolean;
   /** Bumped to flash the device frame when Spoken needs you. */
   flashTick: number;
-  /** Signed in. A local placeholder (demo / demo) until real accounts exist; nothing is sent anywhere. */
+  /** Signed in with a phone number (a session token is stored). Everything but Login needs it. */
   authed: boolean;
   themePref: ThemePref;
   profile: Profile;
@@ -120,9 +121,6 @@ const ABORT = Symbol("abort");
 const LANG_KEY = "spoken-lang";
 /** { themePref, profile } as JSON. layout.tsx reads the theme from here before first paint. */
 export const PREFS_KEY = "spoken-prefs";
-/** Signed in for this browser tab (sessionStorage), so a reload skips the login. */
-const AUTH_KEY = "spoken-authed";
-const DEMO_LOGIN = { user: "demo", pass: "demo" };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Wait two frames so a reset class is painted before the next one is added. */
@@ -203,9 +201,9 @@ export class SpokenStore {
       const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "null") as Partial<Pick<State, "themePref" | "profile">> | null;
       if (p) this.set((s) => ({ themePref: p.themePref ?? s.themePref, profile: { ...s.profile, ...p.profile } }));
     } catch {}
-    try {
-      if (sessionStorage.getItem(AUTH_KEY) === "1") this.set({ authed: true });
-    } catch {}
+    // The stored session token is the login: a reload keeps it, a 401 anywhere drops it.
+    this.set({ authed: !!getToken() });
+    onUnauthorized(() => this.sessionExpired());
     const presets = localPresetRepo.load();
     if (presets) this.set({ presets });
     this.applyTheme();
@@ -213,6 +211,7 @@ export class SpokenStore {
   }
 
   stop() {
+    onUnauthorized(null);
     this.introId++;
     this.homeId++;
     this.callId++;
@@ -294,27 +293,26 @@ export class SpokenStore {
     else this.set({ screen: "login" });
   }
 
-  /** Placeholder sign-in, checked here in the browser: only demo / demo gets in. */
-  login(user: string, pass: string): boolean {
-    if (user.trim().toLowerCase() !== DEMO_LOGIN.user || pass !== DEMO_LOGIN.pass) return false;
-    this.setAuthed(true);
+  /** The SMS code was accepted (account.verifyLogin stored the token): enter the app. */
+  signedIn() {
+    this.set({ authed: true });
     this.goHome();
-    return true;
   }
 
-  logout() {
+  async logout() {
+    await logoutAccount(); // tells the server, then forgets the token whatever the answer
+    this.toLogin();
+  }
+
+  /** A request came back 401: the session is gone, so go back to Login. */
+  sessionExpired() {
+    this.toLogin();
+  }
+
+  private toLogin() {
     this.demo = false;
     this.goHome();
-    this.setAuthed(false);
-    this.set({ screen: "login" });
-  }
-
-  private setAuthed(authed: boolean) {
-    this.set({ authed });
-    try {
-      if (authed) sessionStorage.setItem(AUTH_KEY, "1");
-      else sessionStorage.removeItem(AUTH_KEY);
-    } catch {}
+    this.set({ authed: false, screen: "login" });
   }
 
   setThemePref(themePref: ThemePref) {

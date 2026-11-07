@@ -1,4 +1,4 @@
-/* Optional phone-number account (SMS code). Logged out = the anonymous device, exactly as before.
+/* Phone-number account (SMS code), required: the server answers 401 to everything else.
    The session token sits in localStorage and rides on every API call as Authorization: Bearer. */
 
 const TOKEN_KEY = "spoken-token";
@@ -15,6 +15,26 @@ export function accountPhone(): string {
 export function authHeader(): Record<string, string> {
   const t = getToken();
   return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
+/** An error from the server with its HTTP status (0 = no contact). */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+/** The store registers this: a 401 on any request means the session is gone → back to Login. */
+let unauthorizedHandler: (() => void) | null = null;
+export function onUnauthorized(fn: (() => void) | null) { unauthorizedHandler = fn; }
+export function sessionLost() {
+  if (!getToken()) return;
+  clearSession();
+  unauthorizedHandler?.();
+}
+function clearSession() {
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(PHONE_KEY);
+  } catch { /* ignore */ }
 }
 
 function apiBase(): string {
@@ -45,10 +65,12 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
         signal: ctrl.signal,
       });
     } catch {
-      throw new Error("Får ikke kontakt med Spoken-serveren.");
+      throw new ApiError("Får ikke kontakt med Spoken-serveren.", 0);
     }
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    // 401 outside /api/auth/* = expired or revoked session. (A wrong code is a 400, never a 401.)
+    if (res.status === 401 && !path.startsWith("/api/auth/")) sessionLost();
+    if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
     return data;
   } finally {
     clearTimeout(timer);
@@ -67,8 +89,5 @@ export async function verifyLogin(phone: string, code: string): Promise<void> {
 
 export async function logoutAccount(): Promise<void> {
   await api("POST", "/api/auth/logout").catch(() => {});
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(PHONE_KEY);
-  } catch { /* ignore */ }
+  clearSession();
 }
