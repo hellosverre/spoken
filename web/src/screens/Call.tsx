@@ -37,7 +37,7 @@ export function Call({ callId }: { callId: string }) {
     [notify, d, dispatch],
   );
 
-  const { state, send } = useLiveCall(callId, onEvent);
+  const { state, send, level } = useLiveCall(callId, onEvent);
   const last = state.lines[state.lines.length - 1];
   const lastCallee = [...state.lines].reverse().find((l) => l.who === "callee" && l.final);
   // Who the voice field lights up for: whoever has a line still arriving, or the AI about to speak.
@@ -83,7 +83,7 @@ export function Call({ callId }: { callId: string }) {
           </p>
         ) : null}
 
-        <VoiceField speaking={speaking} pulse={wordCount} />
+        <VoiceField speaking={speaking} pulse={wordCount} level={level} />
 
         <Transcript lines={state.lines} calleeName={plan?.callee.name ?? ""} agentTyping={state.agentTyping} />
 

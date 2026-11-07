@@ -141,6 +141,8 @@ export interface MockCallOptions {
   lang: "en" | "no";
   /** Speed multiplier; tests and screenshots run faster. */
   speed?: number;
+  /** Also emit synthetic `level` events, to exercise the real-loudness path. Off by default. */
+  levels?: boolean;
   onResult(result: CallResult): void;
 }
 
@@ -155,6 +157,7 @@ export function startMockCall(opts: MockCallOptions, h: LiveHandlers): LiveConne
   let closed = false;
   let ended = false;
   let lineSeq = 0;
+  let levelTimer: ReturnType<typeof setInterval> | undefined;
   const now = () => Date.now();
   const emit = (e: LiveEvent) => {
     if (!closed) h.onEvent(e);
@@ -169,12 +172,23 @@ export function startMockCall(opts: MockCallOptions, h: LiveHandlers): LiveConne
     const words = toWords(step.text, step.unsure);
     if (step.who === "agent") emit({ type: "agent_typing", at: now() });
     let i = 0;
+    // Synthetic loudness while this line is "spoken": syllable-ish bumps at ~15 Hz.
+    clearInterval(levelTimer);
+    if (opts.levels) {
+      const t0 = Date.now();
+      levelTimer = setInterval(() => {
+        const t = (Date.now() - t0) / 1000;
+        const rms = Math.max(0, 0.22 + 0.2 * Math.sin(t * 11) + 0.08 * Math.sin(t * 29));
+        emit({ type: "level", who: step.who, rms, at: now() });
+      }, 66);
+    }
     const tick = () => {
       i += 1;
       const part = words.slice(0, i);
       const final = i >= words.length;
       emit({ type: "transcript", id, who: step.who, text: part.map((w) => w.text).join(" "), final, words: part, at: now() });
       if (final) {
+        clearInterval(levelTimer);
         transcript.push({ who: step.who, text: step.text, at: now() });
         later(step.pause, done);
       } else {
@@ -256,6 +270,7 @@ export function startMockCall(opts: MockCallOptions, h: LiveHandlers): LiveConne
           break;
         case "hangup":
           clearTimeout(timer);
+          clearInterval(levelTimer);
           emit({ type: "status", status: "ended", at: now() });
           finish("partial", c.hungUp, {});
           break;
@@ -264,6 +279,7 @@ export function startMockCall(opts: MockCallOptions, h: LiveHandlers): LiveConne
     close() {
       closed = true;
       clearTimeout(timer);
+      clearInterval(levelTimer);
     },
   };
 }

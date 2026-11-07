@@ -69,13 +69,25 @@ function reduce(s: LiveCallState, a: Act): LiveCallState {
       return { ...s, agentTyping: false, approval: { id: e.id, question: e.question, options: e.options, at: e.at } };
     case "note":
       return { ...s, notes: [...s.notes, { text: e.text, level: e.level, at: e.at }] };
+    case "level":
+      // ~15 Hz loudness skips React state; useLiveCall hands it to the voice field via a ref.
+      return s;
     case "result":
       return { ...s, result: e.result, status: "ended", approval: undefined, agentTyping: false };
   }
 }
 
+/** Latest voice loudness from the server. Mutable on purpose: read every animation frame. */
+export interface VoiceLevel {
+  who: "callee" | "agent";
+  rms: number;
+  /** performance.now() when it arrived, so stale levels can be ignored. */
+  receivedAt: number;
+}
+
 export function useLiveCall(callId: string, onEvent?: (e: LiveEvent) => void) {
   const [state, dispatch] = useReducer(reduce, init);
+  const level = useRef<VoiceLevel | null>(null);
   const conn = useRef<ReturnType<typeof api.live> | null>(null);
   const handler = useRef(onEvent);
   handler.current = onEvent;
@@ -83,6 +95,11 @@ export function useLiveCall(callId: string, onEvent?: (e: LiveEvent) => void) {
   useEffect(() => {
     const c = api.live(callId, {
       onEvent: (event) => {
+        if (event.type === "level") {
+          const rms = Number.isFinite(event.rms) ? Math.min(1, Math.max(0, event.rms)) : 0;
+          level.current = { who: event.who, rms, receivedAt: performance.now() };
+          return;
+        }
         dispatch({ kind: "event", event });
         handler.current?.(event);
       },
@@ -100,5 +117,5 @@ export function useLiveCall(callId: string, onEvent?: (e: LiveEvent) => void) {
     if (cmd.type === "approval_response") dispatch({ kind: "answered" });
   }, []);
 
-  return { state, send };
+  return { state, send, level };
 }
