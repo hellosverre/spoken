@@ -15,7 +15,7 @@ export interface LineEvents {
   calleeSpeech(): void;
   calleePartial(segmentId: string, text: string): void;
   /** speechEndAt: when the callee's audio last had voice (local VAD), for the STT latency figure. */
-  calleeFinal(segmentId: string, text: string, words?: Word[], meta?: { speechEndAt?: number }): void;
+  calleeFinal(segmentId: string, text: string, words?: Word[], meta?: { speechEndAt?: number; faint?: boolean }): void;
   /** Same segment again once word confidences arrive. */
   calleeWords?(segmentId: string, text: string, words: Word[]): void;
   /** A slower, more accurate transcript of the same segment (batch STT). */

@@ -110,3 +110,29 @@ test("a time mid-sentence is not cut out", async () => {
   const { withoutTimes } = await import("../src/time.ts");
   expect(withoutTimes("Da mener du klokka 00:30, altså halv ett på natta.")).toBe("");
 });
+
+test("a faint line reaches the LLM marked, and [[SKIP]] says nothing", async () => {
+  const seen: string[] = [];
+  const llm: LlmProvider = {
+    name: "fake",
+    clarify: async () => ({ summary: "", questions: [] }),
+    plan: async () => ({ calleeName: "", goal: "", willShare: [], needsApprovalFor: [] }),
+    summarize: async () => ({ outcome: "partial", summary: "", details: {} }),
+    async *reply(...args: unknown[]) { seen.push(JSON.stringify(args)); yield "[[SKIP]]"; },
+  };
+  const plan: Plan = {
+    taskId: "t", callee: { name: "Domino's", phone: "+4722000001", source: "lookup" },
+    goal: "bestille pizza", opening: "", willShare: ["name"], needsApprovalFor: [], voiceId: "v",
+  };
+  const line = new Line();
+  const s = new CallSession({ callId: `f_${Math.random()}`, taskId: "t", plan, profile: { name: "Sverre", hearCall: true, personality: "warm", lang: "no" }, line, llm });
+  await s.start();
+  await Bun.sleep(30);
+  const before = line.spoken.length;
+  line.ev.calleeFinal("c3", "Skal vi ta bussen?", undefined, { faint: true });
+  line.ev.calleeWords?.("c3", "Skal vi ta bussen?", [{ text: "Skal", confidence: 0.9 }]);
+  await Bun.sleep(1500);
+  expect(seen.some((a) => a.includes("⟨svak stemme⟩"))).toBe(true);
+  expect(line.spoken.length).toBe(before);
+  await s.finish("test");
+});
