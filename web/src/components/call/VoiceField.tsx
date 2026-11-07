@@ -47,8 +47,11 @@ export function VoiceField({
   const canvas = useRef<HTMLCanvasElement>(null);
   const calm = useCalm();
   // Mutable animation state lives in a ref: the loop must not re-render React.
-  // In calm mode there is no loop, so redraw a still frame when the speaker changes.
-  const redrawKey = calm ? speaking : "live";
+  // The draw loop reads the speaker through a ref, so the canvas effect never
+  // restarts (a restart resets the canvas and would flash one blank frame).
+  const speakingRef = useRef(speaking);
+  speakingRef.current = speaking;
+  const redrawRef = useRef<(() => void) | null>(null);
   const sim = useRef({ level: 0, origin: 0, velocity: 0, target: 0, lastPulse: pulse, kick: 0 });
 
   // A new word: kick the envelope, unless real loudness is driving it.
@@ -84,8 +87,10 @@ export function VoiceField({
       ink = cs.getPropertyValue("--color-text").trim() || "#fff";
       idle = Number(cs.getPropertyValue("--dot-idle")) || 0.13;
     };
-    const resize = () => {
+    // Returns true when the backing store was reset (which also clears it).
+    const resize = (): boolean => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (el.clientWidth === w && el.width === Math.round(w * dpr)) return false;
       w = el.clientWidth;
       size = w / (COLS + (COLS - 1) * GAP_RATIO);
       gap = size * GAP_RATIO;
@@ -95,6 +100,7 @@ export function VoiceField({
       el.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       readTheme();
+      return true;
     };
 
     let last = performance.now();
@@ -114,7 +120,7 @@ export function VoiceField({
       }
       if (calm) {
         s.origin = s.target;
-        s.level = real ? Math.min(1, real.rms * 2.2) : speaking === "none" ? 0 : 0.55;
+        s.level = real ? Math.min(1, real.rms * 2.2) : speakingRef.current === "none" ? 0 : 0.55;
       } else {
         // Envelope decays between words; a critically-damped-ish spring moves the origin.
         if (!real) s.level *= Math.exp(-dt * 2.6);
@@ -148,21 +154,31 @@ export function VoiceField({
     };
 
     resize();
+    // Calm mode has no loop: speaker changes ask for a single still frame.
+    redrawRef.current = () => draw(performance.now());
+    // Only a real size change resets the canvas, and it is redrawn in the same
+    // frame so it never paints blank.
     const ro = new ResizeObserver(() => {
-      resize();
-      if (calm) draw(performance.now());
+      if (!resize()) return;
+      cancelAnimationFrame(raf);
+      draw(performance.now());
     });
     ro.observe(el);
     // Theme switches change --color-text on <html>.
     const mo = new MutationObserver(readTheme);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-contrast"] });
-    raf = requestAnimationFrame(draw);
+    draw(performance.now());
     return () => {
+      redrawRef.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
       mo.disconnect();
     };
-  }, [calm, redrawKey, speaking]);
+  }, [calm]);
+
+  useEffect(() => {
+    if (calm) redrawRef.current?.();
+  }, [calm, speaking]);
 
   return <canvas ref={canvas} className="sp-voice" data-speaking={speaking} aria-hidden="true" />;
 }
