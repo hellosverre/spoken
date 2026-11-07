@@ -46,6 +46,7 @@ function ChatPane({ active }: { active: boolean }) {
   const t = useCopy();
   const thread = useSpoken((s) => s.thread);
   const draft = useSpoken((s) => s.draft);
+  const asking = useSpoken((s) => s.asking);
   const focusTick = useSpoken((s) => s.focusTick);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -89,7 +90,7 @@ function ChatPane({ active }: { active: boolean }) {
           value={draft}
           onChange={(v) => store.setDraft(v)}
           onSubmit={() => store.submitDraft()}
-          placeholder={t.ph}
+          placeholder={asking ? t.answerPh : t.ph}
           label={t.phAria}
           sendLabel={t.send}
           focusTick={focusTick}
@@ -114,9 +115,30 @@ function ThreadEntry({ item }: { item: ThreadItem }) {
           </span>
         </div>
       );
+    case "q":
+      return <QuestionEntry item={item} />;
     case "plan":
       return <PlanCard item={item} />;
   }
+}
+
+/** A clarifying question from the call server, with quick answers. */
+function QuestionEntry({ item }: { item: Extract<ThreadItem, { kind: "q" }> }) {
+  const store = useStore();
+  return (
+    <>
+      <div className="bubble bot">{item.text}</div>
+      {!item.answered && item.options.length > 0 && (
+        <div className="chips answers">
+          {item.options.map((o) => (
+            <button key={o} className="chip" onClick={() => store.answer(o)}>
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
 function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
@@ -125,31 +147,50 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
   const lang = useSpoken((s) => s.lang);
   const sc = SCENARIOS[item.scenario];
   const L = sc[lang];
+  const p = item.live ?? {
+    callee: { name: L.contact, number: sc.number, init: sc.init },
+    goal: L.goal,
+    checks: L.checks,
+    share: [],
+    opening: L.opening,
+  };
 
   return (
     <div className="plan">
       <div className="who">
-        <span className="av">{sc.init}</span>
+        <span className="av">{p.callee.init}</span>
         <div>
-          <b>{L.contact}</b>
-          <span>{sc.number}</span>
+          <b>{p.callee.name}</b>
+          <span>{p.callee.number}</span>
         </div>
       </div>
       <div>
         <p className="field-l">{t.planGoal}</p>
-        <p>{L.goal}</p>
+        <p>{p.goal}</p>
       </div>
-      <div>
-        <p className="field-l">{t.planAsk}</p>
-        <div className="checks">
-          {L.checks.map((c) => (
-            <span key={c}>{c}</span>
-          ))}
+      {p.checks.length > 0 && (
+        <div>
+          <p className="field-l">{t.planAsk}</p>
+          <div className="checks">
+            {p.checks.map((c) => (
+              <span key={c}>{c}</span>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
+      {p.share.length > 0 && (
+        <div>
+          <p className="field-l">{t.planShare}</p>
+          <div className="checks">
+            {p.share.map((c) => (
+              <span key={c}>{c}</span>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <p className="field-l">{t.planOpen}</p>
-        <div className="quote">“{L.opening}”</div>
+        <div className="quote">“{p.opening}”</div>
       </div>
       <div className="acts">
         <button className={cx("btn primary", item.pressed && "pressed")} onClick={() => store.startCall()}>
@@ -242,6 +283,12 @@ function SettingsPane({ active }: { active: boolean }) {
                   <Icon name="replay" />
                 </span>
               </button>
+            </li>
+            <li className="row static">
+              <span className="tx">
+                <b>{t.serverL}</b>
+                <span>{store.serverLabel()}</span>
+              </span>
             </li>
             <li className="row static">
               <span className="tx">

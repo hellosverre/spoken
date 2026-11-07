@@ -79,6 +79,17 @@ const en = {
   hungTitle: "You ended the call",
   hungRows: [["Agreed to", "Nothing"]] as Row[],
   dur: "Duration",
+  planShare: "I'll share",
+  share: { name: "Your name", phone: "Your number", address: "Your address", email: "Your email", birthdate: "Birth date", fnr: "National ID", allergies: "Allergies" } as Record<string, string>,
+  answerPh: "Type your answer…",
+  offline: "I can't reach the call server right now, so this is a practice call.",
+  blocked: "I can't make this call.",
+  callErr: "The call didn't start",
+  callLost: "Lost the connection to the call",
+  reason: "Reason",
+  serverL: "Calls",
+  serverLive: "Real calls through {host}",
+  serverScript: "Practice calls (no call server set)",
 };
 
 export type Copy = typeof en;
@@ -161,6 +172,17 @@ const no: Copy = {
   hungTitle: "Du la på",
   hungRows: [["Avtalt", "Ingenting"]],
   dur: "Varighet",
+  planShare: "Jeg deler",
+  share: { name: "Navnet ditt", phone: "Nummeret ditt", address: "Adressen din", email: "E-posten din", birthdate: "Fødselsdato", fnr: "Fødselsnummer", allergies: "Allergier" },
+  answerPh: "Skriv svaret ditt…",
+  offline: "Jeg får ikke kontakt med samtaleserveren nå, så dette er en øvingssamtale.",
+  blocked: "Denne samtalen kan jeg ikke ta.",
+  callErr: "Samtalen startet ikke",
+  callLost: "Mistet kontakten med samtalen",
+  reason: "Grunn",
+  serverL: "Samtaler",
+  serverLive: "Ekte samtaler via {host}",
+  serverScript: "Øvingssamtaler (ingen samtaleserver)",
 };
 
 export const COPY: Record<Lang, Copy> = { en, no };

@@ -10,7 +10,7 @@ Product decisions: see `SPEC.md`. Shared types: `shared/contract.ts` (the source
 |---|---|---|
 | `shared/contract.ts` | Types for REST + WebSocket messages | Lead (change only via the lead) |
 | `server/` | Bun + TypeScript call server on Hugin: REST, live WebSocket, Telnyx call control + media stream, ElevenLabs Scribe (STT) + TTS, LLM agent, safety rules | Lim |
-| `web/` | Next.js + React + TS web app (phone-first, dark, EN/NO). Scripted calls for now; real calls plug in through `CallIO` | Form |
+| `web/` | Next.js + React + TS web app (phone-first, dark, EN/NO). Talks to the server over REST + `/live`; falls back to scripted practice calls with no server | Form |
 
 ## Runtime
 
