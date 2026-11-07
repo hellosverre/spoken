@@ -367,7 +367,8 @@ export class VonageLine implements CallLine {
       new Uint8Array(pcm.buffer).set(raw.subarray(0, even));
       const clean = this.dn.process(pcm, 16000);
       voiced = this.dn.voiced;
-      audio = new Uint8Array(clean.buffer);
+      // The gate always applies; Scribe hears the cleaned audio only with DENOISE_STT=1 (recognition untested on it).
+      if (process.env.DENOISE_STT === "1") audio = new Uint8Array(clean.buffer);
     }
     this.onFrame(down16to8(audio), voiced);
   }
