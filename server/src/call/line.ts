@@ -23,6 +23,8 @@ export interface LineEvents {
   debug?(kind: string, data: Record<string, unknown>): void;
   /** Timing facts for the latency panel. */
   metric?(m: LineMetric): void;
+  /** Usage this line caused, reported once at the end. */
+  cost?(c: { ttsChars: number; sttSec: number }): void;
 }
 
 export interface CallLine {

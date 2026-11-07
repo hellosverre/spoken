@@ -25,6 +25,8 @@ export interface TtsOptions {
   signal?: AbortSignal;
   /** Cache this phrase (fixed lines, disclosure). */
   cache?: boolean;
+  /** Called with the billed character count when a real (uncached) request is made. */
+  onBilled?: (chars: number) => void;
 }
 
 /** Yields µ-law chunks as they arrive. Throws on HTTP errors or a 6 s first-byte timeout. */
@@ -53,6 +55,7 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
     }),
     signal,
   });
+  if (res.ok) opts.onBilled?.(speakable.length);
   if (!res.ok) {
     clearTimeout(timer);
     throw new Error(`ElevenLabs TTS HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);

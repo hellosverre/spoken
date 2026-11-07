@@ -41,6 +41,8 @@ export interface TelnyxLineOpts {
   to: string;
   voiceId?: string;
   keyterms: string[];
+  /** Replay harness: no Telnyx dial/hangup; media is fed through attach()/onMedia(). */
+  offline?: boolean;
 }
 
 export class TelnyxLine implements CallLine {
@@ -71,6 +73,12 @@ export class TelnyxLine implements CallLine {
   private inboundAlaw = false;
   private lastVoicedAt = 0;
   private lastPartialAt = 0;
+  private lastCommittedNorm = "";
+  private sayFramePending = false;
+  private ttsChars = 0;
+  private sttBytes = 0;
+  private costReported = false;
+  private billed = (n: number) => { this.ttsChars += n; };
 
   // latency
   private lastCommitAt = 0;
@@ -84,6 +92,11 @@ export class TelnyxLine implements CallLine {
 
   async start(events: LineEvents) {
     this.ev = events;
+    if (this.o.offline) {
+      this.answered = true;
+      this.ev.status("ringing");
+      return;
+    }
     const { apiKey, connectionId, fromNumber } = config.telnyx;
     if (!apiKey || !connectionId || !fromNumber) throw new Error("TELNYX_API_KEY / TELNYX_CONNECTION_ID / TELNYX_FROM_NUMBER missing");
     const wsBase = config.publicUrl.replace(/^http/, "ws");
@@ -108,7 +121,7 @@ export class TelnyxLine implements CallLine {
   /** Warm the TTS cache while the phone rings, so the disclosure plays instantly. */
   prefetch(texts: string[]) {
     for (const t of texts) {
-      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, cache: true })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
+      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
     }
   }
 
@@ -144,6 +157,10 @@ export class TelnyxLine implements CallLine {
         }, 8000);
         break;
       case "streaming.failed": this.ev.status("failed", `Lydstrømmen feilet: ${p.failure_reason ?? "ukjent"}`); break;
+      case "call.cost":
+        console.log(`[cost] telnyx call ${this.o.callId}: ${p.total_cost ?? "?"} ${p.currency ?? ""} (${p.billed_duration_secs ?? "?"} s billed)`);
+        this.ev.debug?.("telnyx_cost", { total: p.total_cost, currency: p.currency, billedSec: p.billed_duration_secs });
+        break;
       case "call.hangup": {
         this.hungUp = true;
         if (this.answered) this.ev.ended("callee hung up");
@@ -176,8 +193,13 @@ export class TelnyxLine implements CallLine {
     this.ws = ws;
     this.scribe = new ScribeStream({
       partial: (text) => {
+        // Scribe can repeat the just-committed text as a partial; that is not new speech.
+        const n = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+        if (n && this.lastCommittedNorm.startsWith(n) && Date.now() - this.lastCommitAt < 2000) return;
         this.lastPartialAt = Date.now();
-        this.ev.calleeSpeech();
+        // Only real, current speech may barge in: late partials of the previous utterance
+        // used to cut the agent off right as it started (replay, Sat 7 Nov).
+        if (Date.now() - this.lastVoicedAt < 200) this.ev.calleeSpeech();
         this.ev.calleePartial(`c_${this.segId}`, text);
       },
       committed: (text) => {
@@ -185,6 +207,7 @@ export class TelnyxLine implements CallLine {
         this.lastCommitAt = Date.now();
         this.awaitingFirstAudio = true;
         this.committedIds.set(text.trim(), id);
+        this.lastCommittedNorm = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
         // Quiet speech can stay under the energy threshold; the last partial is a later bound.
         const speechEndAt = Math.max(this.lastVoicedAt, this.lastPartialAt) || undefined;
         this.ev.calleeFinal(id, text, undefined, { speechEndAt });
@@ -224,6 +247,7 @@ export class TelnyxLine implements CallLine {
           for (const b of this.inBatch) { out.set(b, o); o += b.length; }
           this.inBatch = [];
           this.scribe?.send(out);
+          this.sttBytes += out.length;
         }
         break;
       }
@@ -279,6 +303,9 @@ export class TelnyxLine implements CallLine {
         this.awaitingFirstAudio = false;
         console.log(`[latency] callee commit → agent audio: ${now - this.lastCommitAt} ms`);
         this.ev.debug?.("latency", { commitToAudioMs: now - this.lastCommitAt });
+      }
+      if (f && this.sayFramePending) {
+        this.sayFramePending = false;
         this.ev.metric?.({ kind: "first_audio", at: now });
       }
       if (!f && this.waiting && !this.speakResolve) {
@@ -309,11 +336,12 @@ export class TelnyxLine implements CallLine {
     const abort = new AbortController();
     this.speakAbort = abort;
     this.producerDone = false;
+    this.sayFramePending = kind === "say";
     const done = new Promise<{ interrupted: boolean }>((resolve) => { this.speakResolve = resolve; });
     const t0 = Date.now();
     let first = true;
     try {
-      for await (const chunk of tts(text, { voiceId: this.o.voiceId, signal: abort.signal, cache: kind === "filler" || text.length <= 40 })) {
+      for await (const chunk of tts(text, { voiceId: this.o.voiceId, signal: abort.signal, cache: kind === "filler" || text.length <= 40, onBilled: this.billed })) {
         if (abort.signal.aborted) break;
         if (first) {
           first = false;
@@ -350,7 +378,7 @@ export class TelnyxLine implements CallLine {
   }
 
   async hangup() {
-    if (!this.hungUp && this.controlId) {
+    if (!this.hungUp && this.controlId && !this.o.offline) {
       this.hungUp = true;
       try { await telnyx(`/calls/${encodeURIComponent(this.controlId)}/actions/hangup`, {}); }
       catch (e) { console.warn("[telnyx] hangup:", (e as Error).message); }
@@ -360,6 +388,10 @@ export class TelnyxLine implements CallLine {
   }
 
   private cleanup() {
+    if (!this.costReported) {
+      this.costReported = true;
+      this.ev?.cost?.({ ttsChars: this.ttsChars, sttSec: Math.round(this.sttBytes / 8000) });
+    }
     clearInterval(this.ticker);
     this.ticker = undefined;
     this.stopSpeaking();

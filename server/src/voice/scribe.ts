@@ -36,7 +36,8 @@ export class ScribeStream {
       audio_format: "ulaw_8000",
       language_code: "no",
       commit_strategy: "vad",
-      vad_silence_threshold_secs: process.env.SCRIBE_SILENCE_SECS ?? "0.5",
+      // Short window for fast turns; CallSession holds the turn if the text sounds unfinished.
+      vad_silence_threshold_secs: process.env.SCRIBE_SILENCE_SECS ?? "0.3",
       include_timestamps: "true",
     });
     for (const k of this.keyterms.slice(0, 20)) q.append("keyterms", k);

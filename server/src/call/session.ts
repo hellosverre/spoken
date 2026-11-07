@@ -45,6 +45,23 @@ const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (d
 // Short fillers for when a reply is slow (> FILLER_AFTER_MS). Rotated, never the same twice in a row.
 const FILLERS = ["Mm, et øyeblikk.", "Ja, la meg se.", "Et lite øyeblikk."];
 const FILLER_AFTER_MS = 1500;
+// Instant cached backchannel when content is not ready this long after the callee's commit.
+const BACKCHANNELS = ["Ja,", "Mm,", "Okei,"];
+const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 450);
+// Start the LLM on a partial that has been stable this long (speculative turn).
+const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
+// Callee text that sounds cut off mid-sentence: wait this long for more before answering.
+const HOLD_MS = 450;
+const UNFINISHED = /(,|\b(og|eller|men|så|at|som|blir|er|det|den|en|et|ei|til|på|for|med|om|hvis|fordi|altså|eh|ehm|øh|liksom))[.…]?$/i;
+
+interface Spec {
+  key: string;
+  abort: AbortController;
+  tokens: string[];
+  done: boolean;
+  error?: unknown;
+  wake?: () => void;
+}
 
 const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
 
@@ -111,6 +128,11 @@ export class CallSession {
   private confusedRun = 0; // confused turns within that window
   private lastFiller = "";
   private timing?: TurnTiming;
+  private spec?: Spec;
+  private lineCost?: { ttsChars: number; sttSec: number };
+  private specTimer?: ReturnType<typeof setTimeout>;
+  private holdTimer?: ReturnType<typeof setTimeout>;
+  private lastBackchannel = "";
   private answeredAtHistory = -1; // history length when the user last answered an approval
   private reasked = 0;
   private usage = { promptTokens: 0, completionTokens: 0, costUsd: 0, requests: 0 };
@@ -164,18 +186,23 @@ export class CallSession {
   async start() {
     this.startedAt = Date.now();
     this.emit({ type: "status", status: "dialing", at: this.startedAt });
-    this.init.line.prefetch?.([ensureDisclosure(this.init.plan.opening, this.init.profile.name), WAIT_PHRASE, CARD_REFUSAL]);
+    this.init.line.prefetch?.([ensureDisclosure(this.init.plan.opening, this.init.profile.name), WAIT_PHRASE, CARD_REFUSAL, ...BACKCHANNELS]);
+    void this.init.llm.warm?.();
     this.maxTimer = setTimeout(() => this.forceEnd("Maks samtaletid (10 min) nådd."), config.maxCallSec * 1000);
     try {
       await this.init.line.start({
         status: (s, detail) => this.onLineStatus(s, detail),
         calleeSpeech: () => this.onCalleeSpeech(),
-        calleePartial: (id, text) => this.emit({ type: "transcript", id, who: "callee", text, final: false, at: Date.now() }),
+        calleePartial: (id, text) => {
+          this.emit({ type: "transcript", id, who: "callee", text, final: false, at: Date.now() });
+          this.onPartial(text);
+        },
         calleeFinal: (id, text, words, meta) => {
           this.timing = { commitAt: Date.now(), speechEndAt: meta?.speechEndAt, llmMs: null, ttsMs: null, awaitTts: false, awaitAudio: false };
           this.onCalleeFinal(id, text, words);
         },
         metric: (m) => this.onMetric(m),
+        cost: (c) => { this.lineCost = c; },
         calleeWords: (id, text, words) => this.emit({ type: "transcript", id, who: "callee", text, final: true, words, at: Date.now() }),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
@@ -228,6 +255,8 @@ export class CallSession {
     this.lastCalleeAt = Date.now();
     this.nudged = 0;
     clearTimeout(this.silenceTimer);
+    clearTimeout(this.holdTimer);
+    this.dropSpec("call ended");
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: this.lastCalleeAt });
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
     this.history.push({ role: "callee", text: clean });
@@ -259,7 +288,75 @@ export class CallSession {
       void this.requestApproval("Mottakeren spør etter adressen din. Kan jeg oppgi den?", ["JA", "NEI"], "address", ADDRESS_REFUSAL);
       return;
     }
+    // Short VAD window: a pause after "Det blir…" must not start our turn.
+    clearTimeout(this.holdTimer);
+    if (UNFINISHED.test(clean)) {
+      this.debug("hold_unfinished", { text: clean });
+      this.holdTimer = setTimeout(() => { this.holdTimer = undefined; this.requestTurn(); }, HOLD_MS);
+      return;
+    }
     this.requestTurn();
+  }
+
+  // ---------- speculative turn ----------
+
+  private canSpeculate() {
+    return this.status === "connected" && !this.pending && !this.turnRunning && !this.speaking && !this.ended;
+  }
+
+  private dropSpec(why: string) {
+    if (!this.spec) return;
+    this.debug("spec_drop", { why, key: this.spec.key });
+    this.spec.abort.abort();
+    this.spec = undefined;
+  }
+
+  /** A partial that stops changing means the callee probably finished: start thinking now. */
+  private onPartial(text: string) {
+    if (this.holdTimer) { clearTimeout(this.holdTimer); this.holdTimer = undefined; } // they kept talking
+    const key = norm(text);
+    if (this.spec && this.spec.key !== key) this.dropSpec("partial changed");
+    clearTimeout(this.specTimer);
+    if (!this.canSpeculate() || key.length < 2) return;
+    this.specTimer = setTimeout(() => {
+      if (this.spec || !this.canSpeculate()) return;
+      const ctx = this.ctx();
+      ctx.history = [...ctx.history, { role: "callee", text: text.trim() }];
+      const spec: Spec = { key, abort: new AbortController(), tokens: [], done: false };
+      this.spec = spec;
+      this.debug("spec_start", { key });
+      void (async () => {
+        try {
+          for await (const tok of this.init.llm.reply(ctx, spec.abort.signal, this.addUsage)) {
+            spec.tokens.push(tok);
+            spec.wake?.();
+          }
+        } catch (e) { spec.error = e; }
+        finally { spec.done = true; spec.wake?.(); }
+      })();
+    }, SPEC_AFTER_MS);
+  }
+
+  /** The speculative reply, if it was made for exactly what the callee ended up saying. */
+  private takeSpec(): Spec | undefined {
+    const spec = this.spec;
+    this.spec = undefined;
+    clearTimeout(this.specTimer);
+    if (!spec) return undefined;
+    const last = this.history.at(-1);
+    if (last?.role === "callee" && norm(last.text) === spec.key) { this.debug("spec_hit", { key: spec.key, tokensReady: spec.tokens.length }); return spec; }
+    this.debug("spec_miss", { key: spec.key, final: last?.text });
+    spec.abort.abort();
+    return undefined;
+  }
+
+  private async *specTokens(spec: Spec): AsyncIterable<string> {
+    let i = 0;
+    while (true) {
+      while (i < spec.tokens.length) yield spec.tokens[i++]!;
+      if (spec.done) { if (spec.error && !spec.abort.signal.aborted) throw spec.error; return; }
+      await new Promise<void>((r) => { spec.wake = r; });
+    }
   }
 
   // ---------- agent turns ----------
@@ -271,7 +368,7 @@ export class CallSession {
       this.wantTurn = true;
       return;
     }
-    void this.runTurn();
+    void this.runTurn(this.takeSpec());
   }
 
   private ctx(): AgentContext {
@@ -297,7 +394,7 @@ export class CallSession {
     };
   }
 
-  private async runTurn() {
+  private async runTurn(spec?: Spec) {
     this.turnRunning = true;
     this.wantTurn = false;
     const abort = new AbortController();
@@ -305,15 +402,25 @@ export class CallSession {
     const t0 = this.lastCalleeAt || Date.now();
     let firstAudio = true;
     this.emit({ type: "agent_typing", at: Date.now() });
-    const seg = new Segmenter();
+    const seg = new Segmenter(true);
     const said: string[] = [];
     let stop = false;
     let turnConfused = false;
     let spokeAnything = false;
     this.debug("turn_start", { history: this.history.at(-1) });
+    let backchannel = "";
+    const answeringCallee = this.history.at(-1)?.role === "callee";
+    // Instant cached "Ja," / "Mm," if real content is not ready yet (never the same twice in a row).
+    const backTimer = answeringCallee ? setTimeout(() => {
+      if (spokeAnything || stop || abort.signal.aborted || this.ended || this.pending) return;
+      backchannel = BACKCHANNELS.find((b) => b !== this.lastBackchannel) ?? BACKCHANNELS[0]!;
+      this.lastBackchannel = backchannel;
+      this.debug("backchannel", { text: backchannel });
+      void this.say(backchannel, "filler");
+    }, Math.max(0, BACKCHANNEL_MS - (Date.now() - t0))) : undefined;
     // Only fill silence when the reply is genuinely slow.
     const fillerTimer = setTimeout(() => {
-      if (spokeAnything || stop || abort.signal.aborted || this.ended || this.pending) return;
+      if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending) return;
       const f = FILLERS.find((x) => x !== this.lastFiller) ?? FILLERS[0]!;
       this.lastFiller = f;
       this.debug("filler", { text: f, afterMs: FILLER_AFTER_MS });
@@ -323,6 +430,12 @@ export class CallSession {
     const handle = async (s: Segment) => {
       if (stop || abort.signal.aborted) return;
       if (s.kind === "speech") {
+        if (backchannel && !spokeAnything) {
+          // "Ja," was already said: don't start the real reply with "Ja, …" again.
+          const w = backchannel.replace(/,$/, "");
+          const stripped = s.text.replace(new RegExp(`^${w}[,!.]?\\s+`, "i"), "");
+          if (stripped !== s.text && stripped.trim()) s = { ...s, text: stripped.charAt(0).toUpperCase() + stripped.slice(1) };
+        }
         const commitment = isCommitment(s.text);
         if (commitment && this.approvalCredit <= 0) {
           // Safety: the model tried to commit without a yes from the user.
@@ -379,7 +492,9 @@ export class CallSession {
     try {
       const llmStart = Date.now();
       const timing = this.timing;
-      for await (const tok of this.init.llm.reply(this.ctx(), abort.signal, this.addUsage)) {
+      if (spec) abort.signal.addEventListener("abort", () => spec.abort.abort(), { once: true });
+      const source = spec ? this.specTokens(spec) : this.init.llm.reply(this.ctx(), abort.signal, this.addUsage);
+      for await (const tok of source) {
         if (abort.signal.aborted || stop) break;
         if (timing && timing.llmMs === null && tok.trim()) timing.llmMs = Date.now() - llmStart;
         for (const s of seg.push(tok)) await handle(s);
@@ -397,6 +512,7 @@ export class CallSession {
       }
     } finally {
       clearTimeout(fillerTimer);
+      clearTimeout(backTimer);
       this.turnRunning = false;
       if (said.length) {
         this.recentTurns = [...this.recentTurns, new Set(said.map(norm))].slice(-3);
@@ -641,9 +757,10 @@ export class CallSession {
     }
     console.log(`[session] ${this.callId} ended (${reason}): ${outcome}`);
     this.debug("ended", { reason, outcome, latencies: this.latencies, usage: this.usage });
-    if (this.usage.requests) {
-      console.log(`[llm-usage] call ${this.callId}: ${this.usage.requests} requests, ${this.usage.promptTokens} in / ${this.usage.completionTokens} out, $${this.usage.costUsd.toFixed(5)}`);
-    }
+    // One cost line per call. Telnyx reports its own price later as [cost] telnyx … (call.cost webhook).
+    console.log(`[cost] call ${this.callId}: LLM $${this.usage.costUsd.toFixed(5)} (${this.usage.requests} req, ${this.usage.promptTokens} in / ${this.usage.completionTokens} out)` +
+      (this.lineCost ? `, TTS ${this.lineCost.ttsChars} chars, STT ${this.lineCost.sttSec} s` : ""));
+    this.debug("cost", { llm: this.usage, line: this.lineCost });
     this.status = "ended";
     this.emit({ type: "status", status: "ended", at: Date.now() });
     this.emit({ type: "result", result: this.result });

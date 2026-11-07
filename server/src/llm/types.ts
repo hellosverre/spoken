@@ -62,6 +62,8 @@ export interface LlmProvider {
   name: string;
   /** Model id, for the latency panel. */
   model?: string;
+  /** Open the TLS connection early (call start), so the first turn doesn't pay for it. */
+  warm?(): Promise<void>;
   clarify(task: TaskForLlm): Promise<ClarifyOut>;
   plan(task: TaskForLlm, answers: Record<string, string>): Promise<PlanOut>;
   reply(ctx: AgentContext, signal: AbortSignal, onUsage?: (u: Usage) => void): AsyncIterable<string>;

@@ -83,6 +83,13 @@ export class OpenAiCompatLlm implements LlmProvider {
     return JSON.parse(a >= 0 && b > a ? content.slice(a, b + 1) : content);
   }
 
+  async warm(): Promise<void> {
+    const url = this.url.replace(/chat\/completions$/, this.kind === "openrouter" ? "key" : "models");
+    try {
+      await fetch(url, { headers: { Authorization: `Bearer ${this.apiKey}` }, signal: AbortSignal.timeout(4000) }).then((r) => r.arrayBuffer());
+    } catch { /* warming is best effort */ }
+  }
+
   async clarify(task: TaskForLlm): Promise<ClarifyOut> {
     try {
       const j = await this.json(clarifyPrompt(task));
@@ -142,6 +149,8 @@ export class OpenAiCompatLlm implements LlmProvider {
       else if (h.role === "callee") messages.push({ role: "user", content: h.text });
       else messages.push({ role: "user", content: "(Ny melding fra appen, se systeminstruksen. Svar mottakeren nå, uten å nevne appen.)" });
     }
+    // Some models (Anthropic) reject a chat that ends on an assistant turn ("prefill").
+    if (messages.at(-1)?.role === "assistant") messages.push({ role: "user", content: "(Fortsett samtalen.)" });
     const timeout = AbortSignal.timeout(8_000);
     const res = await this.post({ messages, stream: true, max_tokens: 120 }, AbortSignal.any([signal, timeout]));
     const reader = res.body!.getReader();
