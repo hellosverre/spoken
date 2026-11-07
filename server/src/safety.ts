@@ -120,6 +120,8 @@ export function filterOutgoing(
     if (d.length === 11) return { text: "", blocked: "Stoppet et fødselsnummer som ikke var godkjent." };
   }
   if (/\b(cvv|cvc|pin)\b[^.]*\d{3,4}/i.test(out)) return { text: "", blocked: "Stoppet en sikkerhetskode før den ble sagt." };
+  // Meta talk about the system sounds robotic (call #7): never said on the phone.
+  if (/hvordan systemet (mitt )?fungerer|kan ikke si mer om (hvordan|systemet)|som en språkmodell|jeg er bare et program/i.test(out)) return { text: "", blocked: "Fjernet en setning om systemet." };
   if (out.includes("{{FNR}}")) {
     if (!share.willShare.includes("fnr") || !share.fnr) return { text: FNR_REFUSAL, blocked: "Fødselsnummer ikke godkjent for denne samtalen." };
     out = out.replaceAll("{{FNR}}", share.fnr.split("").join(" "));

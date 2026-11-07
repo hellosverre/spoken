@@ -55,13 +55,27 @@ const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 1200);
 const BACKCHANNEL_EVERY = 3;
 // Don't start talking until the callee has been quiet this long (call #5: half-sentences from
 // turns that were cancelled because the callee was still talking).
-const SPEAK_AFTER_SILENCE_MS = Number(process.env.SPEAK_AFTER_SILENCE_MS ?? 600);
+// Adaptive end of turn: people answer questions fast, but a statement («Flott.») is often
+// followed by more («Hvilket navn …?»), so wait a little longer after statements.
+const SPEAK_AFTER_QUESTION_MS = Number(process.env.SPEAK_AFTER_QUESTION_MS ?? 300);
+const SPEAK_AFTER_SILENCE_MS = Number(process.env.SPEAK_AFTER_SILENCE_MS ?? 550);
 // Speculative LLM on partials: 0 of 62 matched on call #5, so off unless SPECULATE=1.
 const SPECULATE = process.env.SPECULATE === "1";
 // Callee says only «ja»/«mm» while we're mid-turn: listening noise, not a new turn.
 const CALLEE_BACKCHANNEL = /^(ja|jo|mm+|mhm|hm+|okei|ok|ja ja|aha|å|åh|eh|ehm)[.!,]?$/i;
 const GOODBYE = /\b(ha det( bra| godt)?|ha en (fin|god|strålende) (dag|kveld|helg))\b/i;
 // Unsure words worth waiting ~0.7 s for a batch re-transcription: numbers and real content words.
+// Words where a mishearing changes the meaning: numbers, negations, names. Only these make us
+// wait for the batch second opinion; everything else is answered from realtime and corrected silently.
+const WHO_ARE_YOU = /(hvem (er (du|det)|ringer|snakker jeg med)|hvor ringer du fra|hvor (kom|kommer) du fra|hva (er (dette|det her)|slags (samtale|tjeneste))|er du (en )?(robot|maskin|ki|data|menneske|ekte))/i;
+const NUMBER_WORDS = /^(null|en|ett|én|to|tre|fire|fem|seks|sju|syv|åtte|ni|ti|elleve|tolv|tretten|fjorten|femten|seksten|sytten|atten|nitten|tjue\p{L}*|tretti\p{L}*|førti\p{L}*|femti\p{L}*|hundre\p{L}*|tusen|halv|kvart|kroner|kr)$/iu;
+const NEGATIONS = /^(ikke|ikkje|ekte|ingen|inga|ingenting|aldri|nei|nope|verken)$/i;
+export function isContentWord(raw: string, sentenceStart = false): boolean {
+  const w = raw.replace(/[.,!?«»"]/g, "");
+  if (!w) return false;
+  if (/\d/.test(w) || NUMBER_WORDS.test(w) || NEGATIONS.test(w)) return true;
+  return !sentenceStart && /^\p{Lu}/u.test(w) && w.length >= 3; // a name mid-sentence
+}
 const FILLER_WORDS = new Set(["det", "den", "jeg", "du", "vi", "de", "ha", "har", "er", "var", "ja", "nei", "og", "en", "et", "så", "bare", "da", "eh", "ehm", "øh", "mm", "hm", "ikke", "kan", "vil", "må", "med", "på", "til", "som", "nå", "jo", "okei", "ok"]);
 // Start the LLM on a partial that has been stable this long (speculative turn).
 const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
@@ -343,6 +357,17 @@ export class CallSession {
       return;
     }
 
+    // «Hvem er du? / Hvor ringer du fra?»: a fixed, natural answer instead of whatever the model says.
+    if (WHO_ARE_YOU.test(clean)) {
+      const name = this.init.profile.name || "brukeren";
+      const line = `Jeg er en KI-assistent. ${name} ba meg ringe for å ${this.init.plan.goal}.`;
+      if (!this.recentTurns.some((t) => t.has(norm(line)))) {
+        this.debug("who_are_you", { text: clean });
+        this.recentTurns = [...this.recentTurns, new Set([norm(line)])].slice(-3);
+        void this.say(line, "say", true);
+        return;
+      }
+    }
     const ask = detectSecretAsk(clean);
     if (ask === "card") {
       this.note("Nektet å oppgi kortnummer.", "warn");
@@ -385,7 +410,7 @@ export class CallSession {
     if (this.spec) this.dropSpec("unsure words");
     // Wait for the batch second opinion only if an unsure word matters (a number, a name, a noun);
     // on a real line nearly every segment has some unsure filler word (call #4).
-    const matters = unsure.some((w) => /\d/.test(w) || (w.length >= 5 && !FILLER_WORDS.has(w.toLowerCase())));
+    const matters = unsure.some((w) => isContentWord(w));
     if (!gate) return;
     if (!matters) { gate.go(); return; }
     clearTimeout(gate.timer);
@@ -398,6 +423,7 @@ export class CallSession {
     if (!clean || this.ended) return;
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: Date.now() });
     const item = this.segItems.get(id);
+    const before = item?.text.replace(/\s*⟨.*?⟩/g, "") ?? "";
     if (item) {
       const line = this.transcript.find((t) => t.who === "callee" && t.text === item.text.replace(/ ⟨usikre ord:.*⟩$/, ""));
       if (line) line.text = clean;
@@ -407,7 +433,7 @@ export class CallSession {
     }
     this.debug("stt_revised", { id, text: clean });
     // Batch changed the line we're answering and nothing has been said yet: answer the corrected text.
-    if (this.turnRunning && !this.turnSpoke && item && this.history.at(-1) === item && !this.pending) {
+    if (this.turnRunning && !this.turnSpoke && item && this.history.at(-1) === item && !this.pending && this.contentChanged(before, clean)) {
       this.debug("turn_restart_on_revision", { id });
       this.requestTurn();
     }
@@ -831,6 +857,15 @@ export class CallSession {
     this.note(`Beskjed til ${name || "deg"}${had ? " (rettet)" : ""}: «${msg}»`, "info");
   }
 
+  /** Did the correction change a number, a negation or a name? */
+  private contentChanged(a: string, b: string): boolean {
+    const words = (t: string) => new Set(t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean));
+    const A = words(a), B = words(b);
+    const diff = [...A].filter((w) => !B.has(w)).concat([...B].filter((w) => !A.has(w)));
+    const orig = (a + " " + b).split(/\s+/);
+    return diff.some((w) => isContentWord(w) || orig.some((o) => o.replace(/[.,!?]/g, "").toLowerCase() === w && isContentWord(o)));
+  }
+
   private allowedTimes(): Set<string> {
     const set = new Set(timesIn(this.init.plan.goal));
     for (const h of this.history) if (h.role !== "agent") for (const t of timesIn(h.text.replace(/⟨.*?⟩/g, ""))) set.add(t);
@@ -887,10 +922,12 @@ export class CallSession {
   /** Resolves once the callee has been quiet SPEAK_AFTER_SILENCE_MS (max 3 s), or on abort. */
   private async waitForSilence(signal: AbortSignal) {
     const start = Date.now();
+    const last = [...this.history].reverse().find((h) => h.role === "callee")?.text.replace(/\s*⟨.*?⟩/g, "") ?? "";
+    const need = /\?\s*$/.test(last) ? SPEAK_AFTER_QUESTION_MS : SPEAK_AFTER_SILENCE_MS;
     while (!signal.aborted && !this.ended && Date.now() - start < 3000) {
       const quiet = this.init.line.silenceMs?.() ?? Infinity;
-      if (quiet >= SPEAK_AFTER_SILENCE_MS) return;
-      await Bun.sleep(Math.min(60, SPEAK_AFTER_SILENCE_MS - quiet));
+      if (quiet >= need) return;
+      await Bun.sleep(Math.min(40, need - quiet));
     }
   }
 
