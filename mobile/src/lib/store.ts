@@ -80,8 +80,8 @@ export interface State {
   serverCalls: boolean;
   /** Demo passcode for real calls; empty = the server runs calls in mock mode. */
   passcode: string;
-  /** Higher contrast from Profile; null = follow the phone (sysContrast). */
-  highContrast: boolean | null;
+  /** Higher contrast switched on in Profile. It only adds: the phone's setting (sysContrast) always applies. */
+  highContrast: boolean;
   /** The phone's Increase Contrast (iPhone) or High contrast text (Android). */
   sysContrast: boolean;
   /** The phone's Bold Text (iPhone). */
@@ -123,7 +123,7 @@ const INITIAL: State = {
   history: [],
   serverCalls: true,
   passcode: "",
-  highContrast: null,
+  highContrast: false,
   sysContrast: false,
   boldText: false,
   haptics: true,
@@ -264,7 +264,8 @@ export class SpokenStore {
           profile: { ...s.profile, ...p.profile },
           serverCalls: p.serverCalls ?? s.serverCalls,
           passcode: p.passcode ?? s.passcode,
-          highContrast: p.highContrast ?? s.highContrast,
+          // Older saves may hold null (follow the phone), which is now just off.
+          highContrast: p.highContrast === true,
           haptics: p.haptics ?? s.haptics,
         }));
     } catch {}
@@ -362,7 +363,7 @@ export class SpokenStore {
     this.savePrefs();
   }
 
-  /** Profile: higher contrast on or off. Set once, it stops following the phone's setting. */
+  /** Profile: higher contrast on top of the phone's setting (which can't be turned off from here). */
   setHighContrast(highContrast: boolean) {
     this.set({ highContrast });
     this.savePrefs();

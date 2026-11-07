@@ -174,7 +174,7 @@ Checked in the simulator at the largest accessibility size: the tab bar stacks, 
 | Android back | Android | During a call: closes a result, keeps an open approval, otherwise asks "End the call?". It no longer sends the app to the background. |
 | Custom actions | Both | Preset cards offer Edit and Delete from the screen-reader actions menu, so no one has to find edit mode's small badges. |
 | Bold Text | iOS | Every Inter weight steps up one (`bolder` in `src/lib/theme.tsx`, with Inter 700 loaded), since iOS can't embolden a custom font itself. |
-| Increase Contrast / High contrast text | Both | Switches to the `DARK_HC` / `LIGHT_HC` palettes: secondary text near ink, outlines at 3:1 or more. A Higher contrast switch in Profile works on any phone and overrides the system setting once used. |
+| Increase Contrast / High contrast text | Both | Switches to the `DARK_HC` / `LIGHT_HC` palettes: grey text goes nearly to ink (10:1 or more on every surface, against 4.5–6:1 normally), outlines at 3:1 or more. A Higher contrast switch in Profile turns it on for any phone; it adds to the phone's setting and never overrides it (with the phone's setting on, the switch shows on and is locked). |
 | Reduce Motion | Both | The sheet fades instead of sliding, the level meter and typing dots stand still, the flash lights once instead of pulsing, and call text appears whole. |
 | Large Content Viewer | iOS | On the tab bar (above). |
 | Spoken language | iOS | `accessibilityLanguage` is `nb-NO` or `en-US` on text, transcript lines and sheet titles, so Norwegian is read with a Norwegian voice. |

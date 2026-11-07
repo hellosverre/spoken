@@ -129,7 +129,8 @@ const en = {
   langNames: { en: "English", no: "Norsk" },
   iconNames: { phone: "Phone", heart: "Heart", pizza: "Pizza", doctor: "Doctor", scissors: "Scissors", calendar: "Calendar", bag: "Shopping bag", person: "Person" },
   contrastL: "Higher contrast",
-  contrastS: "Darker text and clearer outlines. On when the phone's contrast setting is on.",
+  contrastS: "Darker grey text and clearer outlines.",
+  contrastSys: "On, because contrast is turned up in your phone's settings.",
   hapticsL: "Vibrate when Spoken needs you",
   hapticsS: "A double buzz with each approval, as well as the flash and sound.",
 };
@@ -257,7 +258,8 @@ const no: MobileCopy = {
   langNames: { en: "English", no: "Norsk" },
   iconNames: { phone: "Telefon", heart: "Hjerte", pizza: "Pizza", doctor: "Lege", scissors: "Saks", calendar: "Kalender", bag: "Handlepose", person: "Person" },
   contrastL: "Høyere kontrast",
-  contrastS: "Mørkere tekst og tydeligere kanter. På når kontrastinnstillingen på telefonen er på.",
+  contrastS: "Mørkere grå tekst og tydeligere kanter.",
+  contrastSys: "På, fordi kontrasten er skrudd opp i innstillingene på telefonen.",
   hapticsL: "Vibrer når Spoken trenger deg",
   hapticsS: "En dobbel vibrering ved hvert spørsmål, i tillegg til blink og lyd.",
 };

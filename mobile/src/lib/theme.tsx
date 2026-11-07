@@ -121,13 +121,16 @@ export const LIGHT: Palette = {
   },
 };
 
-/** Higher contrast: secondary text close to ink, outlines at 3:1 or more on every surface. */
+/**
+ * Higher contrast: grey text goes nearly to ink (10:1 or more, against 4.5–6:1 normally), so the
+ * switch is plain to see, and outlines clear 3:1 on every surface.
+ */
 export const DARK_HC: Palette = {
   ...DARK,
   line: "#646C80",
   line2: "#7A8193",
-  muted: "#C0C5D3",
-  dim: "#A3AABB",
+  muted: "#E0E4EC",
+  dim: "#CDD2DC",
   scrim: "rgba(0,0,0,0.75)",
 };
 
@@ -135,8 +138,8 @@ export const LIGHT_HC: Palette = {
   ...LIGHT,
   line: "#80879A",
   line2: "#6B7282",
-  muted: "#3E4553",
-  dim: "#4F5666",
+  muted: "#262B36",
+  dim: "#333946",
   accent: "#3A4BCF",
   accent2: "#2A3AB0",
   scrim: "rgba(10,12,17,0.55)",
@@ -147,8 +150,8 @@ export type Scheme = "dark" | "light";
 const ThemeContext = createContext<{ C: Palette; scheme: Scheme; bold: boolean }>({ C: DARK, scheme: "dark", bold: false });
 
 /**
- * The user's pick in Profile, else the phone's own dark/light setting. Contrast follows the
- * Profile switch, else the phone's setting; Bold Text comes from the phone (iPhone only).
+ * The user's pick in Profile, else the phone's own dark/light setting. Higher contrast is on when
+ * the phone's setting or the Profile switch is; Bold Text comes from the phone (iPhone only).
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const pref = useSpoken((s) => s.themePref);
@@ -157,7 +160,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const bold = useSpoken((s) => s.boldText);
   const system = useColorScheme();
   const scheme: Scheme = pref === "system" ? (system === "light" ? "light" : "dark") : pref;
-  const high = contrastPref ?? sysContrast;
+  const high = contrastPref || sysContrast;
   const value = useMemo(
     () => ({ C: scheme === "light" ? (high ? LIGHT_HC : LIGHT) : high ? DARK_HC : DARK, scheme, bold }),
     [scheme, high, bold],
