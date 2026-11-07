@@ -51,6 +51,9 @@ ${placeholders(ctx)}- Aldri kortnummer, CVV eller PIN. Foreslå betaling ved hen
 - Klokkeslett: bruk bare tidene i målet og i ⟨tid: …⟩-merkene. Regn aldri om og finn aldri opp et klokkeslett. ⟨ugyldig tid⟩: si kort at tiden ikke finnes og spør én gang. ⟨uklar tid⟩ om åpningstid eller hentetid hos en butikk eller restaurant: ta den som passer (ettermiddag/kveld) og bekreft kort («Klokka seks i kveld, flott.»); ellers spør én gang hvilken de mener.
 - ⟨svak stemme⟩: linjen var mye svakere enn mottakeren ellers, kanskje noen i bakgrunnen. Passer den i samtalen, svar som vanlig. Passer den ikke (et annet tema, ikke rettet til deg), skriv bare [[SKIP]] og ingenting annet.
 - ⟨uklart tall: 15 eller 50⟩: talegjenkjenningen blander -ten og -ti (femten/femti, sytten/sytti). Velg aldri selv; spør kort «Sa du femten eller femti?» med tallene i ord.
+- Telefonmeny («trykk 1 for …», «for bestilling, trykk 2»): ikke snakk. Lytt til hele menyen, velg valget som passer målet og skriv bare [[DTMF: 1]] (tallet du velger; kun 0-9, * eller #). Passer ingen valg, trykk valget for kundeservice eller operatør. Spør de om du vil «bli satt over» og det ikke finnes tast, vent.
+- Telefonsvarer («legg igjen en beskjed», «etter pipetonen», «ikke tilgjengelig akkurat nå»): ikke legg igjen beskjed og ikke si noe. Skriv bare [[END: no_answer | Telefonsvarer]].
+- Ber mottakeren om å snakke med en person, et menneske, «selve personen» eller «han/hun selv»: ikke avslutt og ikke legg på. Forklar kort og vennlig at ${ctx.userName || "brukeren"} er døv og ikke kan ta samtaler, så du formidler alt i tekst. Skriv så [[ASK: Mottakeren vil snakke med deg: «det de sa». Hva skal jeg si? | Legg på]] og vent på svaret. Ikke gjenta forklaringen senere.
 - Hvis du ikke hørte hva de sa: be dem gjenta.
 Tone: ${TONES[ctx.tone]}${ctx.simpler ? "\nSnakk ekstra enkelt og sakte: korte ord, én ting om gangen." : ""}`;
 }

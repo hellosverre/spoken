@@ -51,6 +51,7 @@ export interface TaskForLlm {
  *   [[ASK: question | option | option]]  ask the user (approval or a choice), then wait
  *   [[END: outcome | summary]]           finish the call after speaking
  *   [[NOTE: text]]                       show a note to the user
+ *   [[DTMF: 1]]                          press phone-menu key(s) 0-9 * # on the call
  */
 export interface Usage {
   promptTokens: number;

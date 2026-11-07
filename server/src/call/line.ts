@@ -24,6 +24,8 @@ export interface LineEvents {
   calleeNoise?(segmentId: string): void;
   /** Batch STT finished this segment and agreed with realtime (or failed): nothing to change. */
   calleeBatchDone?(segmentId: string): void;
+  /** Answering machine / voicemail picked up (line-level detection). */
+  voicemail?(): void;
   ended(reason: string): void;
   /** Line-level facts for the per-call debug log (latency, webhooks, media format). */
   debug?(kind: string, data: Record<string, unknown>): void;
@@ -43,6 +45,8 @@ export interface CallLine {
   /** typing = soft keyboard while the user decides; music = hold music while the callee holds. */
   startWaitingSound(kind?: "typing" | "music"): void;
   stopWaitingSound(): void;
+  /** Press phone-menu keys (DTMF): digits 0-9 * #. */
+  sendDtmf?(digits: string): Promise<void>;
   hangup(): Promise<void>;
   /** Optional: warm the TTS cache for lines we know we will say (while it rings). */
   prefetch?(texts: string[]): void;

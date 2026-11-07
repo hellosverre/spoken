@@ -173,6 +173,7 @@ export class TelnyxLine implements CallLine {
       time_limit_secs: Math.min(config.maxCallSec, this.o.maxSec ?? config.maxCallSec),
       webhook_url: `${config.publicUrl}/telnyx/webhook`,
       client_state: Buffer.from(this.o.callId).toString("base64"),
+      answering_machine_detection: "detect",
       stream_url: `${wsBase}/telnyx/media?call=${this.o.callId}&t=${this.token}`,
       stream_track: "inbound_track",
       stream_bidirectional_mode: "rtp",
@@ -220,6 +221,10 @@ export class TelnyxLine implements CallLine {
             void this.hangup();
           }
         }, 8000);
+        break;
+      case "call.machine.detection.ended":
+      case "call.machine.premium.detection.ended":
+        if (p.result === "machine") this.ev.voicemail?.();
         break;
       case "streaming.failed": this.ev.status("failed", `Lydstrømmen feilet: ${p.failure_reason ?? "ukjent"}`); break;
       case "call.cost":
@@ -516,6 +521,11 @@ export class TelnyxLine implements CallLine {
     if (!this.waiting) return;
     this.waiting = false;
     if (!this.speakResolve && this.ws) { try { this.ws.send(JSON.stringify({ event: "clear" })); } catch { /* gone */ } }
+  }
+
+  async sendDtmf(digits: string) {
+    if (this.o.offline || !this.controlId || this.hungUp) return;
+    await telnyx(`/calls/${encodeURIComponent(this.controlId)}/actions/send_dtmf`, { digits, duration_millis: 250 });
   }
 
   async hangup() {
