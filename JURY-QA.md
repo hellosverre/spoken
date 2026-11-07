@@ -48,3 +48,11 @@ The feature: Spoken makes the call, and when the user wants to talk themselves, 
 **Answer (EN):** "It's next on the list. We built for Deaf users first, and they can't take over a voice call. For people with phone anxiety, handing over is the natural next step, and the phone line we use already supports joining two calls."
 
 **Svar (NO):** «Det er neste på lista. Vi bygde for døve først, og de kan ikke ta over en talesamtale. For folk med telefonangst er det neste naturlige steg, og telefonlinja vi bruker kan allerede koble sammen to samtaler.»
+
+## How will NAV pay for it?
+
+**EN:** "Deaf users can already apply to Nav for the 2,000 kr app and subscription grant. Next we list Spoken on FinnHjelpemiddel, open a market dialogue with Nav before the next communication tender, and pilot it with the interpreter service for evenings and weekends, when Bildetolk is closed (it runs weekdays 08–20)."
+
+**NO:** «Døve kan allerede søke Nav om 2 000 kr til apper og abonnement. Neste steg er å legge Spoken inn i FinnHjelpemiddel, markedsdialog med Nav før neste anbud, og en pilot med tolketjenesten på kveld og helg, når bildetolken er stengt (den er åpen hverdager 08–20).»
+
+Source: nav.no/apper-og-programvare, nav.no/skjermtolk (checked 2026-11-07).
