@@ -518,7 +518,12 @@ export class VonageLine implements CallLine {
   }
   stopWaitingSound() { this.waiting = false; }
 
-  // DTMF over the media socket isn't part of the Voice API websocket; sendDtmf stays undefined.
+  /** Press phone-menu keys on the live call (PUT /v1/calls/{uuid}/dtmf). */
+  async sendDtmf(digits: string) {
+    if (!/^[0-9*#]+$/.test(digits)) throw new Error(`ugyldige DTMF-tegn: ${digits}`);
+    if (this.hungUp || !this.uuid) return;
+    await vonage("PUT", `/calls/${encodeURIComponent(this.uuid)}/dtmf`, { digits });
+  }
 
   async hangup() {
     clearTimeout(this.ringTimer);
