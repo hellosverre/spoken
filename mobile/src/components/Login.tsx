@@ -1,11 +1,13 @@
 import { useRef, useState } from "react";
 import { KeyboardAvoidingView, ScrollView, Text, View, type TextInputInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { TERMS_VERSION } from "../lib/terms";
 import { em, F, HEADING_SCALE, makeStyles, PAD, small } from "../lib/theme";
 import { useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { Hero } from "./drawings/Hero";
 import { Wordmark } from "./Icon";
+import { TermsAgree, TermsSheet } from "./Terms";
 import { Btn, Field, Rise } from "./ui";
 
 /**
@@ -22,9 +24,17 @@ export function Login() {
   const [pass, setPass] = useState("");
   const [bad, setBad] = useState(false);
   const passRef = useRef<TextInputInstance>(null);
+  // Agreed already (this version): no checkbox, just the link. New or changed terms: a checkbox.
+  const terms = useSpoken((s) => s.terms);
+  const termsOk = terms?.version === TERMS_VERSION;
+  const changed = terms !== null && !termsOk;
+  const [agreed, setAgreed] = useState(false);
+  const [needTerms, setNeedTerms] = useState(false);
+  const [reading, setReading] = useState(false);
 
   const submit = () => {
-    const ok = store.login(user, pass);
+    if (!termsOk && !agreed) return setNeedTerms(true);
+    const ok = store.login(user, pass, agreed);
     setBad(!ok);
     if (ok) setPass("");
   };
@@ -82,10 +92,28 @@ export function Login() {
               {m.loginBad}
             </Text>
           ) : null}
+          {termsOk ? null : (
+            <>
+              {changed ? <Text style={styles.hint}>{m.termsChanged}</Text> : null}
+              <TermsAgree
+                checked={agreed}
+                onChange={(v) => {
+                  setAgreed(v);
+                  setNeedTerms(false);
+                }}
+                onRead={() => setReading(true)}
+                error={needTerms ? m.termsNeeded : undefined}
+              />
+            </>
+          )}
           <Btn block label={m.loginBtn} onPress={submit} disabled={!user || !pass} style={styles.btn} />
           <Text style={styles.hint}>{m.loginHint}</Text>
+          {termsOk ? (
+            <Btn kind="ghost" label={m.termsL} onPress={() => setReading(true)} style={styles.termsBtn} />
+          ) : null}
         </Rise>
       </ScrollView>
+      <TermsSheet open={reading} onClose={() => setReading(false)} />
     </KeyboardAvoidingView>
   );
 }
@@ -100,4 +128,5 @@ const useStyles = makeStyles((C) => ({
   bad: { fontFamily: F.regular, fontSize: 13.5, color: C.danger },
   btn: { marginTop: 4, height: 48 },
   hint: { ...small(13), color: C.dim, textAlign: "center", marginTop: 4 },
+  termsBtn: { alignSelf: "center" },
 }));

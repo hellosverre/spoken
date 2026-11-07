@@ -106,7 +106,7 @@ const en = {
   historyNone: "No calls yet",
   historyH: "Call history",
   historyEmpty: "Calls you make show up here, with the whole conversation.",
-  historyLocal: "Saved only on this phone. The server keeps no transcripts.",
+  historyLocal: "Transcripts are saved on this phone. During testing the server also keeps call logs; see Terms of use.",
   viewTranscript: "View transcript",
   transcriptH: "Transcript",
   close: "Close",
@@ -133,6 +133,14 @@ const en = {
   contrastSys: "On, because contrast is turned up in your phone's settings.",
   hapticsL: "Vibrate when Spoken needs you",
   hapticsS: "A double buzz with each approval, as well as the flash and sound.",
+  // Terms of use
+  termsL: "Terms of use",
+  termsS: "What Spoken does and what happens to your data",
+  termsAgree: "I agree to the Terms of use",
+  termsRead: "Read the terms of use",
+  termsNeeded: "Tick the box to agree to the terms first.",
+  termsAccepted: "Agreed {date}",
+  termsChanged: "The terms have changed. Read them and agree again to log in.",
 };
 
 export type MobileCopy = typeof en;
@@ -236,7 +244,7 @@ const no: MobileCopy = {
   historyNone: "Ingen samtaler ennå",
   historyH: "Samtalehistorikk",
   historyEmpty: "Samtalene du tar vises her, med hele samtalen.",
-  historyLocal: "Lagret bare på denne telefonen. Serveren lagrer ingen samtaler.",
+  historyLocal: "Samtalene lagres på denne telefonen. Mens Spoken testes, lagrer serveren også samtalelogger; se Vilkår for bruk.",
   viewTranscript: "Se samtalen",
   transcriptH: "Samtalen",
   close: "Lukk",
@@ -262,6 +270,13 @@ const no: MobileCopy = {
   contrastSys: "På, fordi kontrasten er skrudd opp i innstillingene på telefonen.",
   hapticsL: "Vibrer når Spoken trenger deg",
   hapticsS: "En dobbel vibrering ved hvert spørsmål, i tillegg til blink og lyd.",
+  termsL: "Vilkår for bruk",
+  termsS: "Hva Spoken gjør og hva som skjer med dataene dine",
+  termsAgree: "Jeg godtar vilkårene for bruk",
+  termsRead: "Les vilkårene for bruk",
+  termsNeeded: "Kryss av for å godta vilkårene først.",
+  termsAccepted: "Godtatt {date}",
+  termsChanged: "Vilkårene er endret. Les dem og godta på nytt for å logge inn.",
 };
 
 export const MOBILE_COPY: Record<Lang, MobileCopy> = { en, no };

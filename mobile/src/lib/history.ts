@@ -60,3 +60,13 @@ export function formatWhen(iso: string, lang: "en" | "no"): string {
     return `${d.getDate()}.${d.getMonth() + 1}. ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 }
+
+/** "7 November 2026" / "7. november 2026", for when the terms were agreed. */
+export function formatDay(iso: string, lang: "en" | "no"): string {
+  const d = new Date(iso);
+  try {
+    return new Intl.DateTimeFormat(lang === "no" ? "nb-NO" : "en-GB", { day: "numeric", month: "long", year: "numeric" }).format(d);
+  } catch {
+    return `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`;
+  }
+}

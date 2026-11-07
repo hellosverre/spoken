@@ -15,6 +15,7 @@ On top of the web design, mobile adds:
 - **A bigger tab bar**: full width, 56 pt tabs, every label shown.
 - **Colour-blind safe colours**: done is teal and not done is orange (not green against red), delete is a vermilion, and the preset tints are picked to stay apart under protanopia, deuteranopia and tritanopia, checked by simulation (Machado 2009) along with 4.5:1 text contrast in both themes. Status always has an icon and words as well, so nothing depends on colour alone. Not yet checked with colour-blind users. See the note at the top of `src/lib/theme.tsx`.
 - **Follows the phone's accessibility settings**: text size (layouts stack, sheets scroll), Bold Text, Increase Contrast / High contrast text (also a Higher contrast switch in Profile), Reduce Motion, and VoiceOver / TalkBack announcements for each call line. Checked in the iOS simulator only; see `ACCESSIBILITY-AUDIT.md` for what is tested and what is open.
+- **Terms of use** (`src/lib/terms.ts`, English and Norwegian): agreed with a checkbox at login, readable at any time from Profile. Bumping `TERMS_VERSION` asks everyone again. It's a plain-language draft for the test version, not reviewed by a lawyer, and its data section must stay true to the server's logging settings.
 - **Plainer labels**: no "Live" status pill or blinking dots in the call, and small labels are sentence-case Inter instead of the web's uppercase mono ("Spoken", "You", not "SPOKEN · AI", "YOU → SPOKEN"). Mobile-only names live in `copy-mobile.ts`.
 
 ```bash

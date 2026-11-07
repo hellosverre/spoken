@@ -6,6 +6,7 @@ import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { FeedbackSheet } from "./Feedback";
 import { historyCount, HistorySheet } from "./History";
+import { TermsSheet } from "./Terms";
 import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
 import { List, Row, Seg } from "./List";
@@ -29,6 +30,7 @@ export function Profile() {
   const calls = useSpoken((s) => s.history.length);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [code, setCode] = useState(savedCode);
   useEffect(() => setCode(savedCode), [savedCode]);
 
@@ -232,11 +234,13 @@ export function Profile() {
         />
         <Row icon="replay" title={t.replay} sub={t.replayS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => store.replay()} />
         <Row icon="bubble" title={m.fbRowT} sub={m.fbRowS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setFeedbackOpen(true)} />
+        <Row icon="doc" title={m.termsL} sub={m.termsS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setTermsOpen(true)} />
         <Row title={m.logout} icon="logout" tone="danger" onPress={() => store.logout()} />
       </List>
 
       <Text style={styles.about}>{t.foot}</Text>
       {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
+      <TermsSheet open={termsOpen} onClose={() => setTermsOpen(false)} />
     </ScrollView>
   );
 }

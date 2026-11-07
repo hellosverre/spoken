@@ -8,6 +8,7 @@ import { HISTORY_MAX, historyRepo, type CallRecord } from "./history";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
+import { TERMS_VERSION } from "./terms";
 
 export type Screen = "intro" | "login" | "home" | "call";
 export type ThemePref = "system" | "dark" | "light";
@@ -88,6 +89,8 @@ export interface State {
   boldText: boolean;
   /** Buzz when Spoken needs you. */
   haptics: boolean;
+  /** The terms of use this phone agreed to, and when. Login asks again when TERMS_VERSION changes. */
+  terms: { version: string; at: string } | null;
 }
 
 type Pending = { type: "repeat" } | { type: "thanks" } | { type: "text"; text: string };
@@ -127,6 +130,7 @@ const INITIAL: State = {
   sysContrast: false,
   boldText: false,
   haptics: true,
+  terms: null,
 };
 
 const HANG = Symbol("hang");
@@ -136,7 +140,7 @@ const PREFS_KEY = "spoken-prefs";
 /** This phone's id for the server (profile, contacts, call history). Made once, as on the web. */
 const DEVICE_KEY = "spoken-device";
 const DEMO_LOGIN = { user: "demo", pass: "demo" };
-type SavedPrefs = Pick<State, "themePref" | "profile" | "serverCalls" | "passcode" | "highContrast" | "haptics">;
+type SavedPrefs = Pick<State, "themePref" | "profile" | "serverCalls" | "passcode" | "highContrast" | "haptics" | "terms">;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Wait two frames so a reset state is drawn before the next one is set. */
@@ -267,6 +271,7 @@ export class SpokenStore {
           // Older saves may hold null (follow the phone), which is now just off.
           highContrast: p.highContrast === true,
           haptics: p.haptics ?? s.haptics,
+          terms: p.terms ?? s.terms,
         }));
     } catch {}
     this.syncRealCalls();
@@ -344,9 +349,22 @@ export class SpokenStore {
     else this.set({ screen: "login" });
   }
 
-  /** Placeholder sign-in: only demo / demo works until real accounts are added. */
-  login(user: string, pass: string): boolean {
+  /** True when this phone has agreed to the current terms of use. */
+  termsOk(): boolean {
+    return this.state.terms?.version === TERMS_VERSION;
+  }
+
+  /**
+   * Placeholder sign-in: only demo / demo works until real accounts are added.
+   * `agreed` is the terms checkbox; without the current terms agreed there is no way in.
+   */
+  login(user: string, pass: string, agreed = false): boolean {
     if (user.trim().toLowerCase() !== DEMO_LOGIN.user || pass !== DEMO_LOGIN.pass) return false;
+    if (!this.termsOk()) {
+      if (!agreed) return false;
+      this.set({ terms: { version: TERMS_VERSION, at: new Date().toISOString() } });
+      this.savePrefs();
+    }
     this.set({ authed: true });
     this.goHome();
     return true;
@@ -465,9 +483,9 @@ export class SpokenStore {
   }
 
   private savePrefs() {
-    const { themePref, profile, serverCalls, passcode, highContrast, haptics } = this.state;
+    const { themePref, profile, serverCalls, passcode, highContrast, haptics, terms } = this.state;
     this.syncRealCalls();
-    const saved: SavedPrefs = { themePref, profile, serverCalls, passcode, highContrast, haptics };
+    const saved: SavedPrefs = { themePref, profile, serverCalls, passcode, highContrast, haptics, terms };
     AsyncStorage.setItem(PREFS_KEY, JSON.stringify(saved)).catch(() => {});
   }
 
