@@ -49,8 +49,21 @@ export function detectLang(text: string): Detection {
  * segment of ≥6 words. A segment in the current language, or an unclear one with enough words to
  * judge, resets the streak; tiny/unclear segments («Ja.», a brand name) leave it alone.
  */
+const ISO3: Record<string, string> = { nor: "no", nob: "no", nno: "no", nb: "no", nn: "no", eng: "en", swe: "sv", deu: "de", ger: "de", fra: "fr", fre: "fr", spa: "es", ita: "it", nld: "nl", dut: "nl", pol: "pl", por: "pt" };
+
+/** Scribe's language code («no», «nob», «en-US») as our two-letter code. */
+export function normalizeLangCode(code: string): string {
+  const c = code.toLowerCase().split(/[-_]/)[0]!;
+  return ISO3[c] ?? c;
+}
+
+const norm = (t: string) => tokens(t).join(" ");
+
 export class LangSwitcher {
   private pending: string | null = null;
+  /** Segment already judged, so the second signal (text vs. Scribe detection) for it isn't counted twice. */
+  private handled = "";
+  private handledSure = false;
 
   constructor(private current: Lang, private onSwitch: (lang: Lang, from: Lang) => void, private longWords = 6) {}
 
@@ -59,12 +72,36 @@ export class LangSwitcher {
   /** The language was changed from outside (user instruction). */
   set(lang: Lang) { this.current = lang; this.pending = null; }
 
+  /**
+   * Scribe's audio-based language detection for a committed segment: the primary signal. It arrives just
+   * after the text, so the text heuristic (feed) has usually run: only count this when that one was unsure.
+   */
+  feedDetected(code: string, text: string): Lang | undefined {
+    const lang = normalizeLangCode(code);
+    const n = norm(text);
+    if (!lang || n.split(" ").length < 2) return undefined; // «Ja.»: too little to trust either way
+    if (this.handled === n && this.handledSure) return undefined;
+    this.handled = n;
+    this.handledSure = true;
+    return this.judge(lang, n.split(" ").length);
+  }
+
+  /** Fallback: stopword vote on the text. */
   feed(text: string): Lang | undefined {
     const d = detectLang(text);
+    const n = norm(text);
+    if (this.handled === n && this.handledSure) return undefined; // detection already decided this one
+    this.handled = n;
+    this.handledSure = d.lang !== null;
     if (d.lang === null) {
       if (d.words >= 4) this.pending = null;
       return undefined;
     }
+    return this.judge(d.lang, d.words);
+  }
+
+  private judge(lang: string, words: number): Lang | undefined {
+    const d = { lang, words };
     if (d.lang === this.current) { this.pending = null; return undefined; }
     if (d.words >= this.longWords || this.pending === d.lang) {
       const from = this.current;
