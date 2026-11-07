@@ -1,5 +1,6 @@
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
+import { isLive, planRealCall, realEnabled, type LiveIO } from "./real-call";
 
 export type Screen = "intro" | "home" | "call";
 export type Tab = "chat" | "demo" | "settings";
@@ -113,6 +114,10 @@ export class SpokenStore {
   private flushing = false;
   private lastThem = "";
   private askResolve: ((v: string) => void) | null = null;
+  /** Real calls: the chat is waiting for an answer to a server question. */
+  private chatAnswer: ((text: string) => void) | null = null;
+  /** Real calls: where mid-call messages and hang-up go. */
+  private realSink: { instruction(text: string): void; hangup(): void } | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   subscribe = (fn: () => void) => {
@@ -245,6 +250,7 @@ export class SpokenStore {
   /* ---------- home ---------- */
 
   goHome() {
+    this.chatAnswer = null;
     this.introId++;
     this.homeId++;
     this.callId++;
@@ -269,12 +275,59 @@ export class SpokenStore {
 
   submitDraft() {
     this.demo = false;
+    if (this.chatAnswer) {
+      const text = this.state.draft.trim();
+      if (!text) return;
+      const answer = this.chatAnswer;
+      this.chatAnswer = null;
+      this.set({ draft: "" });
+      this.pushThread({ id: this.uid++, kind: "me", text });
+      answer(text);
+      return;
+    }
     this.sendRequest(this.state.draft);
   }
 
   preset(key: ScenarioKey) {
     this.demo = false;
-    this.sendRequest(SCENARIOS[key][this.state.lang].request);
+    this.sendRequest(SCENARIOS[key][this.state.lang].request, true);
+  }
+
+  /** Real call: the server asks its clarify questions in the chat, then its plan fills the card. */
+  private async sendRealRequest(text: string) {
+    const id = ++this.homeId;
+    const stop = () => id !== this.homeId;
+    this.chatAnswer = null;
+    this.set({ threaded: true, thread: [{ id: this.uid++, kind: "me", text }], draft: "" });
+    const dots = this.uid++;
+    this.pushThread({ id: dots, kind: "dots" });
+    const dropDots = () => this.set((s) => ({ thread: s.thread.filter((i) => i.id !== dots) }));
+    const bot = async (line: string) => {
+      if (stop()) return;
+      dropDots();
+      const b = this.uid++;
+      this.pushThread({ id: b, kind: "bot", text: "" });
+      await this.typeInto((t) => this.patchThread(b, { text: t }), line, 10, stop);
+    };
+    try {
+      const key = await planRealCall(text, this.state.lang, {
+        bot,
+        askUser: async (q) => {
+          await bot(q);
+          this.set((s) => ({ focusTick: s.focusTick + 1 }));
+          return new Promise<string>((resolve) => { this.chatAnswer = resolve; });
+        },
+      });
+      if (stop()) return;
+      dropDots();
+      if (!key) return;
+      await bot(this.t.planIntro);
+      if (stop()) return;
+      this.set({ scenario: key });
+      this.pushThread({ id: this.uid++, kind: "plan", scenario: key, request: text, pressed: false });
+    } catch (e) {
+      if (!stop()) await bot(e instanceof Error ? e.message : String(e));
+    }
   }
 
   editPlan(text: string) {
@@ -292,9 +345,10 @@ export class SpokenStore {
     }));
   }
 
-  async sendRequest(raw: string) {
+  async sendRequest(raw: string, scripted = false) {
     const text = raw.trim();
     if (!text) return;
+    if (!scripted && !this.demo && realEnabled()) return this.sendRealRequest(text);
     const id = ++this.homeId;
     const stop = () => id !== this.homeId;
     const scenario = detect(text);
@@ -378,13 +432,18 @@ export class SpokenStore {
       pill: "ringing", speaker: null, speakerNote: "ringing", screen: "call",
     });
     this.sys(`${this.t.calling} ${L.contact} · ${sc.number}`);
-    await sleep(2300);
-    if (id !== this.callId) return;
-    if (this.hangup) return this.finish(id, { hung: true });
-
-    this.set({ pill: "live", speakerNote: "listening" });
-    this.startTimer();
-    this.sys(this.t.connected);
+    const live = isLive(this.state.scenario);
+    const connected = () => {
+      this.set({ pill: "live", speakerNote: "listening" });
+      this.startTimer();
+      this.sys(this.t.connected);
+    };
+    if (!live) {
+      await sleep(2300);
+      if (id !== this.callId) return;
+      if (this.hangup) return this.finish(id, { hung: true });
+      connected();
+    }
 
     const guard = () => {
       if (id !== this.callId) throw ABORT;
@@ -464,9 +523,22 @@ export class SpokenStore {
 
     let outcome: Outcome;
     try {
-      outcome = await sc.run(lang, { say, ask });
+      const io: LiveIO = {
+        say,
+        ask,
+        note: (text) => id === this.callId && this.sys(text),
+        connected: () => id === this.callId && connected(),
+        attach: (sink) => { this.realSink = sink; },
+      };
+      outcome = await sc.run(lang, io);
     } catch (e) {
+      this.realSink = null;
       if (e === ABORT) return;
+      if (live && e !== HANG) {
+        // Server or network problem on a real call: say so, don't fake a line.
+        this.sys(e instanceof Error ? e.message : String(e));
+        return this.finish(id, { ok: false, title: e instanceof Error ? e.message : "Samtalen feilet", rows: [] });
+      }
       if (e !== HANG) throw e;
       try {
         await say("ai", this.t.hang, true);
@@ -504,6 +576,13 @@ export class SpokenStore {
   }
 
   endCall() {
+    if (this.realSink) {
+      // The server says goodbye and hangs up; its result ends the call screen.
+      this.realSink.hangup();
+      this.demo = false;
+      this.askResolve?.("hang");
+      return;
+    }
     this.hangup = true;
     this.demo = false;
     this.askResolve?.("hang");
@@ -518,11 +597,15 @@ export class SpokenStore {
     const text = raw.trim();
     if (!text) return;
     this.noteYou(text);
+    if (this.realSink) return this.realSink.instruction(text);
     this.pending.push({ type: "text", text });
   }
 
   chip(type: Chip) {
     this.noteYou(type === "repeat" ? this.t.chipRepeat : this.t.chipThanks);
+    if (this.realSink) {
+      return this.realSink.instruction(type === "repeat" ? "Be dem gjenta det de sa." : "Takk dem.");
+    }
     this.pending.push({ type });
   }
 }

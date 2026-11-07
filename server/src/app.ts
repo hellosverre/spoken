@@ -1,6 +1,7 @@
 // REST + live WebSocket per CONTRACT.md, plus the Telnyx webhook and media socket.
 
 import type { Server, ServerWebSocket } from "bun";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
 import { MockLine } from "./call/mock-line.ts";
@@ -281,7 +282,8 @@ export function createApp(llm: LlmProvider = createLlm()) {
   };
 }
 
-const WEB_DIST = resolve(process.env.WEB_DIST ?? join(import.meta.dir, "../../web/dist"));
+// Next.js static export (web/out, `SPOKEN_EXPORT=1 next build`); web/dist for the older Vite build.
+const WEB_DIST = resolve(process.env.WEB_DIST ?? (existsSync(join(import.meta.dir, "../../web/out")) ? join(import.meta.dir, "../../web/out") : join(import.meta.dir, "../../web/dist")));
 
 /** Static file from web/dist; unknown paths get index.html (hash routes, deep links). */
 async function webFile(path: string): Promise<Response | undefined> {
@@ -291,7 +293,7 @@ async function webFile(path: string): Promise<Response | undefined> {
   if (target.startsWith(WEB_DIST + "/") && !target.endsWith("/")) {
     const f = Bun.file(target);
     if (await f.exists()) {
-      const immutable = target.includes("/assets/");
+      const immutable = target.includes("/assets/") || target.includes("/_next/static/");
       return new Response(f, { headers: { "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache" } });
     }
   }

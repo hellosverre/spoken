@@ -39,21 +39,28 @@ BAS_SECRET_TOKEN=… /home/sverre/Projects/bas/ops/bas-secret run -- bun scripts
 
 ## Web app on the real server
 
-The Bun server serves the built web app (`web/dist`) at `/`, so the page, REST and the live
-socket share one origin (`https://spoken-api.hellosverre.com/`). Build it with the same-origin flag:
+Sverre's Next.js app (`web/`) is exported statically and served by this server at `/`, so the page,
+REST and the live socket share one origin (`https://spoken-api.hellosverre.com/`):
 
 ```bash
-cd ../web && VITE_API_URL=/ bun run build
+cd ../web && SPOKEN_EXPORT=1 NEXT_PUBLIC_SPOKEN_API=/ npx next build
 ```
 
-Browser end-to-end test (real web build, server in mock mode, a human taps JA):
+The seam is `web/src/lib/real-call.ts`: a typed chat request goes to `POST /api/tasks`, the
+server's questions appear as chat messages (answer by number or text), the plan fills the plan
+card through a runtime `real` scenario, and the live call drives the same `CallIO` as the
+scripted demos (agent/callee lines → `say`, `approval_request` → `ask`, chat during the call →
+`instruction`, end button → `hangup`, `result` → the result sheet). Presets, the D key and
+`?scripted` keep the scripted demos.
+
+Browser end-to-end test (Next export, server in mock mode, a human taps approve, then the D demo):
 
 ```bash
-node e2e/web-real.mjs
+node e2e/next-real.mjs
 ```
 
 `DIRECTORY_OVERRIDE=+47…` sends directory hits («Domino's Storo») to a test number on real calls.
-The server never answers an approval card by itself; only the hold flow (30 s / 2 min) acts while waiting.
+The server never answers an approval by itself; only the hold flow (30 s / 2 min) acts while waiting.
 
 ## Pipeline
 
