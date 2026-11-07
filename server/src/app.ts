@@ -228,11 +228,16 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     const num = checkNumber(t.plan.callee.phone);
     if (!num.ok) return err(403, num.reason);
     // No (or a wrong) demo passcode → this call runs in mock mode: scripted callee, mock agent.
+    // Wrong passcodes are limited per client IP so the code can't be guessed.
+    const passKey = `pass:${userKey(req, server)}`;
+    if (wrongPasscodes(passKey) >= 5) return err(429, "For mange feil koder. Prøv igjen om en time.");
     const pass = passcodeCheck(req.headers.get("x-spoken-passcode"));
+    if (pass === "wrong") noteWrongPasscode(passKey);
     const realProvider = config.callProvider === "telnyx" || config.callProvider === "46elks" || config.callProvider === "vonage";
     const real = realProvider && pass === "ok";
     if (realProvider && !real) console.log(`[call] passcode ${pass}: mock mode`);
-    if (real && !config.callAllowlist.includes(num.e164)) {
+    // CALL_ALLOWLIST=* lets passcode holders call any number (emergency numbers stay blocked in checkNumber).
+    if (real && !config.callAllowlist.includes("*") && !config.callAllowlist.includes(num.e164)) {
       return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
     }
     if (real && config.callProvider === "telnyx") {
@@ -498,6 +503,16 @@ async function webFile(path: string): Promise<Response | undefined> {
 }
 
 /** "ok" | "missing" | "wrong" | "off" (no DEMO_PASSCODE configured → every call is real). */
+const passFails = new Map<string, number[]>();
+function wrongPasscodes(key: string): number {
+  const recent = (passFails.get(key) ?? []).filter((t) => Date.now() - t < 60 * 60_000);
+  passFails.set(key, recent);
+  return recent.length;
+}
+function noteWrongPasscode(key: string) {
+  passFails.set(key, [...(passFails.get(key) ?? []), Date.now()]);
+}
+
 function passcodeCheck(given: string | null): "ok" | "missing" | "wrong" {
   const want = config.demoPasscode;
   if (!want) return "ok";

@@ -27,3 +27,4 @@ test("rotating X-Spoken-User does not dodge the limit", async () => {
   for (let i = 0; i < 30; i++) await send(`u${i}`);
   expect((await send("fresh")).status).toBe(429);
 });
+
