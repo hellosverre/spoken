@@ -101,7 +101,7 @@ const BUILT_INS: Record<BuiltInKey, Record<Lang, PresetContent>> = {
       title: "Call mom",
       icon: "heart",
       contactName: "Mom",
-      contactPhone: "+47 913 40 552",
+      contactPhone: "",
       template: "Call mom and tell her {Message}",
       fields: [f("message", "Message", "I'll be late for dinner")],
     },
@@ -109,7 +109,7 @@ const BUILT_INS: Record<BuiltInKey, Record<Lang, PresetContent>> = {
       title: "Ring mamma",
       icon: "heart",
       contactName: "Mamma",
-      contactPhone: "+47 913 40 552",
+      contactPhone: "",
       template: "Ring mamma og si at {Beskjed}",
       fields: [f("message", "Beskjed", "jeg kommer sent til middag")],
     },
@@ -164,11 +164,13 @@ export function fillTemplate(p: PresetContent, values: Record<string, string> = 
 }
 
 export function toRequest(p: Preset, values: Record<string, string>): PresetRequest {
-  return {
-    presetId: p.id,
-    text: fillTemplate(p, values),
-    contact: p.contactName.trim() ? { name: p.contactName.trim(), phone: p.contactPhone.trim() } : null,
-  };
+  const name = p.contactName.trim();
+  const phone = p.contactPhone.trim();
+  let text = fillTemplate(p, values);
+  // Make sure the text names who to call: the agent needs it, and with no number the server looks it up.
+  if (name && text && !text.toLowerCase().includes(name.toLowerCase())) text = `${text} (${name})`;
+  // A number with no name still has to reach the call.
+  return { presetId: p.id, text, contact: name || phone ? { name, phone } : null };
 }
 
 /** Where presets are kept. Today the browser; later the server. */

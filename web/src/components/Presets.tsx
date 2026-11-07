@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BUILT_IN_KEYS, resolvePreset, type Preset } from "@/lib/presets";
+import { BUILT_IN_KEYS, resolvePreset, toRequest, type Preset } from "@/lib/presets";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { HeroDuet, PresetArt, hasPresetArt, tintOf } from "./Art";
 import { Icon } from "./Icon";
@@ -37,7 +37,7 @@ export function Presets() {
   const open = (p: Preset) => {
     if (editing) return setEditorFor(p);
     // Nothing to fill in: send it straight away.
-    if (!p.fields.length) return store.runPreset({ presetId: p.id, text: p.template, contact: null });
+    if (!p.fields.length) return store.runPreset(toRequest(p, {}));
     setUsing(p);
   };
 

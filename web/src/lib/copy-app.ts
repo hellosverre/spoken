@@ -51,7 +51,7 @@ const en = {
   showMore: "Show more",
   showLess: "Show less",
   tryOne: "Try one",
-  noContact: "Spoken looks up the number",
+  noContact: "No number saved yet",
   useSend: "Send to Spoken",
   usePreview: "Spoken will be asked to",
   editPreset: "Edit preset",
@@ -65,7 +65,7 @@ const en = {
   contactName: "Name",
   contactNamePh: "Mom",
   contactPhone: "Phone number",
-  contactPhoneHint: "Leave empty and Spoken looks it up",
+  contactPhoneHint: "Spoken calls this number. Without one, it only knows a few demo places, and those aren't real numbers",
   fieldsL: "Fields",
   fieldsS: "Things you fill in each time you use it.",
   fieldLabel: "Field name",
@@ -82,6 +82,7 @@ const en = {
   deleteQ: "Delete this preset?",
   deleteBody: "You can't undo this.",
   needName: "Give it a name and say what Spoken should do.",
+  scriptedNote: "Scripted demo: no phone is ringing.",
 };
 
 export type AppCopy = typeof en;
@@ -132,7 +133,7 @@ const no: AppCopy = {
   showMore: "Vis flere",
   showLess: "Vis færre",
   tryOne: "Prøv en",
-  noContact: "Spoken slår opp nummeret",
+  noContact: "Ingen nummer lagret ennå",
   useSend: "Send til Spoken",
   usePreview: "Spoken blir bedt om å",
   editPreset: "Rediger snarvei",
@@ -146,7 +147,7 @@ const no: AppCopy = {
   contactName: "Navn",
   contactNamePh: "Mamma",
   contactPhone: "Telefonnummer",
-  contactPhoneHint: "La det stå tomt, så slår Spoken det opp",
+  contactPhoneHint: "Spoken ringer dette nummeret. Uten nummer kjenner den bare noen få demosteder, og de numrene er ikke ekte",
   fieldsL: "Felt",
   fieldsS: "Det du fyller inn hver gang du bruker den.",
   fieldLabel: "Feltnavn",
@@ -163,6 +164,7 @@ const no: AppCopy = {
   deleteQ: "Slette denne snarveien?",
   deleteBody: "Dette kan ikke angres.",
   needName: "Gi den et navn og skriv hva Spoken skal gjøre.",
+  scriptedNote: "Innspilt demo: ingen telefon ringer.",
 };
 
 export const APP_COPY: Record<Lang, AppCopy> = { en, no };
