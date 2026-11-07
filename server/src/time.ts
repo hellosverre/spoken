@@ -103,3 +103,17 @@ export function timeHint(text: string): string {
 export function timesIn(text: string): string[] {
   return parseTimes(text).flatMap((p) => (p.kind === "time" ? [p.hhmm] : p.kind === "ambiguous" ? p.candidates : []));
 }
+
+/** The sentence with its times taken out: «… til henting halv sju.» → «… til henting.»
+ *  Only times that end the sentence; "" when a time sits mid-sentence (cutting it would garble it). */
+export function withoutTimes(text: string): string {
+  let t = text;
+  for (const p of parseTimes(text)) {
+    const re = new RegExp(p.raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?=\\s*([.!?]|$))", "i");
+    if (!re.test(t)) return "";
+    t = t.replace(re, "");
+  }
+  return t
+    .replace(/(?:\s+(?:til|kl\.?|klokka|klokken|rundt|ca\.?|ved|på))*\s*([.,!?]|$)/gi, "$1")
+    .replace(/\s{2,}/g, " ").replace(/\s+([.,!?])/g, "$1").trim();
+}

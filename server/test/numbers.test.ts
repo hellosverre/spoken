@@ -98,3 +98,15 @@ test("no «atten eller åtti?» after «klokka»", () => {
   expect(numberHint([{ text: "klokka", confidence: 0.9 }, { text: "atten.", confidence: 0.4 }])).toBe("");
   expect(numberHint([{ text: "kl.", confidence: 0.9 }, { text: "17", confidence: 0.4 }])).toBe("");
 });
+
+test("a made-up time is cut out, not left as silence (c_73b6b5529e9b)", async () => {
+  const { withoutTimes } = await import("../src/time.ts");
+  expect(withoutTimes("Jeg vil gjerne bestille en stor pepperoni til henting halv sju.")).toBe("Jeg vil gjerne bestille en stor pepperoni til henting.");
+  expect(withoutTimes("Den er klar til kl. 18:30, flott.")).toBe("");
+  expect(withoutTimes("Kan jeg hente klokka seks?")).toBe("Kan jeg hente?");
+});
+
+test("a time mid-sentence is not cut out", async () => {
+  const { withoutTimes } = await import("../src/time.ts");
+  expect(withoutTimes("Da mener du klokka 00:30, altså halv ett på natta.")).toBe("");
+});

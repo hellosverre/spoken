@@ -13,7 +13,7 @@ import {
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLine, LineMetric } from "./line.ts";
-import { timeHint, timesIn } from "../time.ts";
+import { timeHint, timesIn, withoutTimes } from "../time.ts";
 import { numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
 import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
@@ -820,12 +820,18 @@ export class CallSession {
         // Times the agent says must come from the plan, the callee or the user, never invented.
         const bad = timesIn(s.text).filter((t) => !this.allowedTimes().has(t));
         if (bad.length) {
-          this.debug("time_blocked", { text: s.text, bad });
-          stop = true;
-          spokeAnything = true;
-          const q = "Hvilket klokkeslett mener du?";
-          if (!this.recentTurns.some((r) => r.has(norm(q)))) { said.push(q); await this.say(q, "say", false, abort.signal, turnLine); }
-          return;
+          // c_73b6b5529e9b: the made-up time was blocked every turn and the agent went silent.
+          // Say the sentence without the time instead.
+          const rest = withoutTimes(s.text);
+          this.debug("time_blocked", { text: s.text, bad, rest });
+          if (rest.split(/\s+/).length >= 3) s = { ...s, text: rest };
+          else {
+            stop = true;
+            spokeAnything = true;
+            const q = "Hvilket klokkeslett mener du?";
+            if (!this.recentTurns.some((r) => r.has(norm(q)))) { said.push(q); await this.say(q, "say", false, abort.signal, turnLine); }
+            return;
+          }
         }
         // Asking the shop about the goal again after 2 tries: ask the user instead (call #5 looped 5.5 min).
         if (this.isGoalAsk(s.text)) {
