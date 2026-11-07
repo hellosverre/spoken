@@ -3,9 +3,11 @@
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { SCENARIOS } from "@/lib/scenarios";
 import type { Tab, ThreadItem } from "@/lib/store";
-import { cx, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { Composer } from "./Composer";
 import { Icon, Wordmark, type IconName } from "./Icon";
+import { Presets } from "./Presets";
+import { Profile } from "./Profile";
 
 export function Home({ on }: { on: boolean }) {
   const store = useStore();
@@ -17,14 +19,20 @@ export function Home({ on }: { on: boolean }) {
     <section className={cx("screen", on && "on", threaded && "threaded")} id="home" aria-label="Home">
       <header className="topbar pad">
         <Wordmark />
-        <button className="iconbtn newchat" aria-label={t.newChat} onClick={() => store.newChat()}>
-          <Icon name="plus" />
-        </button>
+        {threaded && tab === "chat" && (
+          <button className="iconbtn newchat" aria-label={t.newChat} onClick={() => store.newChat()}>
+            <Icon name="plus" />
+          </button>
+        )}
       </header>
       <div className="panes">
+        <Pane id="home" active={tab === "home"}>
+          <Presets />
+        </Pane>
         <ChatPane active={tab === "chat"} />
-        <DemoPane active={tab === "demo"} />
-        <SettingsPane active={tab === "settings"} />
+        <Pane id="settings" active={tab === "settings"}>
+          <Profile />
+        </Pane>
       </div>
       <TabBar tab={tab} />
     </section>
@@ -122,6 +130,7 @@ function ThreadEntry({ item }: { item: ThreadItem }) {
 function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
   const store = useStore();
   const t = useCopy();
+  const m = useAppCopy();
   const lang = useSpoken((s) => s.lang);
   const sc = SCENARIOS[item.scenario];
   const L = sc[lang];
@@ -152,108 +161,21 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
         <div className="quote">“{L.opening}”</div>
       </div>
       <div className="acts">
-        <button className={cx("btn primary", item.pressed && "pressed")} onClick={() => store.startCall()}>
+        <button className={cx("btn primary block tall", item.pressed && "pressed")} onClick={() => store.startCall()}>
           <Icon name="phone" />
           {t.start}
         </button>
-        <button className="btn ghost" onClick={() => store.editPlan(item.request)}>
-          {t.edit}
-        </button>
+        <div className="acts-row">
+          <button className="btn ghost" onClick={() => store.editPlan(item.request)}>
+            <Icon name="pencil" />
+            {t.edit}
+          </button>
+          <button className="btn ghost" onClick={() => store.newChat()}>
+            {m.cancel}
+          </button>
+        </div>
       </div>
     </div>
-  );
-}
-
-/* ---------- demo ---------- */
-
-function DemoPane({ active }: { active: boolean }) {
-  const store = useStore();
-  const t = useCopy();
-  const rows = [
-    { key: "pizza", title: t.sugPizza, sub: t.sugPizzaSub },
-    { key: "doctor", title: t.sugDoctor, sub: t.sugDoctorSub },
-  ] as const;
-
-  return (
-    <Pane id="demo" active={active}>
-      <div className="scroll pad">
-        <div className="pane-body">
-          <p className="label">{t.demoTab}</p>
-          <h2 className="pane-h">{t.demoH}</h2>
-          <p className="lede">{t.demoSub}</p>
-          <ul className="list">
-            {rows.map((r) => (
-              <li key={r.key}>
-                <button className="row" data-demo={r.key} onClick={() => store.playDemo(r.key)}>
-                  <span className="ic">
-                    <Icon name={r.key} />
-                  </span>
-                  <span className="tx">
-                    <b>{r.title}</b>
-                    <span>{r.sub}</span>
-                  </span>
-                  <span className="go">
-                    <Icon name="play" />
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </Pane>
-  );
-}
-
-/* ---------- settings ---------- */
-
-function SettingsPane({ active }: { active: boolean }) {
-  const store = useStore();
-  const t = useCopy();
-  const lang = useSpoken((s) => s.lang);
-
-  return (
-    <Pane id="settings" active={active}>
-      <div className="scroll pad">
-        <div className="pane-body">
-          <p className="label">{t.setTab}</p>
-          <h2 className="pane-h">{t.setH}</h2>
-          <ul className="list">
-            <li className="row static">
-              <span className="tx">
-                <b>{t.langL}</b>
-                <span>{t.langS}</span>
-              </span>
-              <div className="seg" role="group" aria-label={t.langL}>
-                {(["en", "no"] as const).map((l) => (
-                  <button key={l} aria-pressed={lang === l} onClick={() => store.setLang(l)}>
-                    {l.toUpperCase()}
-                  </button>
-                ))}
-              </div>
-            </li>
-            <li>
-              <button className="row" onClick={() => store.replay()}>
-                <span className="tx">
-                  <b>{t.replay}</b>
-                  <span>{t.replayS}</span>
-                </span>
-                <span className="go">
-                  <Icon name="replay" />
-                </span>
-              </button>
-            </li>
-            <li className="row static">
-              <span className="tx">
-                <b>{t.keysL}</b>
-                <span>{t.keysS}</span>
-              </span>
-            </li>
-          </ul>
-          <p className="about">{t.foot}</p>
-        </div>
-      </div>
-    </Pane>
   );
 }
 
@@ -262,10 +184,11 @@ function SettingsPane({ active }: { active: boolean }) {
 function TabBar({ tab }: { tab: Tab }) {
   const store = useStore();
   const t = useCopy();
+  const m = useAppCopy();
   const tabs: { id: Tab; icon: IconName; label: string }[] = [
+    { id: "home", icon: "home", label: m.homeTab },
     { id: "chat", icon: "bubble", label: t.chatTab },
-    { id: "demo", icon: "play", label: t.demoTab },
-    { id: "settings", icon: "sliders", label: t.setTab },
+    { id: "settings", icon: "person", label: m.profileTab },
   ];
 
   return (

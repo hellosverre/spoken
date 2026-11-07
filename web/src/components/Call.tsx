@@ -4,7 +4,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fill, type Row } from "@/lib/i18n";
 import { SCENARIOS } from "@/lib/scenarios";
 import type { Sheet as SheetContent } from "@/lib/store";
-import { cx, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { Composer } from "./Composer";
 import { Icon } from "./Icon";
 
@@ -36,7 +36,8 @@ function CallHead() {
   const pill = useSpoken((s) => s.pill);
   const elapsed = useSpoken((s) => s.elapsed);
   const callEnded = useSpoken((s) => s.callEnded);
-  const pillText = { ringing: t.sRinging, live: t.sLive, hold: t.sHold, ended: t.sEnded }[pill];
+  // No status pill in the phone UI: the state goes after the timer, in plain text.
+  const status = { ringing: t.sRinging, live: "", hold: t.sHold, ended: t.sEnded }[pill];
 
   return (
     <header className="callhead pad">
@@ -44,12 +45,9 @@ function CallHead() {
         <b>{contact}</b>
         <span className="num">
           {number} · <span className="timer">{elapsed}</span>
+          {status && <span className="status"> · {status}</span>}
         </span>
       </div>
-      <span className="pill" data-s={pill}>
-        <span className="led" />
-        {pillText}
-      </span>
       <button className="endbtn" aria-label={t.endCall} disabled={callEnded} onClick={() => store.endCall()}>
         <Icon name="hang" />
       </button>
@@ -92,7 +90,7 @@ function Speaker() {
 }
 
 function Transcript() {
-  const t = useCopy();
+  const t = useAppCopy();
   const { contact } = useContact();
   const lines = useSpoken((s) => s.transcript);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -135,7 +133,19 @@ function Transcript() {
 function CallComposer() {
   const store = useStore();
   const t = useCopy();
+  const m = useAppCopy();
+  const callEnded = useSpoken((s) => s.callEnded);
   const [value, setValue] = useState("");
+
+  if (callEnded)
+    return (
+      <div className="composer pad">
+        <button className="btn primary block tall" data-back onClick={() => store.goHome()}>
+          <Icon name="home" />
+          {m.backHome}
+        </button>
+      </div>
+    );
 
   return (
     <div className="composer pad">
@@ -216,10 +226,7 @@ function AskSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "ask" }> }) 
 
   return (
     <>
-      <span className="flag">
-        <span className="led" />
-        {t.waiting}
-      </span>
+      <span className="flag">{t.waiting}</span>
       <h3 id="sheetTitle">{cfg.title}</h3>
       <Rows rows={cfg.rows} />
       <p className="hold">

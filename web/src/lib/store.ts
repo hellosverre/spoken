@@ -1,9 +1,16 @@
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
 import { isLive, planRealCall, realEnabled, type LiveIO } from "./real-call";
+import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 
-export type Screen = "intro" | "home" | "call";
-export type Tab = "chat" | "demo" | "settings";
+export type Screen = "intro" | "login" | "home" | "call";
+/** Home = presets and demos, Chat = talk to Spoken, Settings = the Profile tab. */
+export type Tab = "home" | "chat" | "settings";
+export type ThemePref = "system" | "dark" | "light";
+export interface Profile {
+  name: string;
+  phone: string;
+}
 export type Pill = "ringing" | "live" | "hold" | "ended";
 export type Chip = "repeat" | "thanks";
 
@@ -54,6 +61,11 @@ export interface State {
   sheetOpen: boolean;
   /** Bumped to flash the device frame when Spoken needs you. */
   flashTick: number;
+  /** Signed in. A local placeholder (demo / demo) until real accounts exist; nothing is sent anywhere. */
+  authed: boolean;
+  themePref: ThemePref;
+  profile: Profile;
+  presets: StoredPreset[];
 }
 
 type Pending = { type: "repeat" } | { type: "thanks" } | { type: "text"; text: string };
@@ -65,7 +77,7 @@ const INTRO_RESET: IntroState = {
 const INITIAL: State = {
   lang: "en",
   screen: "intro",
-  tab: "chat",
+  tab: "home",
   intro: INTRO_RESET,
   threaded: false,
   thread: [],
@@ -81,11 +93,20 @@ const INITIAL: State = {
   sheet: null,
   sheetOpen: false,
   flashTick: 0,
+  authed: false,
+  themePref: "system",
+  profile: { name: "Ingrid", phone: "" },
+  presets: DEFAULT_PRESETS,
 };
 
 const HANG = Symbol("hang");
 const ABORT = Symbol("abort");
 const LANG_KEY = "spoken-lang";
+/** { themePref, profile } as JSON. layout.tsx reads the theme from here before first paint. */
+export const PREFS_KEY = "spoken-prefs";
+/** Signed in for this browser tab (sessionStorage), so a reload skips the login. */
+const AUTH_KEY = "spoken-authed";
+const DEMO_LOGIN = { user: "demo", pass: "demo" };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Wait two frames so a reset class is painted before the next one is added. */
@@ -160,6 +181,16 @@ export class SpokenStore {
       if (saved === "en" || saved === "no") lang = saved;
     } catch {}
     this.setLang(lang);
+    try {
+      const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "null") as Partial<Pick<State, "themePref" | "profile">> | null;
+      if (p) this.set((s) => ({ themePref: p.themePref ?? s.themePref, profile: { ...s.profile, ...p.profile } }));
+    } catch {}
+    try {
+      if (sessionStorage.getItem(AUTH_KEY) === "1") this.set({ authed: true });
+    } catch {}
+    const presets = localPresetRepo.load();
+    if (presets) this.set({ presets });
+    this.applyTheme();
     this.intro();
   }
 
@@ -212,7 +243,7 @@ export class SpokenStore {
     if (this.reduce) {
       this.patchIntro({ width, morph: true, still: true, typed: line, pops: true, word: true });
       await sleep(1400);
-      if (!stop()) this.goHome();
+      if (!stop()) this.afterIntro();
       return;
     }
 
@@ -230,12 +261,96 @@ export class SpokenStore {
     if (stop()) return;
     this.patchIntro({ caret: false, word: true });
     await sleep(1500);
-    if (!stop()) this.goHome();
+    if (!stop()) this.afterIntro();
   }
 
   skipIntro() {
     this.introId++;
+    this.afterIntro();
+  }
+
+  /* ---------- login, profile, theme ---------- */
+
+  private afterIntro() {
+    if (this.state.authed) this.goHome();
+    else this.set({ screen: "login" });
+  }
+
+  /** Placeholder sign-in, checked here in the browser: only demo / demo gets in. */
+  login(user: string, pass: string): boolean {
+    if (user.trim().toLowerCase() !== DEMO_LOGIN.user || pass !== DEMO_LOGIN.pass) return false;
+    this.setAuthed(true);
     this.goHome();
+    return true;
+  }
+
+  logout() {
+    this.demo = false;
+    this.goHome();
+    this.setAuthed(false);
+    this.set({ screen: "login" });
+  }
+
+  private setAuthed(authed: boolean) {
+    this.set({ authed });
+    try {
+      if (authed) sessionStorage.setItem(AUTH_KEY, "1");
+      else sessionStorage.removeItem(AUTH_KEY);
+    } catch {}
+  }
+
+  setThemePref(themePref: ThemePref) {
+    this.set({ themePref });
+    this.applyTheme();
+    this.savePrefs();
+  }
+
+  /** data-theme on <html> picks the palette in globals.css ("system" follows the device). */
+  private applyTheme() {
+    document.documentElement.dataset.theme = this.state.themePref;
+  }
+
+  setProfile(patch: Partial<Profile>) {
+    this.set((s) => ({ profile: { ...s.profile, ...patch } }));
+    this.savePrefs();
+  }
+
+  private savePrefs() {
+    const { themePref, profile } = this.state;
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ themePref, profile }));
+    } catch {}
+  }
+
+  /* ---------- presets (see presets.ts for the storage and request seams) ---------- */
+
+  /** A filled-in preset becomes a request in the chat, just like typed text (real calls plan it on the server). */
+  runPreset(req: PresetRequest) {
+    this.demo = false;
+    this.set({ tab: "chat" });
+    // The contact (req.contact) is not sent yet: the server finds the number from the text.
+    this.sendRequest(req.text);
+  }
+
+  savePreset(p: StoredPreset) {
+    const list = this.state.presets;
+    const i = list.findIndex((x) => x.id === p.id);
+    this.setPresets(i === -1 ? [...list, p] : list.map((x, j) => (j === i ? p : x)));
+  }
+
+  deletePreset(id: string) {
+    this.setPresets(this.state.presets.filter((p) => p.id !== id));
+  }
+
+  /** Put back any built-in preset that was deleted, in its original wording. */
+  restorePresets() {
+    const have = new Set(this.state.presets.map((p) => p.builtIn).filter(Boolean));
+    this.setPresets([...DEFAULT_PRESETS.filter((d) => !have.has(d.builtIn)), ...this.state.presets]);
+  }
+
+  private setPresets(presets: StoredPreset[]) {
+    this.set({ presets });
+    localPresetRepo.save(presets);
   }
 
   replay() {
@@ -249,19 +364,19 @@ export class SpokenStore {
 
   /* ---------- home ---------- */
 
-  goHome() {
+  goHome(tab: Tab = "home") {
     this.chatAnswer = null;
     this.introId++;
     this.homeId++;
     this.callId++;
     this.askResolve = null;
     this.stopTimer();
-    this.set({ sheetOpen: false, threaded: false, thread: [], tab: "chat", screen: "home" });
+    this.set({ sheetOpen: false, threaded: false, thread: [], tab, screen: "home" });
   }
 
   newChat() {
     this.demo = false;
-    this.goHome();
+    this.goHome("chat");
     this.set((s) => ({ focusTick: s.focusTick + 1 }));
   }
 
@@ -383,7 +498,7 @@ export class SpokenStore {
   }
 
   async playDemo(which: ScenarioKey = "pizza") {
-    this.goHome();
+    this.goHome("chat");
     this.demo = true;
     const id = this.homeId;
     const stop = () => id !== this.homeId;
@@ -547,6 +662,7 @@ export class SpokenStore {
         attach: (sink) => { this.realSink = sink; },
       };
       outcome = await sc.run(lang, io);
+      this.realSink = null;
     } catch (e) {
       this.realSink = null;
       if (e === ABORT) return;

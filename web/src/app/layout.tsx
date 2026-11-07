@@ -14,13 +14,23 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#06070A",
-  colorScheme: "dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: dark)", color: "#06070A" },
+    { media: "(prefers-color-scheme: light)", color: "#EEF0F5" },
+  ],
+  colorScheme: "dark light",
 };
+
+// Set the saved theme before first paint so a light-theme user never sees a dark flash.
+// Same key and shape as PREFS_KEY in lib/store.ts.
+const THEME_BOOT = `try{var p=JSON.parse(localStorage.getItem("spoken-prefs")||"null");document.documentElement.dataset.theme=(p&&p.themePref)||"system"}catch(e){document.documentElement.dataset.theme="system"}`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+    <html lang="en" className={`${inter.variable} ${mono.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT }} />
+      </head>
       <body>{children}</body>
     </html>
   );

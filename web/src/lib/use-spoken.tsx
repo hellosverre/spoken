@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from "react";
+import { APP_COPY, type AppCopy } from "./copy-app";
 import { COPY, type Copy } from "./i18n";
 import { SpokenStore, type State } from "./store";
 
@@ -29,6 +30,11 @@ export function useSpoken<T>(select: (s: State) => T): T {
 
 export function useCopy(): Copy {
   return COPY[useSpoken((s) => s.lang)];
+}
+
+/** Strings that came with the phone UI (login, profile, presets). */
+export function useAppCopy(): AppCopy {
+  return APP_COPY[useSpoken((s) => s.lang)];
 }
 
 export const cx = (...parts: (string | false | null | undefined | 0)[]) => parts.filter(Boolean).join(" ");
