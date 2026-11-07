@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { BUILT_IN_KEYS, resolvePreset, toRequest, type Preset } from "@/lib/presets";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { HeroDuet, PresetArt, hasPresetArt, tintOf } from "./Art";
+import { CompareEntry } from "./Compare";
 import { Icon } from "./Icon";
 import { PresetEditor, UsePresetSheet } from "./PresetSheets";
 import { Confirm } from "./ui";
@@ -72,6 +73,8 @@ export function Presets() {
               </button>
             </div>
           )}
+
+          <CompareEntry />
 
           <ul className="pgrid">
             {shown.map((p) => (

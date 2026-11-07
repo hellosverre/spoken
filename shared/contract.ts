@@ -133,3 +133,39 @@ export interface FeedbackInput {
   comment?: string; // max 1000
   source: "call" | "profile";
 }
+
+// Compare: POST /api/compare {text, lang, callLang?, targets:[{name, phone}] (2–3)} (X-Spoken-Device, X-Spoken-Passcode)
+// → CompareStart. One info-only call per target (asks price / earliest time, never books). GET /api/compare/:id → CompareState.
+// Each leg's live socket is the normal /api/calls/:callId/live. "Book with X" = a normal POST /api/tasks for that business.
+export interface CompareTarget {
+  name: string;
+  phone: string;
+}
+export interface CompareInput {
+  text: string;
+  lang: Lang;
+  callLang?: Lang;
+  targets: CompareTarget[];
+}
+export interface CompareStart {
+  compareId: string;
+  mode: "real" | "mock";
+  legs: { name: string; callId: string }[];
+}
+export type CompareLegStatus = CallStatus | "queued";
+export interface CompareLeg {
+  name: string;
+  phone: string;
+  callId: string;
+  status: CompareLegStatus;
+  answer?: string; // one line, once the leg ended
+  outcome?: Outcome;
+  lastLine?: string; // latest thing said on the call, for the mini card
+}
+export interface CompareState {
+  compareId: string;
+  text: string;
+  mode: "real" | "mock";
+  done: boolean;
+  legs: CompareLeg[];
+}
