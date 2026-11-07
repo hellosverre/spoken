@@ -6,6 +6,7 @@ import { SCENARIOS } from "@/lib/scenarios";
 import { CallFeedback } from "./Feedback";
 import type { Sheet as SheetContent } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { MultiCall } from "./Compare";
 import { DoneArt, NothingAgreedArt } from "./Art";
 import { Composer } from "./Composer";
 import { FactStrip } from "./FactStrip";
@@ -15,6 +16,14 @@ import { Receipt } from "./Receipt";
 import { ReplyChips } from "./ReplyChips";
 
 export function Call({ on }: { on: boolean }) {
+  const multi = useSpoken((s) => s.multi);
+  if (multi) {
+    return (
+      <section className={cx("screen", on && "on")} id="call" aria-label="Live calls">
+        <MultiCall />
+      </section>
+    );
+  }
   return (
     <section className={cx("screen", on && "on")} id="call" aria-label="Live call">
       <CallHead />
