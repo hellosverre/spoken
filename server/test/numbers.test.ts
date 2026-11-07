@@ -93,3 +93,8 @@ test("a line batch calls noise is taken back and not answered", async () => {
   expect(events.some((e) => e.type === "transcript" && e.id === "c9" && e.text === "")).toBe(true); // UI drops it
   await s.finish("test");
 });
+
+test("no «atten eller åtti?» after «klokka»", () => {
+  expect(numberHint([{ text: "klokka", confidence: 0.9 }, { text: "atten.", confidence: 0.4 }])).toBe("");
+  expect(numberHint([{ text: "kl.", confidence: 0.9 }, { text: "17", confidence: 0.4 }])).toBe("");
+});

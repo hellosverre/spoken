@@ -195,7 +195,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed);
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
     const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
-    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile }, line, llm: callLlm, secrets: { fnr }, maxSec });
+    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile }, line, llm: callLlm, secrets: { fnr }, maxSec, taskText: t.input.text });
     // History: the call's summary (never the transcript) is saved for the device when it ends.
     if (t.device) {
       const device = t.device, calleeName = t.plan.callee.name;

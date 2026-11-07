@@ -6,7 +6,8 @@ const NUMBERISH = /^(\d+|null|en|ett|én|to|tre|fire|fem|seks|sju|syv|åtte|ni|t
 // Batch beats realtime on any line when it is this sure and realtime is unsure (c_05079f8d4529:
 // realtime «Hold da.» 0.63 / batch «Ha det bra!»; «Jeg må bare se på andre…» 0.54 / batch
 // «Domino's, har bare adressen og telefonnummeret ditt…»). Tune with scripts/stt-segments.ts.
-const BATCH_SURE = Number(process.env.BATCH_SURE ?? 0.85);
+// c_5b26344610cc: wrong batch lines scored 0.84–0.86 («To kroner hjelper, nå»), right ones ≥ 0.95.
+const BATCH_SURE = Number(process.env.BATCH_SURE ?? 0.9);
 const RT_UNSURE = Number(process.env.RT_UNSURE ?? 0.65);
 // Batch tags a segment with no speech as «[snakking i bakgrunnen]», «(musikk)»; realtime made up
 // «Jeg vet ikke hva jeg skal gjøre.» (0.42) for that one.
@@ -33,6 +34,7 @@ export function batchVerdict(realtime: string, batch: string, rtConf?: number, b
   // c_ba0df20d («hvor skal vi ha adressen» → «hvor så var adressen»).
   const rw = new Set(norm(realtime).split(" ").map(stem));
   const overlap = norm(batch).split(" ").some((w) => w && rw.has(stem(w)));
-  const numbersDiffer = !!nums(batch) && nums(batch) !== nums(realtime);
+  // Realtime must have heard a number too: «To kroner hjelper» for «Hva kan jeg hjelpe» (c_5b26).
+  const numbersDiffer = !!nums(batch) && !!nums(realtime) && nums(batch) !== nums(realtime);
   return overlap && numbersDiffer ? "revise" : "keep";
 }

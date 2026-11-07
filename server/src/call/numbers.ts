@@ -30,8 +30,10 @@ const NUMBER_SURE = 0.8;
 /** «⟨uklart tall: 15 eller 50⟩» for each unsure -ten/-ti number in the line, or "". */
 export function numberHint(words: Word[]): string {
   const out: string[] = [];
-  for (const w of words) {
+  for (const [i, w] of words.entries()) {
     if (w.confidence >= NUMBER_SURE) continue;
+    // «klokka atten»: a clock time, and 80 isn't one (c_5b26 asked «atten eller åtti?»).
+    if (i > 0 && /^(klokka|klokken|kl)\.?$/i.test(words[i - 1]!.text.replace(/[,!?]$/, ""))) continue;
     const n = numberOf(w.text);
     const alt = n === undefined ? undefined : soundAlike(n);
     if (n !== undefined && alt !== undefined) out.push(`⟨uklart tall: ${n} eller ${alt}⟩`);

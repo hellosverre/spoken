@@ -9,9 +9,12 @@ test("noise tag from batch drops a made-up realtime line", () => {
 });
 
 test("a much surer batch wins even with no shared words", () => {
-  expect(batchVerdict("Hold da.", "Ha det bra!", 0.63, 0.92)).toBe("revise");
+  expect(batchVerdict("Hold da.", "Ha det bra!", 0.63, 0.93)).toBe("revise");
   expect(batchVerdict("Jeg må bare se på andre, så kan jeg bare bestille.", "Domino's, har bare adressen og telefonnummeret ditt på vent litt.", 0.54, 0.9)).toBe("revise");
   expect(batchVerdict("Hold da.", "Ha det bra!", 0.63, 0.7)).toBe("keep"); // batch not sure enough
+  // c_5b26344610cc: right at 0.95+, wrong at 0.86.
+  expect(batchVerdict("Okei, da får jeg se om jeg kan akte den.", "Okay, da sees vi klokka åtte", 0.56, 0.96)).toBe("revise");
+  expect(batchVerdict("Hva kan jeg hjelpe deg med?", "To kroner hjelper, nå", 0.61, 0.86)).toBe("keep");
   expect(batchVerdict("Pepperoni pizza.", "Peppa pizza", 0.9, 0.95)).toBe("keep"); // realtime was sure
 });
 

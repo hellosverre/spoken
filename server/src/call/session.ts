@@ -165,6 +165,8 @@ export interface SessionInit {
   llm: LlmProvider;
   /** Per-call limit in seconds (≤ MAX_CALL_SEC). */
   maxSec?: number;
+  /** What the user typed: times in it («halv sju») may be said even if the plan dropped them. */
+  taskText?: string;
   /** Approved for this call only; never put into the LLM context. */
   secrets?: { fnr?: string };
 }
@@ -1098,7 +1100,8 @@ export class CallSession {
   }
 
   private allowedTimes(): Set<string> {
-    const set = new Set(timesIn(this.init.plan.goal));
+    // c_5b26344610cc: «… til henting klokken halv sju» was blocked; the time was only in the task.
+    const set = new Set([...timesIn(this.init.plan.goal), ...timesIn(this.init.taskText ?? "")]);
     for (const h of this.history) if (h.role !== "agent") for (const t of timesIn(h.text.replace(/⟨.*?⟩/g, ""))) set.add(t);
     return set;
   }
