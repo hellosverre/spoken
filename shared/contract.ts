@@ -47,6 +47,7 @@ export type LiveEvent =
   | { type: "agent_typing"; at: number }
   | { type: "approval_request"; id: string; question: string; options: string[]; at: number }
   | { type: "note"; text: string; level: "info" | "warn"; at: number }
+  | { type: "level"; who: "callee" | "agent"; rms: number; at: number } // voice loudness 0..1, ~15 Hz, for the live visual
   | { type: "result"; result: CallResult };
 
 export type LiveCommand =
