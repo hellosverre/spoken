@@ -4,18 +4,13 @@
 // at any point stops the music and the call continues.
 
 import { config } from "../config.ts";
+import { UI_TEXT, type UiText } from "./ui-text.ts";
 import { LINES, type Lines } from "./lines.ts";
 
 export const HOLD_LINES = LINES.no.hold;
 
 // Note texts the web app matches on (agreed with Form): countdown via /(\d+)\s*s/.
-export const HOLD_NOTES = {
-  asking: "Venter på svaret ditt – spør om personen kan vente.",
-  holding: (s: number) => `Personen venter… ${s} s (ventemusikk på)`,
-  remind: (s: number) => `Personen venter… ${s} s`,
-  resumed: "Ventemusikk av – du svarte, samtalen fortsetter.",
-  callback: "Personen kunne ikke vente – tilbød å ringe tilbake senere.",
-};
+export const HOLD_NOTES = UI_TEXT.no.hold;
 
 const NO = /^(nei|nope|no)\b|kan ikke|har ikke tid|ikke mulighet|dessverre|må gå|må stikke|travelt|ring(e)? (meg )?(tilbake|senere|igjen)|can't|cannot|don't have time|no time|have to go|gotta go|too busy|call (me )?(back|later|again)/i;
 
@@ -23,6 +18,8 @@ export interface HoldDeps {
   userName: string;
   /** The hold lines in the call's current language (default Norwegian). */
   lines?: () => Lines["hold"];
+  /** The notes in the app language (default Norwegian). */
+  notes?: () => UiText["hold"];
   say(text: string): Promise<unknown>;
   note(text: string, level?: "info" | "warn"): void;
   sound(kind: "typing" | "music" | "off"): void;
@@ -42,6 +39,7 @@ export class HoldFlow {
   constructor(private d: HoldDeps) {}
 
   private get L() { return this.d.lines?.() ?? HOLD_LINES; }
+  private get N() { return this.d.notes?.() ?? HOLD_NOTES; }
 
   get active() { return this.state === "asking" || this.state === "holding"; }
 
@@ -70,7 +68,7 @@ export class HoldFlow {
     this.state = "asking";
     this.d.debug("hold_ask");
     this.d.sound("off");
-    this.d.note(HOLD_NOTES.asking);
+    this.d.note(this.N.asking);
     await this.d.say(this.L.ask(this.d.userName || (this.L === LINES.en.hold ? LINES.en.user : LINES.no.user)));
     // No answer from the callee within 10 s: they're still there, so start the hold.
     this.timers.push(setTimeout(() => { if (this.state === "asking") void this.startHold(); }, 10_000));
@@ -101,7 +99,7 @@ export class HoldFlow {
     await this.d.say(this.L.thanks);
     if (this.state !== "holding") return;
     this.d.sound("music");
-    this.d.note(HOLD_NOTES.holding(this.secondsLeft()));
+    this.d.note(this.N.holding(this.secondsLeft()));
     this.remindTimer = setInterval(() => void this.remind(), config.holdRemindSec * 1000);
   }
 
@@ -111,7 +109,7 @@ export class HoldFlow {
     await this.d.say(this.L.remind);
     if (this.state !== "holding") return;
     this.d.sound("music");
-    this.d.note(HOLD_NOTES.remind(this.secondsLeft()));
+    this.d.note(this.N.remind(this.secondsLeft()));
   }
 
   private async callback(why: string) {
@@ -120,7 +118,7 @@ export class HoldFlow {
     this.clear();
     this.d.debug("hold_callback", { why });
     this.d.sound("off");
-    this.d.note(HOLD_NOTES.callback, "warn");
+    this.d.note(this.N.callback, "warn");
     await this.d.say(this.L.callback);
     await this.d.giveUp("Personen kunne ikke vente på svaret ditt; Spoken tilbød å ringe tilbake senere.");
   }
@@ -133,7 +131,7 @@ export class HoldFlow {
     if (!wasHolding) return;
     this.d.debug("hold_resume");
     this.d.sound("off");
-    this.d.note(HOLD_NOTES.resumed);
+    this.d.note(this.N.resumed);
     await this.d.say(this.L.back);
   }
 

@@ -17,6 +17,7 @@ import { timeHint, timesIn, withoutTimes } from "../time.ts";
 import { isNumberish, numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
 import { LINES, langFromText } from "./lines.ts";
+import { uiText } from "./ui-text.ts";
 import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 import { asksUserWhereCallee, fixCardOptions, priceWarning } from "./approval.ts";
@@ -209,6 +210,8 @@ export class CallSession {
   /** Language spoken on the phone (Plan.callLang); the user can switch it mid-call. */
   private lang: Lang;
   private get L() { return LINES[this.lang]; }
+  /** What the app shows the user, in the app language. */
+  private get U() { return uiText(this.init.profile.lang); }
   private simpler = false;
   private speaking = false;
   private turnAbort?: AbortController;
@@ -293,6 +296,7 @@ export class CallSession {
     this.hold = new HoldFlow({
       userName: init.profile.name,
       lines: () => this.L.hold,
+      notes: () => this.U.hold,
       say: (t) => this.say(t, "filler"),
       note: (t, level) => this.note(t, level),
       sound: (k) => (k === "off" ? this.init.line.stopWaitingSound() : this.init.line.startWaitingSound(k)),
@@ -355,7 +359,7 @@ export class CallSession {
       if (!this.ended && Date.now() - this.lastLlmAt > 20_000) void this.init.llm.warm?.();
     }, 20_000);
     const maxSec = Math.min(config.maxCallSec, this.init.maxSec ?? config.maxCallSec);
-    this.maxTimer = setTimeout(() => this.forceEnd(`Maks samtaletid (${maxSec >= 60 ? `${Math.round(maxSec / 60)} min` : `${maxSec} s`}) nådd.`), maxSec * 1000);
+    this.maxTimer = setTimeout(() => this.forceEnd(this.U.summary.maxTime(maxSec >= 60 ? `${Math.round(maxSec / 60)} min` : `${maxSec} s`)), maxSec * 1000);
     try {
       await this.init.line.start({
         status: (s, detail) => this.onLineStatus(s, detail),
@@ -384,9 +388,9 @@ export class CallSession {
       });
     } catch (e) {
       console.error("[session] line start failed:", (e as Error).message);
-      this.note(`Kunne ikke ringe: ${(e as Error).message}`, "warn");
+      this.note(this.U.note.cantCall((e as Error).message), "warn");
       this.setStatus("failed");
-      await this.finish("failed", { outcome: "failed", summary: "Samtalen kunne ikke kobles opp." });
+      await this.finish("failed", { outcome: "failed", summary: this.U.summary.notConnected });
     }
   }
 
@@ -577,12 +581,12 @@ export class CallSession {
     }
     const ask = detectSecretAsk(clean);
     if (ask === "card") {
-      this.note("Nektet å oppgi kortnummer.", "warn");
+      this.note(this.U.note.refusedCard, "warn");
       void this.say(this.L.card, "say", true);
       return;
     }
     if (ask === "fnr" && !(this.init.plan.willShare.includes("fnr") && this.init.secrets?.fnr)) {
-      this.note("Nektet å oppgi fødselsnummer (ikke godkjent for denne samtalen).", "warn");
+      this.note(this.U.note.refusedFnr, "warn");
       void this.say(this.L.fnr, "say", true);
       return;
     }
@@ -876,7 +880,7 @@ export class CallSession {
     this.debug("turn_start", { history: this.history.at(-1) });
     if (this.lastProgressAt && !this.pending && Date.now() - this.lastProgressAt > config.unproductiveSec * 1000) {
       this.turnRunning = false;
-      await this.wrapUp(`Kom ikke videre på ${Math.round(config.unproductiveSec / 60)} min; avsluttet høflig.`);
+      await this.wrapUp(this.U.summary.stuck(Math.round(config.unproductiveSec / 60)));
       return;
     }
     let backchannel = "";
@@ -989,7 +993,7 @@ export class CallSession {
         const commitment = isCommitment(s.text);
         if (commitment && (this.approvalCredit <= 0 || !this.coveredByApproval(s.text))) {
           // Safety: the model tried to commit without a yes from the user for exactly this.
-          this.note("Stoppet en forpliktelse som ikke var godkjent; spør deg først.", "warn");
+          this.note(this.U.note.stoppedCommit, "warn");
           stop = true;
           await this.requestApproval(`Kan jeg si ja til dette: «${s.text.replace(/[.!]$/, "")}»?`, ["JA", "NEI"], "commit");
           return;
@@ -1010,7 +1014,7 @@ export class CallSession {
             spokeAnything = true;
             said.push(esc.text);
             await this.say(esc.text, "say", false, abort.signal, turnLine);
-            if (esc.end) this.endTag = { outcome: "failed", summary: "Forsto ikke mottakeren; avsluttet høflig." };
+            if (esc.end) this.endTag = { outcome: "failed", summary: this.U.summary.misunderstood };
             return;
           }
           if (dup && !confused) {
@@ -1078,10 +1082,10 @@ export class CallSession {
         spokeAnything = true;
         stop = true;
         this.debug("dtmf", { digits: s.digits });
-        this.note(`Trykker ${s.digits} i telefonmenyen.`);
+        this.note(this.U.note.dtmf(s.digits));
         this.history.push({ role: "system", text: `Du trykket ${s.digits} på telefonen. Ikke si noe; vent på neste beskjed fra menyen.` });
         try { await this.init.line.sendDtmf?.(s.digits); }
-        catch (e) { this.note(`Kunne ikke trykke ${s.digits}: ${(e as Error).message}`, "warn"); }
+        catch (e) { this.note(this.U.note.dtmfFailed(s.digits, (e as Error).message), "warn"); }
       } else if (s.kind === "note") {
         this.note(s.text);
       } else if (s.kind === "end") {
@@ -1121,7 +1125,7 @@ export class CallSession {
     } catch (e) {
       if (!abort.signal.aborted) {
         console.error("[session] LLM failed:", (e as Error).message);
-        this.note("KI-en svarte ikke i tide.", "warn");
+        this.note(this.U.note.llmSlow, "warn");
         if (!spokeAnything) {
           const f = this.L.fillers.find((x) => x !== this.lastFiller) ?? this.L.fillers[0]!;
           this.lastFiller = f;
@@ -1186,7 +1190,7 @@ export class CallSession {
       if (this.rephrased || this.recentTurns.some((t) => t.has(norm(rephrase)))) {
         return { text: this.L.misunderstood(name), end: true };
       }
-      if (this.confusedRun === 2) this.note("Mottakeren er vanskelig å forstå; jeg prøver å spørre enklere.", "warn");
+      if (this.confusedRun === 2) this.note(this.U.note.hardToUnderstand, "warn");
       this.rephrased = true;
       return { text: rephrase };
     }
@@ -1205,6 +1209,7 @@ export class CallSession {
       fnr: this.init.secrets?.fnr,
       address: this.init.profile.address,
       lang: this.lang,
+      uiLang: this.init.profile.lang,
     });
     if (f.blocked) this.note(f.blocked, "warn");
     if (!f.text) return { interrupted: false };
@@ -1222,7 +1227,7 @@ export class CallSession {
       r = await this.init.line.speak(f.text, kind);
     } catch (e) {
       console.error("[session] speak failed:", (e as Error).message);
-      this.note("Talen feilet; prøver videre.", "warn");
+      this.note(this.U.note.ttsFailed, "warn");
     } finally {
       this.speaking = false;
     }
@@ -1299,7 +1304,7 @@ export class CallSession {
     const msg = (m[1] || text).replace(/^["«»“”]+|["«»“”]+$/g, "").trim() || text;
     const had = this.messages.has(id);
     this.messages.set(id, msg);
-    this.note(`Beskjed til ${name || "deg"}${had ? " (rettet)" : ""}: «${msg}»`, "info");
+    this.note(this.U.note.message(name || this.U.note.you, had, msg), "info");
   }
 
   /** Did the correction change a number, a negation or a name? */
@@ -1390,7 +1395,7 @@ export class CallSession {
       if (quiet < 8000 || this.lastPartialAt > since) { this.armSilenceNudge(); return; }
       this.nudged++;
       void this.say(this.nudged === 1 ? this.L.hello : this.L.cantHear, "filler").then(() => {
-        if (this.nudged >= 2 && !this.ended) void this.finish("silence", { outcome: "failed", summary: "Hørte ingenting fra mottakeren." });
+        if (this.nudged >= 2 && !this.ended) void this.finish("silence", { outcome: "failed", summary: this.U.summary.heardNothing });
       });
     }, 8000);
   }
@@ -1420,7 +1425,7 @@ export class CallSession {
     const p = this.pending;
     if (!p || p.id !== id) return;
     if (/^skriv( svar)?$/i.test(choice.trim())) {
-      this.note("Skriv svaret ditt i meldingsfeltet, så sier jeg det videre.");
+      this.note(this.U.note.writeAnswer);
       return; // card stays open; the next instruction is the answer
     }
     this.answered.push({ q: norm(p.question), choice });
@@ -1456,7 +1461,7 @@ export class CallSession {
     this.answeredAtHistory = this.history.length;
     this.progress();
     if (p.kind === "stuck" && /legg på/i.test(choice)) {
-      void this.hold.resume().then(() => this.wrapUp("Brukeren valgte å legge på."));
+      void this.hold.resume().then(() => this.wrapUp(this.U.summary.userHungUp));
       return;
     }
     // If the callee was asked to hold, thank them first («Takk for at du ventet!»), then go on.
@@ -1479,7 +1484,7 @@ export class CallSession {
         if (lang && lang !== this.lang) this.setLang(lang);
         this.history.push({ role: "user", text: `[instruks] ${text}` });
         this.progress();
-        this.note(`Instruks sendt: ${text}`);
+        this.note(this.U.note.instruction(text));
         if (!this.pending && !this.speaking) this.requestTurn();
         else if (!this.pending) this.wantTurn = true;
         break;
@@ -1491,7 +1496,7 @@ export class CallSession {
         break;
       case "tone":
         this.tone = cmd.tone;
-        this.note(`Tone: ${{ friendly: "vennlig", firm: "bestemt", hurry: "rask" }[cmd.tone]}`);
+        this.note(this.U.note.tone(cmd.tone));
         break;
       case "hangup":
         void this.userHangup();
@@ -1504,7 +1509,7 @@ export class CallSession {
     this.lang = lang;
     this.init.line.setLang?.(lang);
     this.debug("call_lang", { lang });
-    this.note(lang === "en" ? "Snakker engelsk nå." : "Snakker norsk nå.");
+    this.note(this.U.note.speaking(lang));
   }
 
   private async userHangup() {
@@ -1515,7 +1520,7 @@ export class CallSession {
       if (this.speaking) this.init.line.stopSpeaking();
       await Promise.race([this.say(this.L.mustEnd, "filler"), Bun.sleep(5000)]);
     }
-    await this.finish("user hangup", { outcome: "partial", summary: "Avsluttet av deg." });
+    await this.finish("user hangup", { outcome: "partial", summary: this.U.summary.byYou });
   }
 
   private async forceEnd(reason: string) {
@@ -1554,14 +1559,14 @@ export class CallSession {
     // after «Begge to» and a confused 240/274 kr).
     if (outcome === "done" && !(this.approvedCommit && this.confirmedByCallee)) {
       outcome = "partial";
-      honestSummary = this.approvedCommit ? "Uklart om de bekreftet bestillingen." : "Ikke bekreftet: ingen godkjent avtale.";
+      honestSummary = this.approvedCommit ? this.U.summary.unclearConfirm : this.U.summary.noDeal;
       this.debug("done_downgraded", { approvedCommit: this.approvedCommit, confirmedByCallee: this.confirmedByCallee });
     }
     if (this.voicemail) outcome = "no_answer";
     if (!this.connectedAt) outcome = this.status === "failed" ? "failed" : "no_answer";
     const summary = this.voicemail ? this.voicemailText() : !this.connectedAt
-      ? (outcome === "no_answer" ? "Ingen svarte." : "Samtalen kunne ikke kobles opp.")
-      : honestSummary ? `${honestSummary} ${s.summary || ""}`.trim() : tag ? tag.summary : (s.summary || tagIn?.summary || "Samtalen er ferdig.");
+      ? (outcome === "no_answer" ? this.U.summary.noAnswer : this.U.summary.notConnected)
+      : honestSummary ? `${honestSummary} ${s.summary || ""}`.trim() : tag ? tag.summary : (s.summary || tagIn?.summary || this.U.summary.done);
     this.result = {
       callId: this.callId,
       taskId: this.taskId,

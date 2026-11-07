@@ -3,6 +3,7 @@
 
 import type { Lang, Shareable } from "../../shared/contract.ts";
 import { LINES } from "./call/lines.ts";
+import { uiText } from "./call/ui-text.ts";
 
 // ---------- Numbers ----------
 
@@ -113,24 +114,25 @@ function luhn(d: string): boolean {
  */
 export function filterOutgoing(
   text: string,
-  share: { willShare: Shareable[]; fnr?: string; address?: string; lang?: Lang },
+  share: { willShare: Shareable[]; fnr?: string; address?: string; lang?: Lang; uiLang?: Lang },
 ): { text: string; blocked?: string } {
+  const B = uiText(share.uiLang).blocked;
   let out = text;
   const runs = out.match(/\d[\d \-]{9,}\d/g) ?? [];
   for (const r of runs) {
     const d = r.replace(/\D/g, "");
-    if (d.length >= 13 && d.length <= 19 && luhn(d)) return { text: "", blocked: "Stoppet et kortnummer før det ble sagt." };
-    if (d.length === 11) return { text: "", blocked: "Stoppet et fødselsnummer som ikke var godkjent." };
+    if (d.length >= 13 && d.length <= 19 && luhn(d)) return { text: "", blocked: B.card };
+    if (d.length === 11) return { text: "", blocked: B.fnr };
   }
-  if (/\b(cvv|cvc|pin)\b[^.]*\d{3,4}/i.test(out)) return { text: "", blocked: "Stoppet en sikkerhetskode før den ble sagt." };
+  if (/\b(cvv|cvc|pin)\b[^.]*\d{3,4}/i.test(out)) return { text: "", blocked: B.code };
   // Meta talk about the system sounds robotic (call #7): never said on the phone.
-  if (/hvordan systemet (mitt )?fungerer|kan ikke si mer om (hvordan|systemet)|som en språkmodell|jeg er bare et program|how (the|my) system works|as a language model|i'?m just a program/i.test(out)) return { text: "", blocked: "Fjernet en setning om systemet." };
+  if (/hvordan systemet (mitt )?fungerer|kan ikke si mer om (hvordan|systemet)|som en språkmodell|jeg er bare et program|how (the|my) system works|as a language model|i'?m just a program/i.test(out)) return { text: "", blocked: B.meta };
   if (out.includes("{{FNR}}")) {
-    if (!share.willShare.includes("fnr") || !share.fnr) return { text: share.lang === "en" ? LINES.en.fnr : FNR_REFUSAL, blocked: "Fødselsnummer ikke godkjent for denne samtalen." };
+    if (!share.willShare.includes("fnr") || !share.fnr) return { text: share.lang === "en" ? LINES.en.fnr : FNR_REFUSAL, blocked: B.fnrNotOk };
     out = out.replaceAll("{{FNR}}", share.fnr.split("").join(" "));
   }
   if (out.includes("{{ADDRESS}}")) {
-    if (!share.willShare.includes("address") || !share.address) return { text: "", blocked: "Adresse ikke godkjent for denne samtalen." };
+    if (!share.willShare.includes("address") || !share.address) return { text: "", blocked: B.addressNotOk };
     out = out.replaceAll("{{ADDRESS}}", share.address);
   }
   return { text: out };
