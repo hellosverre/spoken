@@ -16,6 +16,8 @@ import type { CallLine, LineMetric } from "./line.ts";
 import { timeHint, timesIn, withoutTimes } from "../time.ts";
 import { isNumberish, numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
+import { OnHoldDetector } from "./onhold.ts";
+import { suggestChips } from "./chips.ts";
 import { LINES, langFromText } from "./lines.ts";
 import { uiText } from "./ui-text.ts";
 import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
@@ -291,6 +293,8 @@ export class CallSession {
   private cutTimer?: ReturnType<typeof setTimeout>;
 
   private hold: HoldFlow;
+  private onHold: OnHoldDetector; // the shop put US on hold
+  private chipGen = 0;
 
   get inbound() { return !!this.init.inbound; }
 
@@ -299,6 +303,10 @@ export class CallSession {
     this.taskId = init.taskId;
     this.errand = parseErrand(init.plan.goal, init.profile.name);
     this.lang = init.plan.callLang ?? "no";
+    this.onHold = new OnHoldDetector({
+      onHold: (since) => { this.debug("on_hold"); this.emit({ type: "on_hold", since }); },
+      holdOver: () => { this.debug("hold_over"); this.emit({ type: "hold_over", at: Date.now() }); },
+    });
     this.hold = new HoldFlow({
       userName: init.profile.name,
       lines: () => this.L.hold,
@@ -531,6 +539,12 @@ export class CallSession {
       this.debug("held_for_opening", { text: clean, speaking: this.openingSpeaking });
       return;
     }
+    // They put us on hold: stay silent until a person speaks again.
+    if (this.onHold.onCallee(clean)) {
+      this.debug("on_hold_line", { text: clean });
+      return;
+    }
+    this.offerChips();
     if ((this.turnRunning || this.speaking) && CALLEE_BACKCHANNEL.test(clean)) {
       this.debug("callee_backchannel_ignored", { text: clean });
       return;
@@ -626,6 +640,16 @@ export class CallSession {
       return;
     }
     this.startGate(id);
+  }
+
+  /** Suggest next-instruction chips; fire-and-forget, a newer callee turn drops this one. */
+  private offerChips() {
+    const gen = ++this.chipGen;
+    void suggestChips(this.init.llm, this.ctx())
+      .then((items) => {
+        if (items && gen === this.chipGen && !this.ended) this.emit({ type: "chips", items, at: Date.now() });
+      })
+      .catch(() => { /* no chips is fine */ });
   }
 
   // ---------- word confidence ----------
@@ -1540,6 +1564,7 @@ export class CallSession {
   async finish(reason: string, tag?: { outcome: Outcome; summary: string }) {
     if (this.ended) return;
     this.ended = true;
+    this.onHold.end();
     clearTimeout(this.maxTimer);
     clearInterval(this.warmTimer);
     this.hold.cancel();
