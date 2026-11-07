@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { TextInput, View, type TextInputInstance } from "react-native";
 import { em, F, makeStyles, useTheme } from "../lib/theme";
+import { ContactsButton } from "./ContactPicker";
 import { Icon } from "./Icon";
 import { Press } from "./ui";
 
@@ -46,6 +47,7 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
         onBlur={() => setFocused(false)}
         style={styles.input}
       />
+      <ContactsButton onInsert={(t) => onChange(value.trim() ? `${value.trimEnd()} ${t}` : t)} />
       <Press accessibilityLabel={sendLabel} onPress={onSubmit} scale={0.92} style={styles.send}>
         <Icon name="send" color={C.inv} size={17} strokeWidth={2} />
       </Press>

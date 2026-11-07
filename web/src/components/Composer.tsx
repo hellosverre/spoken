@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { ContactsButton } from "./ContactPicker";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -54,6 +55,7 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
           }
         }}
       />
+      <ContactsButton onInsert={(t) => onChange(value.trim() ? `${value.trimEnd()} ${t}` : t)} />
       <button className="send" type="submit" aria-label={sendLabel}>
         <Icon name="send" />
       </button>
