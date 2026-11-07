@@ -87,6 +87,9 @@ const PATHS = {
   heart: <path d="M12 19.5s-7.5-4.4-7.5-10A4.3 4.3 0 0 1 12 6.8a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10-7.5 10z" />,
   trash: <path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7M10.5 10.5v6M13.5 10.5v6" />,
   pencil: <path d="M15.5 5.5l3 3L9 18l-4 1 1-4zM13.5 7.5l3 3" />,
+  // Thumbs: a cuff and a raised hand (down is the same drawing turned over).
+  thumbUp: <path d="M7 11v9H4.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zM7 11l4-7.5c1.7 0 2.7 1.2 2.4 2.8L13 9h5.5a2 2 0 0 1 2 2.4l-1.3 6.5a2.5 2.5 0 0 1-2.4 2.1H7" />,
+  thumbDown: <path d="M7 13V4H4.5a1 1 0 0 0-1 1v7a1 1 0 0 0 1 1zM7 13l4 7.5c1.7 0 2.7-1.2 2.4-2.8L13 15h5.5a2 2 0 0 0 2-2.4l-1.3-6.5A2.5 2.5 0 0 0 16.8 4H7" />,
   chevron: <path d="M9.5 6l6 6-6 6" />,
   person: (
     <>

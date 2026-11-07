@@ -325,3 +325,9 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   const rows = Object.entries(result.details ?? {}).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as Row);
   return { ok: result.outcome === "done", title: result.summary, rows };
 }
+
+/** Feedback after a call or from Profile. Without real calls switched on there is no server to send to. */
+export async function sendFeedback(input: { rating?: "up" | "down"; comment?: string; source: "call" | "profile"; callId?: string }): Promise<void> {
+  if (!realEnabled()) return;
+  await http("POST", "/api/feedback", input);
+}

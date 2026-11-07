@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { fill, type Row } from "@/lib/i18n";
 import { SCENARIOS } from "@/lib/scenarios";
+import { CallFeedback } from "./Feedback";
 import type { Sheet as SheetContent } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { DoneArt, NothingAgreedArt } from "./Art";
@@ -281,6 +282,7 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
       {sheet.ok ? <DoneArt /> : <NothingAgreedArt />}
       <h3 id="sheetTitle">{sheet.title}</h3>
       <Rows rows={sheet.rows} />
+      <CallFeedback />
       <div className="acts">
         <button className="btn primary block" data-back onClick={() => store.goHome()}>
           {t.back}
