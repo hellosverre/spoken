@@ -1,4 +1,4 @@
-/* Optional phone-number account (SMS code). Logged out = the anonymous device, as before.
+/* Phone-number account (SMS code), required: the server answers 401 to everything else.
    The session token is kept in AsyncStorage and sent as Authorization: Bearer on API calls. */
 import AsyncStorage from "@react-native-async-storage/async-storage";
 // Same server URL as real-call.ts (not imported from it: real-call imports authHeader from here).
@@ -19,6 +19,33 @@ async function load() {
     cache = { token: token ?? "", phone: token ? phone ?? "" : "" };
   }
   return cache;
+}
+
+/** An error from the server with its HTTP status (0 = no contact). */
+export class ApiError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** The store registers this: a 401 on any request means the session is gone → back to Login. */
+let unauthorizedHandler: (() => void) | null = null;
+export function onUnauthorized(fn: (() => void) | null) {
+  unauthorizedHandler = fn;
+}
+export async function sessionLost() {
+  if (!(await load()).token) return;
+  await clearSession();
+  unauthorizedHandler?.();
+}
+async function clearSession() {
+  await clearSession();
+}
+
+export async function hasSession(): Promise<boolean> {
+  return !!(await load()).token;
 }
 
 export async function accountPhone(): Promise<string> {
@@ -46,10 +73,12 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
     try {
       res = await fetch(API + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: ctrl.signal });
     } catch {
-      throw new Error("Får ikke kontakt med Spoken-serveren.");
+      throw new ApiError("Får ikke kontakt med Spoken-serveren.", 0);
     }
     const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    // 401 outside /api/auth/* = expired or revoked session. (A wrong code is a 400, never a 401.)
+    if (res.status === 401 && !path.startsWith("/api/auth/")) await sessionLost();
+    if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
     return data;
   } finally {
     clearTimeout(timer);
@@ -67,6 +96,5 @@ export async function verifyLogin(phone: string, code: string): Promise<void> {
 
 export async function logoutAccount(): Promise<void> {
   await api("POST", "/api/auth/logout").catch(() => {});
-  cache = { token: "", phone: "" };
-  await Promise.all([AsyncStorage.removeItem(TOKEN_KEY), AsyncStorage.removeItem(PHONE_KEY)]).catch(() => {});
+  await clearSession();
 }

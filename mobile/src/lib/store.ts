@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { hasSession, logoutAccount, onUnauthorized } from "./account";
 import * as Haptics from "expo-haptics";
 import { AccessibilityInfo, Platform, Vibration } from "react-native";
 import { MOBILE_COPY } from "./copy-mobile";
@@ -77,7 +78,7 @@ export interface State {
   /** Bumped to flash the device frame when Spoken needs you. */
   flashTick: number;
   /* Mobile only, not in the web store. */
-  /** Signed in this session. The login is a placeholder (demo / demo) until real accounts exist. */
+  /** Signed in with a phone number (a session token is stored). Everything but Login needs it. */
   authed: boolean;
   themePref: ThemePref;
   profile: Profile;
@@ -133,7 +134,6 @@ const LANG_KEY = "spoken-lang";
 const PREFS_KEY = "spoken-prefs";
 /** This phone's id for the server (profile, contacts, call history). Made once, as on the web. */
 const DEVICE_KEY = "spoken-device";
-const DEMO_LOGIN = { user: "demo", pass: "demo" };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Wait two frames so a reset state is drawn before the next one is set. */
@@ -222,6 +222,9 @@ export class SpokenStore {
       AccessibilityInfo.isReduceMotionEnabled().catch(() => false),
       AsyncStorage.getItem(DEVICE_KEY).catch(() => null),
     ]);
+    // The stored session token is the login: a restart keeps it, a 401 anywhere drops it.
+    this.set({ authed: await hasSession() });
+    onUnauthorized(() => this.sessionExpired());
     const deviceId = device || newDeviceId();
     if (!device) AsyncStorage.setItem(DEVICE_KEY, deviceId).catch(() => {});
     configureRealCalls({ deviceId });
@@ -247,6 +250,7 @@ export class SpokenStore {
   }
 
   stop() {
+    onUnauthorized(null);
     this.introId++;
     this.homeId++;
     this.callId++;
@@ -313,15 +317,23 @@ export class SpokenStore {
     else this.set({ screen: "login" });
   }
 
-  /** Placeholder sign-in: only demo / demo works until real accounts are added. */
-  login(user: string, pass: string): boolean {
-    if (user.trim().toLowerCase() !== DEMO_LOGIN.user || pass !== DEMO_LOGIN.pass) return false;
+  /** The SMS code was accepted (account.verifyLogin stored the token): enter the app. */
+  signedIn() {
     this.set({ authed: true });
     this.goHome();
-    return true;
   }
 
-  logout() {
+  async logout() {
+    await logoutAccount(); // tells the server, then forgets the token whatever the answer
+    this.toLogin();
+  }
+
+  /** A request came back 401: the session is gone, so go back to Login. */
+  sessionExpired() {
+    this.toLogin();
+  }
+
+  private toLogin() {
     this.demo = false;
     this.goHome();
     this.set({ authed: false, screen: "login" });
