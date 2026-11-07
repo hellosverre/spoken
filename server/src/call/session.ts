@@ -186,7 +186,12 @@ export class CallSession {
   private answeredAtHistory = -1; // history length when the user last answered an approval
   private reasked = 0;
   private usage = { promptTokens: 0, completionTokens: 0, costUsd: 0, requests: 0 };
+  private cachedTokens = 0;
+  private lastLlmAt = 0;
+  private warmTimer?: ReturnType<typeof setInterval>;
   private addUsage = (u: Usage) => {
+    this.cachedTokens += u.cachedTokens ?? 0;
+    this.lastLlmAt = Date.now();
     this.usage.promptTokens += u.promptTokens;
     this.usage.completionTokens += u.completionTokens;
     this.usage.costUsd += u.costUsd ?? 0;
@@ -258,6 +263,10 @@ export class CallSession {
     this.emit({ type: "status", status: "dialing", at: this.startedAt });
     this.init.line.prefetch?.([ensureDisclosure(this.init.plan.opening, this.init.profile.name), WAIT_PHRASE, CARD_REFUSAL, ...BACKCHANNELS]);
     void this.init.llm.warm?.();
+    // Keep the LLM's TLS connection warm while the call is up (no request for 20 s → ping).
+    this.warmTimer = setInterval(() => {
+      if (!this.ended && Date.now() - this.lastLlmAt > 20_000) void this.init.llm.warm?.();
+    }, 20_000);
     this.maxTimer = setTimeout(() => this.forceEnd("Maks samtaletid (10 min) nådd."), config.maxCallSec * 1000);
     try {
       await this.init.line.start({
@@ -1050,6 +1059,7 @@ export class CallSession {
     if (this.ended) return;
     this.ended = true;
     clearTimeout(this.maxTimer);
+    clearInterval(this.warmTimer);
     this.hold.cancel();
     clearTimeout(this.holdTimer);
     clearTimeout(this.gate?.timer);
@@ -1089,7 +1099,7 @@ export class CallSession {
     console.log(`[session] ${this.callId} ended (${reason}): ${outcome}`);
     this.debug("ended", { reason, outcome, latencies: this.latencies, usage: this.usage });
     // One cost line per call. Telnyx reports its own price later as [cost] telnyx … (call.cost webhook).
-    console.log(`[cost] call ${this.callId}: LLM $${this.usage.costUsd.toFixed(5)} (${this.usage.requests} req, ${this.usage.promptTokens} in / ${this.usage.completionTokens} out)` +
+    console.log(`[cost] call ${this.callId}: LLM $${this.usage.costUsd.toFixed(5)} (${this.usage.requests} req, ${this.usage.promptTokens} in [${this.cachedTokens} cached] / ${this.usage.completionTokens} out)` +
       (this.lineCost ? `, TTS ${this.lineCost.ttsChars} chars, STT ${this.lineCost.sttSec} s` : ""));
     this.debug("cost", { llm: this.usage, line: this.lineCost });
     this.status = "ended";

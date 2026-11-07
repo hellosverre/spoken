@@ -8,7 +8,12 @@ import type { AgentContext, ClarifyOut, LlmProvider, PlanOut, SummaryOut, TaskFo
 
 function toUsage(u: any): Usage | null {
   if (!u || typeof u !== "object") return null;
-  return { promptTokens: u.prompt_tokens ?? 0, completionTokens: u.completion_tokens ?? 0, ...(typeof u.cost === "number" ? { costUsd: u.cost } : {}) };
+  return {
+    promptTokens: u.prompt_tokens ?? 0,
+    completionTokens: u.completion_tokens ?? 0,
+    ...(typeof u.cost === "number" ? { costUsd: u.cost } : {}),
+    ...(u.prompt_tokens_details?.cached_tokens ? { cachedTokens: u.prompt_tokens_details.cached_tokens } : {}),
+  };
 }
 
 const ENDPOINTS = {
@@ -66,6 +71,9 @@ export class OpenAiCompatLlm implements LlmProvider {
       const r = routing(model);
       extra.provider = r.provider;
       if (this.reasoningOff) extra.reasoning = r.reasoning;
+      // Anthropic automatic prompt caching: the system prompt + earlier turns become a cached
+      // prefix (Haiku/Sonnet 5.5 cache from 512 tokens). LLM_PROMPT_CACHE=0 turns it off.
+      if (model.startsWith("anthropic/") && process.env.LLM_PROMPT_CACHE !== "0") extra.cache_control = { type: "ephemeral" };
     }
     const send = () => fetch(this.url, {
       method: "POST",
