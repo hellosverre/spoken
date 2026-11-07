@@ -97,3 +97,7 @@ Real calls need Telnyx, ElevenLabs and OpenRouter keys. See `server/.env.example
 ## Team
 
 Sverre, Jakob
+
+## For AI agents
+
+Read [PRODUCT_CONTEXT.md](PRODUCT_CONTEXT.md) for the product purpose, user journey, architecture, demo modes, safety boundaries and open questions. Start with [AGENTS.md](AGENTS.md) for working instructions.
