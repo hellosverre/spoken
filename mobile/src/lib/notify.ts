@@ -30,7 +30,9 @@ async function show() {
   const { title, body, category } = waiting;
   try {
     const id = await Notifications.scheduleNotificationAsync({
-      content: { title, body, sound: true, ...(category ? { categoryIdentifier: category } : {}) },
+      // Time sensitive: an approval gets through Focus modes and notification summaries on iPhone
+      // (needs the Time Sensitive Notifications capability; without it iOS treats it as active).
+      content: { title, body, sound: true, interruptionLevel: "timeSensitive", ...(category ? { categoryIdentifier: category } : {}) },
       trigger: Platform.OS === "android" ? { channelId: CHANNEL } : null,
     });
     // Answered while it was being scheduled.

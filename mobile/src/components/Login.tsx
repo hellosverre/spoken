@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { KeyboardAvoidingView, ScrollView, Text, View, type TextInputInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { em, F, makeStyles, PAD, small } from "../lib/theme";
+import { em, F, HEADING_SCALE, makeStyles, PAD, small } from "../lib/theme";
 import { useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { Hero } from "./drawings/Hero";
@@ -40,7 +40,7 @@ export function Login() {
           <Hero width={210} />
         </Rise>
         <Rise i={1} on={on}>
-          <Text style={styles.h} accessibilityRole="header">
+          <Text style={styles.h} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
             {m.loginH}
           </Text>
           <Text style={styles.lede}>{m.loginSub}</Text>

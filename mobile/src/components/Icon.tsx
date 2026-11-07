@@ -177,7 +177,10 @@ export function Wordmark({ size = 17 }: { size?: number }) {
   return (
     <View style={styles.wordmark} accessibilityRole="header" accessibilityLabel="Spoken">
       <Mark />
-      <Text style={[styles.word, { fontSize: size, letterSpacing: em(-0.012, size) }]}>Spoken</Text>
+      {/* The logo: grows a little with the text size, not as much as the content. */}
+      <Text style={[styles.word, { fontSize: size, letterSpacing: em(-0.012, size) }]} maxFontSizeMultiplier={1.2}>
+        Spoken
+      </Text>
     </View>
   );
 }

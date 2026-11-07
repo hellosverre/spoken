@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { sendFeedback } from "../lib/real-call";
-import { F, makeStyles, PAD, useTheme } from "../lib/theme";
+import { F, makeStyles, PAD, useLargeText, useTheme } from "../lib/theme";
 import { useMobileCopy } from "../lib/use-spoken";
 import { Icon } from "./Icon";
 import { Btn, T } from "./ui";
@@ -22,6 +22,7 @@ export function CallFeedback() {
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const stack = useLargeText();
 
   function rate(r: Rating) {
     if (busy) return;
@@ -59,7 +60,7 @@ export function CallFeedback() {
 
   return (
     <View style={styles.fb}>
-      <View style={styles.ask}>
+      <View style={[styles.ask, stack && styles.askStack]}>
         <T size={14} weight="medium">
           {m.fbAsk}
         </T>
@@ -83,7 +84,7 @@ export function CallFeedback() {
       </View>
       {rating ? (
         <>
-          <View style={styles.send}>
+          <View style={[styles.send, stack && styles.sendStack]}>
             <TextInput
               accessibilityLabel={m.fbCommentPh}
               placeholder={m.fbCommentPh}
@@ -195,11 +196,13 @@ export function FeedbackSheet({ onClose }: { onClose(): void }) {
 const useStyles = makeStyles((C) => ({
   fb: { gap: 10, borderTopWidth: 1, borderTopColor: C.line },
   ask: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingTop: 12 },
+  askStack: { flexDirection: "column", alignItems: "flex-start" },
   thumbs: { flexDirection: "row", gap: 8 },
-  thumb: { width: 48, height: 44, borderRadius: 12, borderWidth: 1, borderColor: C.line2, alignItems: "center", justifyContent: "center" },
+  thumb: { width: 48, minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: C.line2, alignItems: "center", justifyContent: "center" },
   send: { flexDirection: "row", gap: 8, alignItems: "center" },
-  input: { flex: 1, height: 44, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface, fontFamily: F.regular, fontSize: 16, color: C.ink },
-  multi: { flex: 0, height: undefined, minHeight: 120, paddingTop: 12, paddingBottom: 12 },
+  sendStack: { flexDirection: "column", alignItems: "stretch" },
+  input: { flex: 1, minHeight: 44, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface, fontFamily: F.regular, fontSize: 16, color: C.ink },
+  multi: { flex: 0, minHeight: 120, paddingTop: 12, paddingBottom: 12 },
   thanks: { flexDirection: "row", alignItems: "center", gap: 10, paddingTop: 12 },
   modal: { flex: 1, backgroundColor: C.app },
   head: { flexDirection: "row", alignItems: "center", paddingHorizontal: PAD, paddingTop: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.line },

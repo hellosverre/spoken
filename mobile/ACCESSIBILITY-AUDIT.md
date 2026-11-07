@@ -2,32 +2,39 @@
 
 A code review of the Expo app in `mobile/src`, looking for barriers for people who are blind or use a screen reader, deaf or hard of hearing, low vision, colour blind, or have limited dexterity or motion sensitivity. Requirements and priorities come from [../ACCESSIBILITY.md](../ACCESSIBILITY.md).
 
-**Scope and limits.** Read from the code at commit `7274d73` (branch `mobile-history-background`), 2026-11-07. Nothing here was tested on a device with VoiceOver, TalkBack, Dynamic Type, colour filters or switch control. Screen-reader findings describe what the code is likely to do and must be confirmed on a phone. Contrast ratios were computed from the theme tokens in `src/lib/theme.tsx` at that commit; recheck them after any palette change.
+**Scope and limits.** First read from the code at commit `7274d73` (branch `mobile-history-background`), 2026-11-07; the detailed sections below describe that version, and their line links may have moved since. A second pass the same day added text scaling and the iPhone/Android accessibility settings ([Text scaling](#text-scaling) and [Phone accessibility settings](#phone-accessibility-settings)), and most findings were then fixed ([Status](#status)). The fixes were checked in the iOS simulator (iPhone 16, iOS 18.6) at the default and the largest accessibility text size, with Increase Contrast on and off. Nothing has been tested with VoiceOver, TalkBack, Bold Text, an Android device, colour filters or switch control, and no disabled users have tried it. Contrast ratios are computed from the tokens in `src/lib/theme.tsx`.
 
 Severity: **High** blocks or seriously harms the core call flow, **Medium** makes it harder, **Low** is polish.
 
 ## Summary
 
-| # | Issue | Who | Severity |
-|---|---|---|---|
-| 1 | New call lines are not announced on iOS, only "X is talking" on Android | Blind | High |
-| 2 | Approval request may not be announced; focus targets a non-accessible View | Blind | High |
-| 3 | Transcript forces scroll to the newest word | Deaf, low vision, everyone | High |
-| 4 | Real transcript text is delayed by word-by-word pacing | Deaf | High |
-| 5 | Dim text fails contrast (≈3.1–3.3:1) and carries key info | Low vision | High |
-| 6 | Button and field outlines are ≈1.2–1.5:1 (Decline is outline only) | Low vision | Medium |
-| 7 | End call is 38×38 pt with no confirmation | Motor, everyone | Medium |
-| 8 | No waiting time or hold-limit feedback during an approval | Deaf, slow typists | Medium |
-| 9 | Uncertain speech recognition is shown as plain fact | Deaf | Medium |
-| 10 | Chat live region may re-read the whole thread (Android) | Blind | Medium |
-| 11 | Fixed-height controls clip at large text sizes | Low vision | Medium |
-| 12 | Mislabelled controls (EN/NO, "…", raw icon names, {tokens}) | Blind | Medium |
-| 13 | Field errors shown by red border only | Colour blind, blind | Medium |
-| 14 | Small touch targets (30–36 pt) | Motor | Medium |
-| 15 | No `accessibilityLanguage` for Norwegian text | Blind | Low |
-| 16 | Animations that ignore reduce motion | Vestibular | Low |
-| 17 | Selected state shown mostly by subtle colour | Low vision, colour blind | Low |
-| 18 | "Needs you" flash is brief and subtle | Deaf | Low |
+| # | Issue | Who | Severity | Status |
+|---|---|---|---|---|
+| 1 | New call lines are not announced on iOS, only "X is talking" on Android | Blind | High | Fixed, needs VoiceOver/TalkBack test |
+| 2 | Approval request may not be announced; focus targets a non-accessible View | Blind | High | Fixed, needs VoiceOver/TalkBack test |
+| 3 | Transcript forces scroll to the newest word | Deaf, low vision, everyone | High | Fixed |
+| 4 | Real transcript text is delayed by word-by-word pacing | Deaf | High | Fixed |
+| 5 | Dim text fails contrast (≈3.1–3.3:1) and carries key info | Low vision | High | Fixed (dim now ≥4.5:1); light-theme accent on its pale tint is still 4.2:1 outside Higher contrast |
+| 6 | Button and field outlines are ≈1.2–1.5:1 (Decline is outline only) | Low vision | Medium | Fixed in Higher contrast; standard look unchanged |
+| 7 | End call is 38×38 pt with no confirmation | Motor, everyone | Medium | Fixed |
+| 8 | No waiting time or hold-limit feedback during an approval | Deaf, slow typists | Medium | Partly: elapsed time shown; no hold limit known to the app |
+| 9 | Uncertain speech recognition is shown as plain fact | Deaf | Medium | Open: needs confidence data from the server |
+| 10 | Chat live region may re-read the whole thread (Android) | Blind | Medium | Fixed |
+| 11 | Fixed-height controls clip at large text sizes | Low vision | Medium | Fixed (see [Text scaling](#text-scaling)) |
+| 12 | Mislabelled controls (EN/NO, "…", raw icon names, {tokens}) | Blind | Medium | Fixed |
+| 13 | Field errors shown by red border only | Colour blind, blind | Medium | Fixed (commit `d17b16b`) |
+| 14 | Small touch targets (30–36 pt) | Motor | Medium | Mostly fixed; send button keeps a 36 pt look with a 44 pt hit area |
+| 15 | No `accessibilityLanguage` for Norwegian text | Blind | Low | Fixed |
+| 16 | Animations that ignore reduce motion | Vestibular | Low | Fixed for the level meter, typing dots, sheet, flash and word pacing |
+| 17 | Selected state shown mostly by subtle colour | Low vision, colour blind | Low | Fixed (commit `d17b16b`) |
+| 18 | "Needs you" flash is brief and subtle | Deaf | Low | Partly: approvals are now time sensitive on iPhone; flash unchanged |
+| 19 | Approval and result sheet cannot scroll; buttons go off screen at large text | Low vision | High | Fixed |
+| 20 | Result sheet's comment box sits under the keyboard | Everyone | Medium | Fixed |
+| 21 | Android back sends the app away mid-call | Android users | Medium | Fixed |
+| 22 | No support for Bold Text or Increase Contrast / High contrast text | Low vision | Medium | Fixed, Bold Text untested |
+| 23 | Portrait only (WCAG 1.3.4) | Mounted devices | Low | Open: needs landscape layout testing |
+| 24 | A failed real call is titled in Norwegian in every language | Everyone | Low | Fixed |
+| 25 | Passcode stored unencrypted in AsyncStorage | Security | Low | Open: needs `expo-secure-store` and a native rebuild |
 
 ## Blind and screen-reader users
 
@@ -142,3 +149,45 @@ Respected: `Rise`, `PulseRings`, the intro. Not respected: the level-meter bars 
 1. Issues 1, 2, 3 and 4: whether a blind or deaf user can follow a live call and answer an approval in time.
 2. Issues 5, 6 and 7: quick theme and size changes.
 3. Device testing with VoiceOver, TalkBack, 200 % text and colour filters to confirm the above and find what code review misses.
+
+## Text scaling
+
+React Native scales text with the phone's setting (iPhone Text Size / Dynamic Type, Android Font size), so the words grow. The layouts around them did not. Findings from the second pass, all fixed:
+
+- **The approval and result sheet could not scroll** (issue 19). It is capped at 85 % of the screen, so at large sizes Approve and Decline could end up off screen. The question now scrolls and the answers stay pinned below it; the result sheet scrolls as a whole.
+- **Fixed heights** on buttons, fields, chips, segment buttons, tabs, token chips and the feedback input are now minimum heights with padding.
+- **Text cut to one line**: the call's contact name and number now wrap.
+- **The tab bar** puts the icon above the label at large sizes. Labels grow to 1.6×; past that, iPhone's Large Content Viewer shows the label on a long press, as system tab bars do.
+- **Side-by-side layouts stack** at large sizes (`useLargeText()` in `src/lib/theme.tsx`, from 1.3×): result and approval rows, the plan card's Change and Cancel, multiple-choice times, the "Did it go well?" row, and segmented controls beside a row title.
+- **Headings grow less** than body text (`HEADING_SCALE`, 1.4×), and so do the logo and the call screen's header, status line and chips (1.5×), so the transcript keeps the screen. Transcript and body text are never capped. The message box grows to 1.8×.
+- **At large sizes the call's speaker card** drops its picture and keeps only "X is talking", and the result sheet drops its illustration.
+- **The intro's icons** move in on narrow screens (Display Zoom, 320 pt).
+
+Checked in the simulator at the largest accessibility size: the tab bar stacks, the approval sheet keeps its buttons on screen with the question scrolling, and the call transcript keeps most of the screen. Not yet checked on Android at 200 % font plus the largest display size.
+
+## Phone accessibility settings
+
+| Setting | Platform | What the app now does |
+|---|---|---|
+| VoiceOver / TalkBack announcements | Both | Each finished call line is read out with its speaker, plus call status lines and new chat replies, queued so they don't cut each other off (`announce` in `src/lib/store.ts`). An approval says "Spoken needs your OK" and moves focus to the question; a result moves focus to its title. |
+| Escape gesture (two-finger scrub) | iOS | Closes a call result. An open approval stays until it is answered, so the escape can't decline by accident. |
+| Android back | Android | During a call: closes a result, keeps an open approval, otherwise asks "End the call?". It no longer sends the app to the background. |
+| Custom actions | Both | Preset cards offer Edit and Delete from the screen-reader actions menu, so no one has to find edit mode's small badges. |
+| Bold Text | iOS | Every Inter weight steps up one (`bolder` in `src/lib/theme.tsx`, with Inter 700 loaded), since iOS can't embolden a custom font itself. |
+| Increase Contrast / High contrast text | Both | Switches to the `DARK_HC` / `LIGHT_HC` palettes: secondary text near ink, outlines at 3:1 or more. A Higher contrast switch in Profile works on any phone and overrides the system setting once used. |
+| Reduce Motion | Both | The sheet fades instead of sliding, the level meter and typing dots stand still, the flash lights once instead of pulsing, and call text appears whole. |
+| Large Content Viewer | iOS | On the tab bar (above). |
+| Spoken language | iOS | `accessibilityLanguage` is `nb-NO` or `en-US` on text, transcript lines and sheet titles, so Norwegian is read with a Norwegian voice. |
+| Time-sensitive notifications | iOS | Approval notifications ask for `interruptionLevel: "timeSensitive"`, to get through Focus modes. This needs the Time Sensitive Notifications capability, which is **not** added yet (`app.config.js`); without it iOS treats them as normal. |
+| Haptics | Both | A Profile switch turns the approval buzz off. The flash, sheet and sound still signal. |
+
+Still open: landscape (issue 23); a lock-screen or Dynamic Island call status (iOS Live Activity, Android ongoing notification); saved quick phrases beyond "repeat" and "thanks" (a product decision to make with users).
+
+## Status
+
+All of the "Fixed" items above are code changes that typecheck. Only the text-scaling and contrast fixes have been looked at, in the iOS simulator. Before claiming support for any assistive technology (see [../ACCESSIBILITY.md](../ACCESSIBILITY.md)), test on real phones:
+
+1. VoiceOver and TalkBack through a whole call: lines read once each, approval focus, the escape gesture, Android back.
+2. Bold Text on iPhone; High contrast text on Android.
+3. Android at 200 % font and the largest display size.
+4. Switch Control / Switch Access and Voice Control / Voice Access, using the visible button names.

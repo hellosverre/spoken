@@ -1,12 +1,13 @@
 import { useEffect, type ReactNode } from "react";
 import { BackHandler, StyleSheet, View } from "react-native";
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from "react-native-reanimated";
-import { Call } from "../components/Call";
+import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from "react-native-reanimated";
+import { Call, confirmEndCall } from "../components/Call";
 import { Home } from "../components/Home";
 import { Intro } from "../components/Intro";
 import { Login } from "../components/Login";
 import type { Screen } from "../lib/store";
 import { ease, makeStyles } from "../lib/theme";
+import { MOBILE_COPY } from "../lib/copy-mobile";
 import { useSpoken, useStore } from "../lib/use-spoken";
 
 // The whole app is one device with its screens layered, like web/src/components/SpokenApp.tsx
@@ -24,12 +25,17 @@ export default function Device() {
     return () => store.stop();
   }, [store]);
 
-  // Android back: skip the intro, return to the Home tab, or leave an ended call. Otherwise the OS handles it.
+  // Android back: skip the intro, return to the Home tab, close a result, or leave an ended call.
+  // During a call it never sends the app away: an open approval stays until answered, and
+  // otherwise it asks before hanging up. Elsewhere the OS handles it.
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       const s = store.getSnapshot();
-      if (s.screen === "call" && s.callEnded) store.goHome();
-      else if (s.screen === "home" && s.tab !== "home") store.setTab("home");
+      if (s.screen === "call" && s.sheetOpen && s.sheet?.kind === "result") store.closeSheet();
+      else if (s.screen === "call" && s.callEnded) store.goHome();
+      else if (s.screen === "call") {
+        if (!s.sheetOpen) confirmEndCall(store, MOBILE_COPY[s.lang]);
+      } else if (s.screen === "home" && s.tab !== "home") store.setTab("home");
       else if (s.screen === "intro") store.skipIntro();
       else return false;
       return true;
@@ -76,13 +82,19 @@ function Layer({ name, screen, children }: { name: Screen; screen: Screen; child
   );
 }
 
-/** The screen edge flashes accent twice when Spoken needs you (.flash-ring). */
+/**
+ * The screen edge flashes accent twice when Spoken needs you (.flash-ring).
+ * Reduced motion: it lights once and holds, then fades, instead of pulsing.
+ */
 function FlashRing() {
   const styles = useStyles();
+  const reduce = useReducedMotion();
   const o = useSharedValue(0);
   useEffect(() => {
-    o.value = withRepeat(withSequence(withTiming(1, { duration: 400 }), withTiming(0, { duration: 400 })), 2);
-  }, [o]);
+    o.value = reduce
+      ? withSequence(withTiming(1, { duration: 200 }), withDelay(1400, withTiming(0, { duration: 400 })))
+      : withRepeat(withSequence(withTiming(1, { duration: 400 }), withTiming(0, { duration: 400 })), 2);
+  }, [o, reduce]);
   const anim = useAnimatedStyle(() => ({ opacity: o.value }));
   return <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.ring, anim]} />;
 }

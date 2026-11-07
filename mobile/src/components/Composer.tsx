@@ -21,6 +21,7 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
   const styles = useStyles();
   const ref = useRef<TextInputInstance>(null);
   const [focused, setFocused] = useState(false);
+  const empty = !value.trim();
 
   useEffect(() => {
     if (focusTick) ref.current?.focus();
@@ -44,9 +45,20 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
         onSubmitEditing={onSubmit}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        // Grows with the text size up to a point, so a line still fits beside the send button.
+        maxFontSizeMultiplier={1.8}
         style={styles.input}
       />
-      <Press accessibilityLabel={sendLabel} onPress={onSubmit} scale={0.92} style={styles.send}>
+      {/* Dimmed and announced as such while there is nothing to send; hit area padded to 44 pt. */}
+      <Press
+        accessibilityLabel={sendLabel}
+        accessibilityState={{ disabled: empty }}
+        disabled={empty}
+        onPress={onSubmit}
+        hitSlop={4}
+        scale={0.92}
+        style={[styles.send, empty && styles.sendEmpty]}
+      >
         <Icon name="send" color={C.inv} size={17} strokeWidth={2} />
       </Press>
     </View>
@@ -80,4 +92,5 @@ const useStyles = makeStyles((C) => ({
     color: C.ink,
   },
   send: { width: 36, height: 36, borderRadius: 9, backgroundColor: C.accent, alignItems: "center", justifyContent: "center" },
+  sendEmpty: { opacity: 0.45 },
 }));

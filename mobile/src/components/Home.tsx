@@ -1,17 +1,17 @@
-import { useEffect, useRef, type ReactNode } from "react";
-import { KeyboardAvoidingView, Pressable, ScrollView, Text, useWindowDimensions, View, type ScrollViewInstance } from "react-native";
+import { useEffect, type ReactNode } from "react";
+import { KeyboardAvoidingView, Pressable, ScrollView, Text, useWindowDimensions, View } from "react-native";
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SCENARIOS } from "../lib/scenarios";
 import type { Tab, ThreadItem } from "../lib/store";
-import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
+import { em, F, HEADING_SCALE, makeStyles, PAD, small, useLargeText, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Composer } from "./Composer";
 import { CHAT_HERO_RATIO, ChatHero } from "./drawings/ChatHero";
 import { Icon, Wordmark, type IconName } from "./Icon";
 import { Presets } from "./Presets";
 import { Profile } from "./Profile";
-import { Btn, Dots, Press, Rise, T } from "./ui";
+import { Btn, Dots, JumpToLatest, Press, Rise, T, useSpeechLang, useStickToEnd } from "./ui";
 
 // The tabbed part of the app, as web/src/components/Home.tsx: Home (presets and
 // demos; the web's Demo tab), the chat with Spoken, and Profile, switched by the
@@ -91,38 +91,41 @@ function ChatPane({ screenOn }: { screenOn: boolean }) {
   const threaded = useSpoken((s) => s.threaded);
   const draft = useSpoken((s) => s.draft);
   const focusTick = useSpoken((s) => s.focusTick);
-  const scroll = useRef<ScrollViewInstance>(null);
+  // New messages are read out by the store; the view follows them only while you're at the bottom.
+  const stick = useStickToEnd(() => thread.at(-1)?.kind === "plan");
 
   return (
     <Pane>
-      <ScrollView
-        ref={scroll}
-        style={styles.grow}
-        contentContainerStyle={styles.chatScroll}
-        keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: thread.at(-1)?.kind === "plan" })}
-      >
-        {threaded ? (
-          <View style={styles.thread} accessibilityLiveRegion="polite">
-            {thread.map((item) => (
-              <ThreadEntry key={item.id} item={item} />
-            ))}
-          </View>
-        ) : (
-          <View style={styles.empty}>
-            <Rise i={0} on={screenOn}>
-              <ChatHeader title={t.ask} lede={t.askSub} />
-            </Rise>
-            {/* Real example requests instead of generic chips: tap one to send it. */}
-            <Rise i={1} on={screenOn} style={styles.examples}>
-              <Text style={styles.examplesL}>{m.tryOne}</Text>
-              {(["pizza", "doctor"] as const).map((k) => (
-                <Example key={k} icon={k} text={SCENARIOS[k][lang].request} onPress={() => store.preset(k)} />
+      <View style={styles.grow}>
+        <ScrollView
+          {...stick.props}
+          style={styles.grow}
+          contentContainerStyle={styles.chatScroll}
+          keyboardShouldPersistTaps="handled"
+        >
+          {threaded ? (
+            <View style={styles.thread}>
+              {thread.map((item) => (
+                <ThreadEntry key={item.id} item={item} />
               ))}
-            </Rise>
-          </View>
-        )}
-      </ScrollView>
+            </View>
+          ) : (
+            <View style={styles.empty}>
+              <Rise i={0} on={screenOn}>
+                <ChatHeader title={t.ask} lede={t.askSub} />
+              </Rise>
+              {/* Real example requests instead of generic chips: tap one to send it. */}
+              <Rise i={1} on={screenOn} style={styles.examples}>
+                <Text style={styles.examplesL}>{m.tryOne}</Text>
+                {(["pizza", "doctor"] as const).map((k) => (
+                  <Example key={k} icon={k} text={SCENARIOS[k][lang].request} onPress={() => store.preset(k)} />
+                ))}
+              </Rise>
+            </View>
+          )}
+        </ScrollView>
+        <JumpToLatest on={stick.behind} onPress={() => stick.toEnd()} />
+      </View>
       <View style={styles.composer}>
         <Composer
           value={draft}
@@ -152,7 +155,7 @@ function ChatHeader({ title, lede }: { title: string; lede: string }) {
         <ChatHero width={width} />
       </View>
       <View style={[styles.heroText, { paddingTop: height * 0.5 }]}>
-        <Text style={styles.greet} accessibilityRole="header">
+        <Text style={styles.greet} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
           {title}
         </Text>
         <Text style={[styles.lede, styles.ledeLeft]}>{lede}</Text>
@@ -181,21 +184,26 @@ export function Chip({ icon, label, onPress }: { icon?: IconName; label: string;
   const { C } = useTheme();
   const styles = useStyles();
   return (
-    <Press onPress={onPress} accessibilityLabel={label} style={styles.chip}>
+    <Press onPress={onPress} accessibilityLabel={label} hitSlop={{ top: 4, bottom: 4 }} style={styles.chip}>
       {icon ? <Icon name={icon} color={C.accent} size={15} /> : null}
-      <Text style={styles.chipText}>{label}</Text>
+      <Text style={styles.chipText} maxFontSizeMultiplier={1.5}>
+        {label}
+      </Text>
     </Press>
   );
 }
 
 function ThreadEntry({ item }: { item: ThreadItem }) {
   const styles = useStyles();
+  const speechLang = useSpeechLang();
   switch (item.kind) {
     case "me":
     case "bot":
       return (
         <Animated.View entering={FadeIn.duration(300)} style={[styles.bubble, item.kind === "me" ? styles.me : styles.bot]}>
-          <Text style={[styles.bubbleText, item.kind === "me" && styles.meText]}>{item.text}</Text>
+          <Text style={[styles.bubbleText, item.kind === "me" && styles.meText]} accessibilityLanguage={speechLang}>
+            {item.text}
+          </Text>
         </Animated.View>
       );
     case "dots":
@@ -218,6 +226,7 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
   const lang = useSpoken((s) => s.lang);
   const sc = SCENARIOS[item.scenario];
   const L = sc[lang];
+  const stack = useLargeText();
 
   return (
     <Animated.View entering={FadeIn.duration(350)} style={styles.plan}>
@@ -258,10 +267,10 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
       </View>
       <View style={styles.actsCol}>
         <Btn block label={t.start} pressed={item.pressed} icon={<Icon name="phone" color={C.inv} />} onPress={() => store.startCall()} />
-        <View style={styles.acts}>
-          <Btn kind="ghost" label={t.edit} icon={<Icon name="pencil" color={C.ink} size={17} />} onPress={() => store.editPlan(item.request)} style={styles.grow} />
+        <View style={stack ? styles.actsCol : styles.acts}>
+          <Btn kind="ghost" label={t.edit} icon={<Icon name="pencil" color={C.ink} size={17} />} onPress={() => store.editPlan(item.request)} style={stack ? undefined : styles.grow} />
           {/* Mobile: drop the plan without calling, back to an empty chat. */}
-          <Btn kind="ghost" label={m.cancel} icon={<Icon name="x" color={C.ink} size={17} />} onPress={() => store.newChat()} style={styles.grow} />
+          <Btn kind="ghost" label={m.cancel} icon={<Icon name="x" color={C.ink} size={17} />} onPress={() => store.newChat()} style={stack ? undefined : styles.grow} />
         </View>
       </View>
     </Animated.View>
@@ -288,6 +297,9 @@ function TabBar({ tab }: { tab: Tab }) {
   const { C } = useTheme();
   const styles = useStyles();
   const insets = useSafeAreaInsets();
+  // Large text: icon above label, so three tabs still fit. Labels grow to a cap; past it,
+  // a long press shows the label large (iOS Large Content Viewer), as system tab bars do.
+  const stacked = useLargeText();
   const tabs: { id: Tab; icon: IconName; label: string }[] = [
     { id: "home", icon: "home", label: m.homeTab },
     { id: "chat", icon: "bubble", label: t.chatTab },
@@ -306,11 +318,13 @@ function TabBar({ tab }: { tab: Tab }) {
               accessibilityRole="tab"
               accessibilityLabel={x.label}
               accessibilityState={{ selected: on }}
+              accessibilityShowsLargeContentViewer
+              accessibilityLargeContentTitle={x.label}
               onPress={() => store.setTab(x.id)}
-              style={[styles.tab, on && styles.tabOn]}
+              style={[styles.tab, stacked && styles.tabStacked, on && styles.tabOn]}
             >
               <Icon name={x.icon} color={color} size={22} />
-              <Text style={[styles.tabLabel, on && styles.tabLabelOn, { color }]} numberOfLines={1}>
+              <Text style={[styles.tabLabel, on && styles.tabLabelOn, { color }]} numberOfLines={1} maxFontSizeMultiplier={1.6}>
                 {x.label}
               </Text>
             </Pressable>
@@ -326,7 +340,7 @@ const useStyles = makeStyles((C) => ({
   grow: { flex: 1 },
   left: { textAlign: "left" },
   topbar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingHorizontal: PAD, paddingTop: 14, paddingBottom: 6, minHeight: 34 },
-  iconbtn: { width: 34, height: 34, borderRadius: 9, borderWidth: 1, borderColor: C.line2, alignItems: "center", justifyContent: "center" },
+  iconbtn: { width: 44, height: 44, borderRadius: 9, borderWidth: 1, borderColor: C.line2, alignItems: "center", justifyContent: "center" },
   panes: { flex: 1, minHeight: 0 },
   pane: { flex: 1 },
   chatScroll: { flexGrow: 1, paddingHorizontal: PAD },
@@ -345,7 +359,7 @@ const useStyles = makeStyles((C) => ({
   exampleText: { flex: 1, fontFamily: F.regular, fontSize: 14.5, lineHeight: 20, color: C.ink },
   thread: { gap: 10, paddingTop: 16, paddingBottom: 24 },
   composer: { paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 6, backgroundColor: C.app },
-  chip: { height: 30, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, flexDirection: "row", alignItems: "center", gap: 7 },
+  chip: { minHeight: 36, paddingVertical: 6, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, flexDirection: "row", alignItems: "center", gap: 7 },
   chipText: { fontFamily: F.regular, fontSize: 13, color: C.muted },
   bubble: { maxWidth: "84%", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 18 },
   me: { alignSelf: "flex-end", backgroundColor: C.ink, borderBottomRightRadius: 6 },
@@ -366,7 +380,8 @@ const useStyles = makeStyles((C) => ({
   // Bigger than the web's compact pill: full width, 56 pt tabs, every label visible.
   tabbar: { paddingTop: 8, paddingHorizontal: 12, backgroundColor: C.app },
   tabs: { flexDirection: "row", gap: 4, padding: 5, borderWidth: 1, borderColor: C.line, borderRadius: 999, backgroundColor: C.surface },
-  tab: { flex: 1, height: 56, borderRadius: 999, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 8 },
+  tab: { flex: 1, minHeight: 56, borderRadius: 999, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 8 },
+  tabStacked: { flexDirection: "column", gap: 2, paddingVertical: 6, borderRadius: 22 },
   tabOn: { backgroundColor: C.surface2 },
   tabLabel: { fontFamily: F.medium, fontSize: 15, letterSpacing: em(-0.006, 15) },
   tabLabelOn: { fontFamily: F.semibold },

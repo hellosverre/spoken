@@ -1,5 +1,5 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
-import { StyleSheet, useColorScheme, type ImageStyle, type TextStyle, type ViewStyle } from "react-native";
+import { StyleSheet, useColorScheme, useWindowDimensions, type ImageStyle, type TextStyle, type ViewStyle } from "react-native";
 import { Easing } from "react-native-reanimated";
 import { useSpoken } from "./use-spoken";
 
@@ -15,7 +15,12 @@ import { useSpoken } from "./use-spoken";
    and the six tints stay apart under protanopia, deuteranopia and tritanopia
    (simulated, Machado 2009), mostly by differing in lightness as well as hue.
    Every coloured text clears 4.5:1 on the surfaces. Colour is never the only
-   signal: status always has an icon and words too (ACCESSIBILITY.md). */
+   signal: status always has an icon and words too (ACCESSIBILITY.md).
+
+   Small text (dim) clears 4.5:1 too. Higher contrast (Profile, or the phone's
+   Increase Contrast / High contrast text) swaps in the *_HC palettes below:
+   stronger secondary text and outlines that clear 3:1. Bold Text on iPhone
+   steps every Inter weight up one, since the system can't embolden a custom font. */
 
 /** Supporting tints for preset cards and art. Each is a foreground and a soft background. */
 export type TintKey = "violet" | "amber" | "teal" | "rose" | "sky" | "lime";
@@ -63,7 +68,7 @@ export const DARK: Palette = {
   line2: "#2C3240",
   ink: "#EDF0F7",
   muted: "#949BAD",
-  dim: "#5D6475",
+  dim: "#80879A",
   inv: "#0A0C11",
   accent: "#A5B4FF",
   accent2: "#C7D0FF",
@@ -94,7 +99,7 @@ export const LIGHT: Palette = {
   line2: "#CDD2DC",
   ink: "#0B0D12",
   muted: "#5A6172",
-  dim: "#868D9D",
+  dim: "#646B7B",
   inv: "#FFFFFF",
   accent: "#5566E8",
   accent2: "#3A4BCF",
@@ -116,16 +121,47 @@ export const LIGHT: Palette = {
   },
 };
 
+/** Higher contrast: secondary text close to ink, outlines at 3:1 or more on every surface. */
+export const DARK_HC: Palette = {
+  ...DARK,
+  line: "#646C80",
+  line2: "#7A8193",
+  muted: "#C0C5D3",
+  dim: "#A3AABB",
+  scrim: "rgba(0,0,0,0.75)",
+};
+
+export const LIGHT_HC: Palette = {
+  ...LIGHT,
+  line: "#80879A",
+  line2: "#6B7282",
+  muted: "#3E4553",
+  dim: "#4F5666",
+  accent: "#3A4BCF",
+  accent2: "#2A3AB0",
+  scrim: "rgba(10,12,17,0.55)",
+};
+
 export type Scheme = "dark" | "light";
 
-const ThemeContext = createContext<{ C: Palette; scheme: Scheme }>({ C: DARK, scheme: "dark" });
+const ThemeContext = createContext<{ C: Palette; scheme: Scheme; bold: boolean }>({ C: DARK, scheme: "dark", bold: false });
 
-/** The user's pick in Profile, else the phone's own dark/light setting. */
+/**
+ * The user's pick in Profile, else the phone's own dark/light setting. Contrast follows the
+ * Profile switch, else the phone's setting; Bold Text comes from the phone (iPhone only).
+ */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const pref = useSpoken((s) => s.themePref);
+  const contrastPref = useSpoken((s) => s.highContrast);
+  const sysContrast = useSpoken((s) => s.sysContrast);
+  const bold = useSpoken((s) => s.boldText);
   const system = useColorScheme();
   const scheme: Scheme = pref === "system" ? (system === "light" ? "light" : "dark") : pref;
-  const value = useMemo(() => ({ C: scheme === "light" ? LIGHT : DARK, scheme }), [scheme]);
+  const high = contrastPref ?? sysContrast;
+  const value = useMemo(
+    () => ({ C: scheme === "light" ? (high ? LIGHT_HC : LIGHT) : high ? DARK_HC : DARK, scheme, bold }),
+    [scheme, high, bold],
+  );
   return <ThemeContext value={value}>{children}</ThemeContext>;
 }
 
@@ -135,25 +171,54 @@ export function useTheme() {
 
 type Styles = Record<string, ViewStyle | TextStyle | ImageStyle>;
 
-/** A style sheet built from the palette; rebuilt once per theme, then cached. Typed like StyleSheet.create. */
+/**
+ * A style sheet built from the palette; rebuilt once per theme (and Bold Text), then cached.
+ * Typed like StyleSheet.create.
+ */
 export function makeStyles<S extends Styles>(build: (C: Palette) => S & Styles): () => Readonly<S> {
-  const cache = new Map<Palette, Readonly<S>>();
+  const cache = new Map<string, Readonly<S>>();
+  const ids = new Map<Palette, number>();
   return () => {
-    const { C } = useTheme();
-    const hit = cache.get(C);
+    const { C, bold } = useTheme();
+    if (!ids.has(C)) ids.set(C, ids.size);
+    const key = `${ids.get(C)}${bold ? "b" : ""}`;
+    const hit = cache.get(key);
     if (hit) return hit;
-    const sheet = StyleSheet.create(build(C));
-    cache.set(C, sheet);
+    const built = build(C);
+    if (bold)
+      for (const style of Object.values(built) as { fontFamily?: string }[])
+        if (style.fontFamily) style.fontFamily = bolder(style.fontFamily);
+    const sheet = StyleSheet.create(built);
+    cache.set(key, sheet);
     return sheet;
   };
 }
 
-/** Inter weights. The web uses variable weights 510/560; the nearest static cuts are 500/600. */
+/** Inter weights. The web uses variable weights 510/560; the nearest static cuts are 500/600. Bold is for Bold Text. */
 export const F = {
   regular: "Inter_400Regular",
   medium: "Inter_500Medium",
   semibold: "Inter_600SemiBold",
+  bold: "Inter_700Bold",
 } as const;
+
+const BOLDER: Record<string, string> = { [F.regular]: F.medium, [F.medium]: F.semibold, [F.semibold]: F.bold };
+
+/** One Inter weight up, for the phone's Bold Text setting. */
+export function bolder(family: string): string {
+  return BOLDER[family] ?? family;
+}
+
+/** Text is at least this much bigger than default (the phone's text size): layouts stack and simplify. */
+export const LARGE_TEXT = 1.3;
+
+/** True when the phone's text size is large enough that side-by-side layouts should stack. */
+export function useLargeText(): boolean {
+  return useWindowDimensions().fontScale >= LARGE_TEXT;
+}
+
+/** Big headings grow less than body text, so they don't push the content off screen. */
+export const HEADING_SCALE = 1.4;
 
 /** CSS letter-spacing in em → React Native points. */
 export const em = (v: number, size: number) => v * size;

@@ -13,7 +13,8 @@ import {
   type PresetField,
   type PresetRequest,
 } from "../lib/presets";
-import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
+import { fill } from "../lib/i18n";
+import { em, F, HEADING_SCALE, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useMobileCopy, useStore } from "../lib/use-spoken";
 import { Icon } from "./Icon";
 import { Btn, Field, Press, T } from "./ui";
@@ -61,7 +62,8 @@ export function SheetModal({
 export function HeadButton({ label, onPress, strong }: { label: string; onPress(): void; strong?: boolean }) {
   const styles = useStyles();
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={10}>
+    // "‹ Back" is read as just "Back".
+    <Pressable accessibilityRole="button" accessibilityLabel={label.replace(/^‹\s*/, "")} onPress={onPress} hitSlop={10} style={styles.headHit}>
       <Text style={[styles.headBtn, strong && styles.headBtnStrong]}>{label}</Text>
     </Pressable>
   );
@@ -256,7 +258,7 @@ export function PresetEditor({ open, preset, onClose }: { open: boolean; preset:
               <Press
                 key={name}
                 accessibilityRole="radio"
-                accessibilityLabel={name}
+                accessibilityLabel={m.iconNames[name]}
                 accessibilityState={{ checked: on }}
                 onPress={() => patch({ icon: name })}
                 style={[styles.iconOpt, on && styles.iconOn]}
@@ -268,7 +270,7 @@ export function PresetEditor({ open, preset, onClose }: { open: boolean; preset:
         </View>
       </View>
 
-      <Text style={styles.section}>{m.whoL}</Text>
+      <Text style={styles.section} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>{m.whoL}</Text>
       <Field label={m.contactName} value={draft.contactName} placeholder={m.contactNamePh} onChangeText={(contactName) => patch({ contactName })} />
       <View>
         <Field
@@ -281,7 +283,7 @@ export function PresetEditor({ open, preset, onClose }: { open: boolean; preset:
         <Text style={styles.help}>{m.contactPhoneHint}</Text>
       </View>
 
-      <Text style={styles.section}>{m.fieldsL}</Text>
+      <Text style={styles.section} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>{m.fieldsL}</Text>
       <Text style={[styles.help, styles.helpTop]}>{m.fieldsS}</Text>
       {draft.fields.map((f) => (
         <View key={f.id} style={styles.fieldCard}>
@@ -298,7 +300,7 @@ export function PresetEditor({ open, preset, onClose }: { open: boolean; preset:
       ))}
       <Btn kind="ghost" block label={m.addField} icon={<Icon name="plus" color={C.ink} size={18} />} onPress={addField} />
 
-      <Text style={styles.section}>{m.templateL}</Text>
+      <Text style={styles.section} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>{m.templateL}</Text>
       <Field
         label={m.templateL}
         value={draft.template}
@@ -316,7 +318,7 @@ export function PresetEditor({ open, preset, onClose }: { open: boolean; preset:
             {draft.fields
               .filter((f) => f.label.trim())
               .map((f) => (
-                <Press key={f.id} onPress={() => insertToken(f)} accessibilityLabel={token(f)} style={styles.tokenChip}>
+                <Press key={f.id} onPress={() => insertToken(f)} accessibilityLabel={fill(m.insertField, { name: f.label })} style={styles.tokenChip}>
                   <Icon name="plus" color={C.accent} size={14} />
                   <Text style={styles.tokenText}>{f.label}</Text>
                 </Press>
@@ -360,6 +362,7 @@ const useStyles = makeStyles((C) => ({
   headTitle: { flex: 1, textAlign: "center", fontFamily: F.semibold, fontSize: 16, color: C.ink },
   headBtn: { fontFamily: F.regular, fontSize: 16, color: C.accent },
   headBtnStrong: { fontFamily: F.semibold },
+  headHit: { minHeight: 44, justifyContent: "center" },
   sheetBody: { paddingHorizontal: PAD, paddingTop: 20, gap: 16 },
   badge: { alignItems: "center", justifyContent: "center", backgroundColor: C.surface2 },
   useHead: { flexDirection: "row", alignItems: "center", gap: 14, marginBottom: 4 },
@@ -381,7 +384,7 @@ const useStyles = makeStyles((C) => ({
   remove: { width: 48, height: 48, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: C.surface2 },
   multiline: { height: undefined, minHeight: 96, paddingTop: 12, paddingBottom: 12, textAlignVertical: "top", lineHeight: 22 },
   tokens: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  tokenChip: { flexDirection: "row", alignItems: "center", gap: 4, height: 32, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.accent },
+  tokenChip: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: 40, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.accent },
   tokenText: { fontFamily: F.medium, fontSize: 13, color: C.accent2 },
   error: { ...small(13.5), color: C.danger },
   deleteRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48 },

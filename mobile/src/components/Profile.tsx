@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ScrollView, Switch, Text, View } from "react-native";
 import type { ThemePref } from "../lib/store";
-import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
+import { em, F, HEADING_SCALE, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { FeedbackSheet } from "./Feedback";
@@ -51,12 +51,14 @@ export function Profile() {
   const first = name.trim().split(/\s+/)[0] ?? "";
   const hour = new Date().getHours();
   const greet = m.greet[hour < 5 ? "night" : hour < 11 ? "morning" : hour < 18 ? "day" : "evening"];
+  const highContrast = useSpoken((s) => s.highContrast ?? s.sysContrast);
+  const haptics = useSpoken((s) => s.haptics);
   const realOn = serverCalls && !!savedCode;
   const ready = C.ok;
 
   return (
     <ScrollView style={styles.grow} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-      <Text style={styles.h} accessibilityRole="header">
+      <Text style={styles.h} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
         {m.profileH}
       </Text>
 
@@ -173,6 +175,8 @@ export function Profile() {
             </View>
           </>
         ) : null}
+        <View style={styles.divider} />
+        <SwitchRow icon="phone" title={m.hapticsL} sub={m.hapticsS} value={haptics} onChange={(v) => store.setHaptics(v)} />
       </View>
 
       <SectionTitle icon="sliders" title={m.appearance} />
@@ -197,6 +201,8 @@ export function Profile() {
           onChange={(v) => store.setThemePref(v)}
           options={(["system", "light", "dark"] as const).map((v) => ({ v, label: m.themes[v], icon: THEME_ICON[v] }))}
         />
+        <View style={styles.divider} />
+        <SwitchRow icon="sun" title={m.contrastL} sub={m.contrastS} value={highContrast} onChange={(v) => store.setHighContrast(v)} />
       </View>
 
       <SectionTitle icon="bubble" title={m.general} />
@@ -211,7 +217,7 @@ export function Profile() {
               label={t.langL}
               value={lang}
               onChange={(v) => store.setLang(v)}
-              options={(["en", "no"] as const).map((v) => ({ v, label: v.toUpperCase() }))}
+              options={(["en", "no"] as const).map((v) => ({ v, label: v.toUpperCase(), a11y: m.langNames[v] }))}
             />
           }
         />
@@ -227,6 +233,36 @@ export function Profile() {
 }
 
 const THEME_ICON: Record<ThemePref, IconName> = { system: "auto", light: "sun", dark: "moon" };
+
+/** An icon tile, a title with a note, and a switch named by the title. */
+function SwitchRow({ icon, title, sub, value, onChange }: { icon: IconName; title: string; sub: string; value: boolean; onChange(v: boolean): void }) {
+  const { C } = useTheme();
+  const styles = useStyles();
+  return (
+    <View style={styles.switchRow}>
+      <View style={[styles.tile, { backgroundColor: C.accentSoft }]}>
+        <Icon name={icon} color={C.accent} size={19} />
+      </View>
+      <View style={styles.grow}>
+        <T size={15} weight="semibold">
+          {title}
+        </T>
+        <T size={13} color={C.dim}>
+          {sub}
+        </T>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: C.line2, true: C.accent }}
+        thumbColor="#fff"
+        ios_backgroundColor={C.line2}
+        accessibilityLabel={title}
+        accessibilityHint={sub}
+      />
+    </View>
+  );
+}
 
 /** A field with an icon tile beside its input. */
 function FieldRow({ icon, tint, children }: { icon: IconName; tint?: { fg: string; bg: string }; children: ReactNode }) {
@@ -248,7 +284,7 @@ function SectionTitle({ icon, title }: { icon: IconName; title: string }) {
   return (
     <View style={styles.section}>
       <Icon name={icon} color={C.accent} size={16} />
-      <Text style={styles.sectionText} accessibilityRole="header">
+      <Text style={styles.sectionText} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
         {title}
       </Text>
     </View>

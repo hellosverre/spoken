@@ -33,7 +33,7 @@ export type Line =
   | { id: number; kind: "sys"; text: string };
 
 export type Sheet =
-  | { kind: "ask"; cfg: AskConfig; pressed: string | null }
+  | { kind: "ask"; cfg: AskConfig; pressed: string | null; since: number }
   | { kind: "result"; ok: boolean; title: string; rows: Row[] };
 
 export interface IntroState {
@@ -80,6 +80,14 @@ export interface State {
   serverCalls: boolean;
   /** Demo passcode for real calls; empty = the server runs calls in mock mode. */
   passcode: string;
+  /** Higher contrast from Profile; null = follow the phone (sysContrast). */
+  highContrast: boolean | null;
+  /** The phone's Increase Contrast (iPhone) or High contrast text (Android). */
+  sysContrast: boolean;
+  /** The phone's Bold Text (iPhone). */
+  boldText: boolean;
+  /** Buzz when Spoken needs you. */
+  haptics: boolean;
 }
 
 type Pending = { type: "repeat" } | { type: "thanks" } | { type: "text"; text: string };
@@ -115,6 +123,10 @@ const INITIAL: State = {
   history: [],
   serverCalls: true,
   passcode: "",
+  highContrast: null,
+  sysContrast: false,
+  boldText: false,
+  haptics: true,
 };
 
 const HANG = Symbol("hang");
@@ -124,6 +136,7 @@ const PREFS_KEY = "spoken-prefs";
 /** This phone's id for the server (profile, contacts, call history). Made once, as on the web. */
 const DEVICE_KEY = "spoken-device";
 const DEMO_LOGIN = { user: "demo", pass: "demo" };
+type SavedPrefs = Pick<State, "themePref" | "profile" | "serverCalls" | "passcode" | "highContrast" | "haptics">;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Wait two frames so a reset state is drawn before the next one is set. */
@@ -170,7 +183,7 @@ export class SpokenStore {
   private realSink: { instruction(text: string): void; hangup(): void } | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
   private reduce = false;
-  private motionSub: { remove(): void } | undefined;
+  private a11ySubs: { remove(): void }[] = [];
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -202,10 +215,31 @@ export class SpokenStore {
 
   /* ---------- lifecycle ---------- */
 
-  async start() {
-    this.motionSub = AccessibilityInfo.addEventListener("reduceMotionChanged", (v) => {
+  /** Read out by VoiceOver / TalkBack, after whatever is being read now. Does nothing without a screen reader. */
+  private announce(text: string) {
+    if (text.trim()) AccessibilityInfo.announceForAccessibilityWithOptions(text, { queue: true });
+  }
+
+  /** The phone's accessibility settings that change how the app looks or moves. */
+  private watchA11y() {
+    const on = (event: Parameters<typeof AccessibilityInfo.addEventListener>[0], fn: (v: boolean) => void) =>
+      this.a11ySubs.push(AccessibilityInfo.addEventListener(event, fn as never));
+    on("reduceMotionChanged", (v) => {
       this.reduce = v;
     });
+    if (Platform.OS === "ios") {
+      on("boldTextChanged", (boldText) => this.set({ boldText }));
+      on("darkerSystemColorsChanged", (sysContrast) => this.set({ sysContrast }));
+      AccessibilityInfo.isBoldTextEnabled().then((boldText) => this.set({ boldText }), () => {});
+      AccessibilityInfo.isDarkerSystemColorsEnabled().then((sysContrast) => this.set({ sysContrast }), () => {});
+    } else {
+      on("highTextContrastChanged", (sysContrast) => this.set({ sysContrast }));
+      AccessibilityInfo.isHighTextContrastEnabled().then((sysContrast) => this.set({ sysContrast }), () => {});
+    }
+  }
+
+  async start() {
+    this.watchA11y();
     const [saved, prefs, reduce, device] = await Promise.all([
       AsyncStorage.getItem(LANG_KEY).catch(() => null),
       AsyncStorage.getItem(PREFS_KEY).catch(() => null),
@@ -223,13 +257,15 @@ export class SpokenStore {
       .catch(() => {});
     historyRepo.load().then((history) => this.set({ history }));
     try {
-      const p = JSON.parse(prefs ?? "null") as Partial<Pick<State, "themePref" | "profile" | "serverCalls" | "passcode">> | null;
+      const p = JSON.parse(prefs ?? "null") as Partial<SavedPrefs> | null;
       if (p)
         this.set((s) => ({
           themePref: p.themePref ?? s.themePref,
           profile: { ...s.profile, ...p.profile },
           serverCalls: p.serverCalls ?? s.serverCalls,
           passcode: p.passcode ?? s.passcode,
+          highContrast: p.highContrast ?? s.highContrast,
+          haptics: p.haptics ?? s.haptics,
         }));
     } catch {}
     this.syncRealCalls();
@@ -244,7 +280,8 @@ export class SpokenStore {
     this.homeId++;
     this.callId++;
     this.stopTimer();
-    this.motionSub?.remove();
+    this.a11ySubs.forEach((s) => s.remove());
+    this.a11ySubs = [];
   }
 
   setLang(lang: Lang) {
@@ -322,6 +359,17 @@ export class SpokenStore {
 
   setThemePref(themePref: ThemePref) {
     this.set({ themePref });
+    this.savePrefs();
+  }
+
+  /** Profile: higher contrast on or off. Set once, it stops following the phone's setting. */
+  setHighContrast(highContrast: boolean) {
+    this.set({ highContrast });
+    this.savePrefs();
+  }
+
+  setHaptics(haptics: boolean) {
+    this.set({ haptics });
     this.savePrefs();
   }
 
@@ -416,9 +464,10 @@ export class SpokenStore {
   }
 
   private savePrefs() {
-    const { themePref, profile, serverCalls, passcode } = this.state;
+    const { themePref, profile, serverCalls, passcode, highContrast, haptics } = this.state;
     this.syncRealCalls();
-    AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ themePref, profile, serverCalls, passcode })).catch(() => {});
+    const saved: SavedPrefs = { themePref, profile, serverCalls, passcode, highContrast, haptics };
+    AsyncStorage.setItem(PREFS_KEY, JSON.stringify(saved)).catch(() => {});
   }
 
   replay() {
@@ -493,6 +542,7 @@ export class SpokenStore {
       const b = this.uid++;
       this.pushThread({ id: b, kind: "bot", text: "" });
       await this.typeInto((t) => this.patchThread(b, { text: t }), line, 10, stop);
+      if (!stop()) this.announce(line);
     };
     void askNotificationPermission();
     const askUser = async (q: string, secret = false) => {
@@ -572,6 +622,7 @@ export class SpokenStore {
     this.set((s) => ({ thread: [...s.thread.filter((i) => i.id !== dots), { id: bot, kind: "bot", text: "" }] }));
     await this.typeInto((t) => this.patchThread(bot, { text: t }), this.t.planIntro, 14, stop);
     if (stop()) return;
+    this.announce(this.t.planIntro);
     await sleep(180);
     if (stop()) return;
 
@@ -607,6 +658,7 @@ export class SpokenStore {
 
   private sys(text: string) {
     this.set((s) => ({ transcript: [...s.transcript, { id: this.uid++, kind: "sys", text }] }));
+    if (this.state.screen === "call") this.announce(text);
   }
 
   private startTimer() {
@@ -639,6 +691,7 @@ export class SpokenStore {
     });
     this.sys(`${this.t.calling} ${L.contact} · ${sc.number}`);
     const live = isLive(this.state.scenario);
+    const instant = () => live || this.reduce;
     const connected = () => {
       this.set({ pill: "live", speakerNote: "listening" });
       this.startTimer();
@@ -683,20 +736,25 @@ export class SpokenStore {
         }
       }
       if (who === "them") this.lastThem = text;
-      await sleep(who === "them" ? 500 : 350);
-      guard();
-
-      const lineId = this.uid++;
-      this.set((s) => ({ transcript: [...s.transcript, { id: lineId, kind: who, words: [] }], speaker: who }));
       const words = text.split(" ");
-      for (let i = 0; i < words.length; i++) {
+      const lineId = this.uid++;
+      if (instant()) {
+        // Real calls and reduced motion: the whole line at once, so reading never lags the call.
+        this.set((s) => ({ transcript: [...s.transcript, { id: lineId, kind: who, words }], speaker: who }));
+      } else {
+        await sleep(who === "them" ? 500 : 350);
         guard();
-        const shown = words.slice(0, i + 1);
-        this.set((s) => ({
-          transcript: s.transcript.map((l) => (l.id === lineId ? { id: lineId, kind: who, words: shown } : l)),
-        }));
-        await sleep((who === "them" ? 105 : 90) + (/[.,!?]$/.test(words[i]) ? 140 : 0));
+        this.set((s) => ({ transcript: [...s.transcript, { id: lineId, kind: who, words: [] }], speaker: who }));
+        for (let i = 0; i < words.length; i++) {
+          guard();
+          const shown = words.slice(0, i + 1);
+          this.set((s) => ({
+            transcript: s.transcript.map((l) => (l.id === lineId ? { id: lineId, kind: who, words: shown } : l)),
+          }));
+          await sleep((who === "them" ? 105 : 90) + (/[.,!?]$/.test(words[i]) ? 140 : 0));
+        }
       }
+      this.announce(`${who === "ai" ? MOBILE_COPY[lang].aiLabel : L.contact}: ${text}`);
       this.set({ speaker: null, speakerNote: "listening" });
     };
 
@@ -704,9 +762,11 @@ export class SpokenStore {
       guard();
       return new Promise<string>((resolve) => {
         this.set((s) => ({
-          pill: "hold", flashTick: s.flashTick + 1, sheet: { kind: "ask", cfg, pressed: null }, sheetOpen: true,
+          pill: "hold", flashTick: s.flashTick + 1, sheet: { kind: "ask", cfg, pressed: null, since: Date.now() }, sheetOpen: true,
         }));
-        buzz();
+        if (this.state.haptics) buzz();
+        // The sheet then takes screen-reader focus on its question (Call.tsx).
+        this.announce(MOBILE_COPY[lang].notifyApproval);
         if (!this.demo) {
           void notifyNeedsYou(MOBILE_COPY[lang].notifyApproval, cfg.title, [
             ...cfg.options.map((o) => ({ id: o.v, label: o.label })),
@@ -742,13 +802,18 @@ export class SpokenStore {
         if (!last || last.kind === "you" || last.kind === "sys") return say(who, text);
         const words = text.split(" ");
         this.set({ speaker: who });
-        for (let i = 0; i < words.length; i++) {
-          guard();
+        const add = (more: string[]) =>
           this.set((s) => ({
-            transcript: s.transcript.map((l) => (l.id === last.id && l.kind === who ? { ...l, words: [...l.words, words[i]] } : l)),
+            transcript: s.transcript.map((l) => (l.id === last.id && l.kind === who ? { ...l, words: [...l.words, ...more] } : l)),
           }));
-          await sleep(90 + (/[.,!?]$/.test(words[i]) ? 140 : 0));
-        }
+        if (instant()) add(words);
+        else
+          for (let i = 0; i < words.length; i++) {
+            guard();
+            add([words[i]]);
+            await sleep(90 + (/[.,!?]$/.test(words[i]) ? 140 : 0));
+          }
+        this.announce(text);
         this.set({ speaker: null, speakerNote: "listening" });
       };
       const io: LiveIO = {
@@ -767,7 +832,8 @@ export class SpokenStore {
       if (live && e !== HANG) {
         // Server or network problem on a real call: say so, don't fake a line.
         this.sys(e instanceof Error ? e.message : String(e));
-        return this.finish(id, { ok: false, title: e instanceof Error ? e.message : "Samtalen feilet", rows: [] });
+        // The reason is in the transcript above; the title stays plain and in the app's language.
+        return this.finish(id, { ok: false, title: MOBILE_COPY[lang].callFailed, rows: [] });
       }
       if (e !== HANG) throw e;
       try {

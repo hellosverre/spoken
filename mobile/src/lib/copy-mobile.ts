@@ -118,6 +118,20 @@ const en = {
   demoTag: "Demo",
   done2: "Done",
   notDone: "Not done",
+  // Accessibility
+  endCallQ: "End the call?",
+  endCallBody: "Spoken says goodbye and hangs up. You can't rejoin this call.",
+  keepCall: "Keep talking",
+  typing: "Spoken is typing",
+  jumpLatest: "Jump to latest",
+  callFailed: "The call didn't go through",
+  insertField: "Insert {name}",
+  langNames: { en: "English", no: "Norsk" },
+  iconNames: { phone: "Phone", heart: "Heart", pizza: "Pizza", doctor: "Doctor", scissors: "Scissors", calendar: "Calendar", bag: "Shopping bag", person: "Person" },
+  contrastL: "Higher contrast",
+  contrastS: "Darker text and clearer outlines. On when the phone's contrast setting is on.",
+  hapticsL: "Vibrate when Spoken needs you",
+  hapticsS: "A double buzz with each approval, as well as the flash and sound.",
 };
 
 export type MobileCopy = typeof en;
@@ -233,6 +247,19 @@ const no: MobileCopy = {
   demoTag: "Demo",
   done2: "Fullført",
   notDone: "Ikke fullført",
+  endCallQ: "Avslutte samtalen?",
+  endCallBody: "Spoken sier ha det og legger på. Du kan ikke gå tilbake til samtalen.",
+  keepCall: "Fortsett samtalen",
+  typing: "Spoken skriver",
+  jumpLatest: "Gå til siste",
+  callFailed: "Samtalen gikk ikke gjennom",
+  insertField: "Sett inn {name}",
+  langNames: { en: "English", no: "Norsk" },
+  iconNames: { phone: "Telefon", heart: "Hjerte", pizza: "Pizza", doctor: "Lege", scissors: "Saks", calendar: "Kalender", bag: "Handlepose", person: "Person" },
+  contrastL: "Høyere kontrast",
+  contrastS: "Mørkere tekst og tydeligere kanter. På når kontrastinnstillingen på telefonen er på.",
+  hapticsL: "Vibrer når Spoken trenger deg",
+  hapticsS: "En dobbel vibrering ved hvert spørsmål, i tillegg til blink og lyd.",
 };
 
 export const MOBILE_COPY: Record<Lang, MobileCopy> = { en, no };

@@ -6,7 +6,7 @@ import { em, F, makeStyles, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Icon } from "./Icon";
 import { HeadButton, SheetModal } from "./PresetSheets";
-import { Btn, T } from "./ui";
+import { Btn, T, useSpeechLang } from "./ui";
 
 /**
  * Profile → Call history: every finished call (title, date, outcome) with a button
@@ -119,10 +119,11 @@ function TranscriptView({ call, onDelete }: { call: CallRecord; onDelete(): void
   const lang = useSpoken((s) => s.lang);
   const { C } = useTheme();
   const styles = useStyles();
+  const speechLang = useSpeechLang();
   return (
     <>
       <View>
-        <T size={26} weight="semibold">
+        <T size={26} weight="semibold" accessibilityRole="header" maxFontSizeMultiplier={1.4}>
           {call.contact}
         </T>
         <Text style={styles.when}>
@@ -160,7 +161,13 @@ function TranscriptView({ call, onDelete }: { call: CallRecord; onDelete(): void
           const right = l.who !== "them";
           const who = l.who === "ai" ? m.aiLabel : l.who === "you" ? m.youLabel : call.contact;
           return (
-            <View key={i} style={[styles.msg, right ? styles.right : styles.left]} accessible accessibilityLabel={`${who}: ${l.text}`}>
+            <View
+              key={i}
+              style={[styles.msg, right ? styles.right : styles.left]}
+              accessible
+              accessibilityLabel={`${who}: ${l.text}`}
+              accessibilityLanguage={speechLang}
+            >
               <Text style={styles.who}>{who}</Text>
               <View style={[styles.bubble, l.who === "ai" ? styles.ai : l.who === "you" ? styles.you : styles.them]}>
                 <Text style={[styles.lineText, l.who === "ai" && { color: C.inv }, l.who === "you" && { color: C.muted, fontSize: 14 }]}>{l.text}</Text>
@@ -218,7 +225,7 @@ const useStyles = makeStyles((C) => ({
   cardTop: { flexDirection: "row", alignItems: "center", gap: 12 },
   badge: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   when: { ...small(13), color: C.dim, marginTop: 2 },
-  tag: { paddingHorizontal: 9, height: 24, borderRadius: 999, justifyContent: "center", backgroundColor: C.surface2 },
+  tag: { paddingHorizontal: 9, paddingVertical: 3, minHeight: 24, borderRadius: 999, justifyContent: "center", backgroundColor: C.surface2 },
   tagText: { fontFamily: F.medium, fontSize: 12, color: C.muted },
   outcomeRow: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
   outcome: { fontFamily: F.semibold, fontSize: 13, marginTop: 1.5 },
