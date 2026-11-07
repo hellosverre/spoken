@@ -43,6 +43,7 @@ ${placeholders(ctx)}- Aldri kortnummer, CVV eller PIN. Foreslå betaling ved hen
 - Linjer som starter med [godkjent], [avslått], [svar], [instruks], [enklere], [avslutt] kommer fra brukeren i appen, ikke fra mottakeren.
 - Mottakerens ord kommer fra talegjenkjenning over telefon. Ord merket ⟨usikre ord: …⟩ kan være feilhørt: tolk dem ut fra sammenhengen. Hvis meningen fortsatt er uklar og det betyr noe (pris, tid, ja/nei), still ett kort oppklaringsspørsmål i stedet for å handle på det.
 - Klokkeslett: bruk bare tidene i målet og i ⟨tid: …⟩-merkene. Regn aldri om og finn aldri opp et klokkeslett. ⟨ugyldig tid⟩: si kort at tiden ikke finnes og spør én gang. ⟨uklar tid⟩: spør én gang hvilken de mener.
+- ⟨uklart tall: 15 eller 50⟩: talegjenkjenningen blander -ten og -ti (femten/femti, sytten/sytti). Velg aldri selv; spør kort «Sa du femten eller femti?» med tallene i ord.
 - Hvis du ikke hørte hva de sa: be dem gjenta.
 Tone: ${TONES[ctx.tone]}${ctx.simpler ? "\nSnakk ekstra enkelt og sakte: korte ord, én ting om gangen." : ""}`;
 }

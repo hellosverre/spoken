@@ -14,6 +14,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLine, LineMetric } from "./line.ts";
 import { timeHint, timesIn } from "../time.ts";
+import { numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
 import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
 import { Segmenter, type Segment } from "./segment.ts";
@@ -477,15 +478,18 @@ export class CallSession {
    */
   private onWords(id: string, words: Word[]) {
     const unsure = words.filter((w) => w.confidence < 0.6).map((w) => w.text.replace(/[.,!?]$/, ""));
+    const numHint = numberHint(words);
     const gate = this.gate?.id === id ? this.gate : undefined;
-    if (!unsure.length) { gate?.go(); return; }
+    if (!unsure.length && !numHint) { gate?.go(); return; }
     const item = this.segItems.get(id);
-    if (item && !item.text.includes("⟨")) item.text = `${item.text} ⟨usikre ord: ${unsure.join(", ")}⟩`;
-    this.debug("unsure_words", { id, unsure });
+    if (item && !/⟨(usikre ord|uklart tall)/.test(item.text)) {
+      item.text = [item.text, numHint, unsure.length ? `⟨usikre ord: ${unsure.join(", ")}⟩` : ""].filter(Boolean).join(" ");
+    }
+    this.debug("unsure_words", { id, unsure, numHint: numHint || undefined });
     if (this.spec) this.dropSpec("unsure words");
     // Wait for the batch second opinion only if an unsure word matters (a number, a name, a noun);
     // on a real line nearly every segment has some unsure filler word (call #4).
-    const matters = unsure.some((w) => isContentWord(w));
+    const matters = !!numHint || unsure.some((w) => isContentWord(w));
     if (!gate) return;
     if (!matters) { gate.go(); return; }
     clearTimeout(gate.timer);
@@ -500,11 +504,11 @@ export class CallSession {
     const item = this.segItems.get(id);
     const before = item?.text.replace(/\s*⟨.*?⟩/g, "") ?? "";
     if (item) {
-      const line = this.transcript.find((t) => t.who === "callee" && t.text === item.text.replace(/ ⟨usikre ord:.*⟩$/, ""));
+      const line = this.transcript.find((t) => t.who === "callee" && t.text === before);
       if (line) line.text = clean;
       const unsure = words.filter((w) => w.confidence < 0.6).map((w) => w.text.replace(/[.,!?]$/, ""));
       const hint = timeHint(clean);
-      item.text = [clean, hint, unsure.length ? `⟨usikre ord: ${unsure.join(", ")}⟩` : ""].filter(Boolean).join(" ");
+      item.text = [clean, hint, numberHint(words), unsure.length ? `⟨usikre ord: ${unsure.join(", ")}⟩` : ""].filter(Boolean).join(" ");
     }
     this.debug("stt_revised", { id, text: clean });
     // Batch changed the line we're answering and nothing has been said yet: answer the corrected text.

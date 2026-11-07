@@ -22,7 +22,8 @@ const BARGE_RMS = Number(process.env.BARGE_RMS ?? 1500);
 const BARGE_FRAMES = 10;
 const BACKCHANNEL_TEXT = /^(ja|jo|mm+|mhm|hm+|okei|ok|ja ja|aha|å|åh|eh|ehm|nei)[.!,]?$/i;
 const VOICED_RMS = Number(process.env.VOICED_RMS ?? 600);
-const LOCAL_COMMIT_MS = Number(process.env.LOCAL_COMMIT_MS ?? 280); // 0 = only Scribe's VAD // "callee is talking" for the STT timing
+// 280 ms cut soft endings: «femti» lost its «-ti» and came back as «15.» (c_28dd2d9a6285).
+const LOCAL_COMMIT_MS = Number(process.env.LOCAL_COMMIT_MS ?? 450); // 0 = only Scribe's VAD // "callee is talking" for the STT timing
 
 // Batch second opinion per segment (STT_BATCH=0 turns it off).
 const STT_BATCH = process.env.STT_BATCH !== "0";
