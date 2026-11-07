@@ -133,6 +133,18 @@ export function Profile() {
             </button>
           </li>
         </ul>
+
+        <h3 className="section">{m.privacyH}</h3>
+        <ul className="list privacy">
+          {m.privacy.map(([title, sub]) => (
+            <li key={title} className="row static">
+              <span className="tx">
+                <b>{title}</b>
+                <span>{sub}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
         <p className="about">{t.foot}</p>
       </div>
     </div>
