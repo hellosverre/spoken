@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spoken · Direction A · Caption</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Lexend:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Direction A — Caption.
+   The call reads like broadcast captions: the other side in big full-contrast type,
+   Spoken's own lines quieter and blue. Lexend was drawn for reading ease, which matters
+   when Norwegian is a second language after sign language. */
+:root{
+  --bg:#0b0d12; --raise:#12151c; --line:#1e2330; --ink:#f2f4f8; --ink-2:#a3abbd; --ink-3:#5d6578;
+  --blue:#4f86ff; --blue-ink:#9dbbff; --blue-wash:rgba(79,134,255,.12); --on-blue:#fff;
+  --r-s:8px; --r-m:14px; --r-l:22px;
+}
+[data-theme=light]{
+  --bg:#f6f7f9; --raise:#ffffff; --line:#e3e6ec; --ink:#0d1018; --ink-2:#4b5263; --ink-3:#9198a8;
+  --blue:#2a62f0; --blue-ink:#1f4fc8; --blue-wash:rgba(42,98,240,.08);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:Lexend,system-ui,sans-serif;-webkit-font-smoothing:antialiased;min-height:100vh}
+.screen{width:100%;max-width:430px;margin:0 auto;min-height:100vh;display:none;flex-direction:column;padding:18px 20px 22px}
+.screen.on{display:flex}
+.top{display:flex;align-items:center;justify-content:space-between;height:40px}
+.mark{font-weight:800;font-size:19px;letter-spacing:-.04em;display:flex;align-items:center;gap:8px}
+.mark i{width:18px;height:18px;display:block}
+.iconbtn{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--ink-2);border:1px solid var(--line)}
+svg{display:block}
+
+/* home */
+.ask{margin-top:40px}
+.ask label{font-size:15px;color:var(--ink-2);font-weight:400}
+.field{margin-top:12px;font-size:34px;line-height:1.14;letter-spacing:-.03em;font-weight:500;min-height:150px}
+.field .typed{color:var(--ink)}
+.field .caret{display:inline-block;width:3px;height:34px;background:var(--blue);vertical-align:-5px;margin-left:2px;border-radius:2px;animation:blink 1.1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.meta{display:flex;gap:8px;margin-top:6px}
+.chip{height:36px;padding:0 13px;border-radius:999px;border:1px solid var(--line);display:inline-flex;align-items:center;gap:7px;font-size:14px;color:var(--ink-2);white-space:nowrap}
+.chip svg{color:var(--ink-3)}
+.go{margin-top:22px;height:60px;border-radius:var(--r-m);background:var(--blue);color:var(--on-blue);display:flex;align-items:center;justify-content:space-between;padding:0 20px;font-size:18px;font-weight:600}
+.go small{font-weight:400;opacity:.75;font-size:13px}
+.sect{margin-top:34px}
+.sect h2{font-size:13px;font-weight:500;color:var(--ink-3);margin-bottom:10px}
+.rail{display:flex;gap:8px;overflow:hidden;margin-right:-20px}
+.short{flex:0 0 auto;padding:14px 15px;border-radius:var(--r-m);background:var(--raise);border:1px solid var(--line);width:140px}
+.short svg{color:var(--blue);margin-bottom:22px}
+.short b{display:block;font-weight:500;font-size:15px}
+.short span{font-size:12.5px;color:var(--ink-3)}
+.place{display:flex;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid var(--line)}
+.place:last-child{border:0}
+.av{width:38px;height:38px;border-radius:11px;background:var(--blue-wash);color:var(--blue-ink);display:grid;place-items:center;font-weight:600;font-size:14px}
+.place b{font-weight:500;font-size:16px;display:block}
+.place span{font-size:13px;color:var(--ink-3)}
+.place em{margin-left:auto;font-style:normal;color:var(--ink-3)}
+
+/* call */
+.callbar{display:flex;align-items:center;gap:12px;height:52px}
+.who{flex:1;min-width:0}
+.who b{display:block;font-size:17px;font-weight:600;letter-spacing:-.01em}
+.who span{font-size:13px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.live{width:8px;height:8px;border-radius:50%;background:#3ad07a;box-shadow:0 0 0 3px rgba(58,208,122,.18)}
+.end{height:40px;padding:0 14px;border-radius:12px;background:#e5484d;color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center}
+.wave{display:flex;gap:3px;align-items:center;height:22px;margin:10px 0 4px}
+.wave i{width:3px;border-radius:2px;background:var(--ink-3);opacity:.6}
+.wave i.hot{background:var(--ink);opacity:1}
+.feed{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:22px;padding:18px 0 14px;overflow:hidden}
+.ln{display:grid;grid-template-columns:3px 1fr;gap:14px}
+.ln:before{content:"";border-radius:3px;background:var(--ink)}
+.ln .tag{font-size:12.5px;color:var(--ink-3);margin-bottom:5px;font-weight:500}
+.ln.them p{font-size:26px;line-height:1.22;letter-spacing:-.02em;font-weight:500}
+.ln.ai:before{background:var(--blue)}
+.ln.ai p{font-size:18px;line-height:1.4;color:var(--blue-ink);font-weight:400}
+.ln.old{opacity:.42}
+.u{color:var(--ink-3)}
+.ln .caret{display:inline-block;width:3px;height:26px;background:var(--ink);vertical-align:-4px;margin-left:3px;border-radius:2px}
+.note{font-size:13px;color:var(--ink-2);display:flex;gap:8px;align-items:center;padding:8px 12px;border-radius:10px;background:var(--raise);border:1px solid var(--line);align-self:flex-start}
+.sheet{margin:0 -20px -22px;padding:22px 20px 24px;background:var(--raise);border-top:1px solid var(--line);border-radius:26px 26px 0 0}
+.sheet .q-l{font-size:13px;color:var(--blue-ink);font-weight:500;display:flex;gap:8px;align-items:center}
+.sheet h3{font-size:28px;line-height:1.15;letter-spacing:-.03em;font-weight:600;margin:10px 0 6px}
+.sheet p{font-size:14.5px;color:var(--ink-2);line-height:1.45}
+.yn{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:18px}
+.yn div{height:96px;border-radius:18px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:34px;font-weight:700;letter-spacing:-.02em}
+.yn small{font-size:13px;font-weight:400;opacity:.75;letter-spacing:0;margin-top:2px}
+.yes{background:var(--blue);color:var(--on-blue)}
+.no{border:1.5px solid var(--line);color:var(--ink)}
+.dock{display:flex;gap:8px;margin-top:14px}
+.dock .in{flex:1;height:48px;border-radius:14px;border:1px solid var(--line);display:flex;align-items:center;padding:0 14px;color:var(--ink-3);font-size:15px}
+.dock .sm{height:48px;padding:0 14px;border-radius:14px;border:1px solid var(--line);display:flex;align-items:center;font-size:14px;color:var(--ink-2)}
+.wait{font-size:13px;color:var(--ink-3);margin-top:14px;text-align:center}
+</style>
+</head>
+<body>
+<!-- HOME -->
+<section class="screen" id="home">
+  <div class="top">
+    <div class="mark"><i><svg viewBox="0 0 18 18" width="18" height="18"><rect x="1" y="7" width="3" height="4" rx="1.5" fill="currentColor"/><rect x="6" y="3" width="3" height="12" rx="1.5" fill="currentColor"/><rect x="11" y="5" width="3" height="8" rx="1.5" fill="#4f86ff"/><rect x="15.5" y="8" width="2.5" height="2" rx="1" fill="#4f86ff"/></svg></i>Spoken</div>
+    <div class="iconbtn"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="6.5" r="3"/><path d="M3.5 15.5c.8-2.6 3-4 5.5-4s4.7 1.4 5.5 4" stroke-linecap="round"/></svg></div>
+  </div>
+  <div class="ask">
+    <label>What do you want done?</label>
+    <div class="field"><span class="typed">Order a large pepperoni from Domino's Storo for 18:00</span><span class="caret"></span></div>
+    <div class="meta">
+      <span class="chip"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1.5h2l1 3-1.5 1a7 7 0 0 0 3 3l1-1.5 3 1v2A1.5 1.5 0 0 1 10 12.5 9 9 0 0 1 1.5 4 1.5 1.5 0 0 1 3 1.5Z" stroke-linejoin="round"/></svg>Look up number</span>
+      <span class="chip"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4h10M2 7h7M2 10h5" stroke-linecap="round"/></svg>Read only</span>
+    </div>
+    <div class="go">Plan the call <small>asks first, then calls</small></div>
+  </div>
+  <div class="sect">
+    <h2>Shortcuts</h2>
+    <div class="rail">
+      <div class="short"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 6.5 11 19l8-12.5a13 13 0 0 0-16 0Z" stroke-linejoin="round"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="13" cy="11.5" r="1.2" fill="currentColor"/></svg><b>Order food</b><span>Takeaway, pickup</span></div>
+      <div class="short"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4.5" width="16" height="14" rx="3"/><path d="M3 9h16M7.5 2.5v4M14.5 2.5v4" stroke-linecap="round"/></svg><b>Book a time</b><span>Doctor, dentist</span></div>
+      <div class="short"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="11" cy="11" r="8"/><path d="M11 6.5V11l3 2" stroke-linecap="round"/></svg><b>Ask a question</b><span>Hours, stock</span></div>
+    </div>
+  </div>
+  <div class="sect">
+    <h2>Saved places</h2>
+    <div class="place"><div class="av">DS</div><div><b>Domino's Storo</b><span>Business · 22 15 00 00</span></div><em>›</em></div>
+    <div class="place"><div class="av">TL</div><div><b>Torshov legesenter</b><span>Business · 23 22 41 00</span></div><em>›</em></div>
+    <div class="place"><div class="av">IM</div><div><b>Mamma</b><span>Person · 913 40 552</span></div><em>›</em></div>
+  </div>
+</section>
+
+<!-- CALL -->
+<section class="screen" id="call">
+  <div class="callbar">
+    <div class="av">DS</div>
+    <div class="who"><b>Domino's Storo</b><span><i class="live"></i>Connected · 01:42</span></div>
+    <div class="end">End</div>
+  </div>
+  <div class="wave" aria-hidden="true">
+    <script>document.write(Array.from({length:62},(_,i)=>{const h=4+Math.abs(Math.sin(i*.55)*Math.cos(i*.17))*18;return `<i class="${i>40&&i<56?'hot':''}" style="height:${h.toFixed(0)}px"></i>`}).join(''))</script>
+  </div>
+  <div class="feed">
+        <div class="ln them old"><div><div class="tag">Domino's</div><p>Hei! Ja, det går fint. Hva skal det være?</p></div></div>
+    <div class="ln ai"><div><div class="tag">Spoken</div><p>En stor pepperoni, til henting klokka 18.</p></div></div>
+    <div class="ln them"><div><div class="tag">Domino's</div><p>Det blir 189 kroner. Betaler du nå eller <span class="u">ved</span> <span class="u">henting</span><span class="caret"></span></p></div></div>
+  </div>
+  <div class="sheet">
+    <div class="q-l"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="5.5"/><path d="M7 4v3.5M7 9.8v.2" stroke-linecap="round"/></svg>Spoken is waiting for you</div>
+    <h3>Pay 189 kr at pickup?</h3>
+    <p>The line stays open. They hear «Et øyeblikk…» until you answer.</p>
+    <div class="yn"><div class="yes">JA<small>Pay at pickup</small></div><div class="no">NEI<small>Don't agree</small></div></div>
+    <div class="dock"><div class="in">Tell Spoken something…</div><div class="sm">Simpler</div><div class="sm">Tone</div></div>
+  </div>
+</section>
+<script>
+const q=new URLSearchParams(location.search);
+document.documentElement.dataset.theme=q.get('theme')||'dark';
+document.getElementById(q.get('screen')||'home').classList.add('on');
+</script>
+</body>
+</html>
