@@ -28,7 +28,7 @@ export const config = {
   elevenlabs: {
     apiKey: env("ELEVENLABS_API_KEY"),
     ttsModel: env("TTS_MODEL", "eleven_flash_v2_5"),
-    defaultVoice: env("DEFAULT_VOICE_ID", "EXAVITQu4vr4xnSDxMaL"),
+    defaultVoice: env("DEFAULT_VOICE_ID", "nPczCjzI2devNBz1zQrb"),
   },
   // Real calls only go to numbers listed here (comma-separated E.164). Empty = no real calls.
   callAllowlist: env("CALL_ALLOWLIST").split(",").map((s) => s.trim()).filter(Boolean),

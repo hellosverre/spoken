@@ -66,6 +66,8 @@ export class CallSession {
   private maxTimer?: ReturnType<typeof setTimeout>;
   private lastCalleeAt = 0;
   private waitingNoticeSaid = false;
+  private silenceTimer?: ReturnType<typeof setTimeout>;
+  private nudged = 0;
 
   constructor(private init: SessionInit) {
     this.callId = init.callId;
@@ -156,6 +158,8 @@ export class CallSession {
     const clean = text.trim();
     if (!clean || this.ended) return;
     this.lastCalleeAt = Date.now();
+    this.nudged = 0;
+    clearTimeout(this.silenceTimer);
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: this.lastCalleeAt });
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
     this.history.push({ role: "callee", text: clean });
@@ -314,9 +318,24 @@ export class CallSession {
       this.speaking = false;
     }
     this.emit({ type: "transcript", id, who: "agent", text: shownSafe, final: true, at: Date.now() });
+    this.armSilenceNudge();
     this.transcript.push({ who: "agent", text: shownSafe, at });
     if (kind === "say" || canned) this.history.push({ role: "agent", text });
     return r;
+  }
+
+  /** If the callee says nothing for 8 s after we spoke, check the line once. */
+  private armSilenceNudge() {
+    clearTimeout(this.silenceTimer);
+    if (this.ended || this.pending || this.nudged >= 2) return;
+    const since = Date.now();
+    this.silenceTimer = setTimeout(() => {
+      if (this.ended || this.pending || this.speaking || this.turnRunning || this.lastCalleeAt > since) return;
+      this.nudged++;
+      void this.say(this.nudged === 1 ? "Hallo, hører du meg?" : "Jeg hører deg dessverre ikke. Jeg prøver igjen senere. Ha det!", "filler").then(() => {
+        if (this.nudged >= 2 && !this.ended) void this.finish("silence", { outcome: "failed", summary: "Hørte ingenting fra mottakeren." });
+      });
+    }, 8000);
   }
 
   private async requestApproval(question: string, options: string[], kind: PendingApproval["kind"], spoken = WAIT_PHRASE) {
@@ -410,6 +429,7 @@ export class CallSession {
     if (this.ended) return;
     this.ended = true;
     clearTimeout(this.maxTimer);
+    clearTimeout(this.silenceTimer);
     this.turnAbort?.abort();
     if (this.pending) clearTimeout(this.pending.timer);
     this.init.line.stopWaitingSound();

@@ -5,7 +5,7 @@ import type { ServerWebSocket } from "bun";
 import { config } from "../config.ts";
 import { ScribeStream } from "../voice/scribe.ts";
 import { tts } from "../voice/tts.ts";
-import { typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
+import { alawToUlaw, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
 import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
 
 const FRAME = 160; // 20 ms of µ-law at 8 kHz
@@ -67,6 +67,7 @@ export class TelnyxLine implements CallLine {
   private typingOff = 0;
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
+  private inboundAlaw = false;
 
   // latency
   private lastCommitAt = 0;
@@ -124,7 +125,7 @@ export class TelnyxLine implements CallLine {
   }
 
   private onWebhook(type: string, p: any) {
-    console.log(`[telnyx] ${type}${p.hangup_cause ? ` cause=${p.hangup_cause} sip=${p.sip_hangup_cause ?? ""}` : ""}`);
+    console.log(`[telnyx] ${type}${p.hangup_cause ? ` cause=${p.hangup_cause} sip=${p.sip_hangup_cause ?? ""} source=${p.hangup_source ?? "?"}` : ""}${p.failure_reason ? ` reason=${p.failure_reason}` : ""}`);
     switch (type) {
       case "call.initiated": this.ev.status("ringing"); break;
       case "call.answered":
@@ -197,12 +198,14 @@ export class TelnyxLine implements CallLine {
     switch (m.event) {
       case "start":
         this.streaming = true;
+        this.inboundAlaw = m.start?.media_format?.encoding === "PCMA";
         console.log(`[telnyx] media start ${JSON.stringify(m.start?.media_format ?? {})}`);
         this.maybeConnected();
         break;
       case "media": {
         if (!m.media?.payload) return;
-        const buf = new Uint8Array(Buffer.from(m.media.payload, "base64"));
+        const raw = new Uint8Array(Buffer.from(m.media.payload, "base64"));
+        const buf = this.inboundAlaw ? alawToUlaw(raw) : raw;
         this.localVad(buf);
         this.inBatch.push(buf);
         if (this.inBatch.length >= 2) { // 40 ms per Scribe message

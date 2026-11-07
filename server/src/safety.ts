@@ -7,7 +7,7 @@ import type { Shareable } from "../../shared/contract.ts";
 
 export const EMERGENCY_ALTERNATIVE =
   "Spoken ringer aldri nødnumre. Ved nød: ring 113 (ambulanse), 112 (politi) eller 110 (brann) selv. " +
-  "Døve og hørselshemmede kan bruke Nødmeldingstjenesten for døve (SMS til 1412).";
+  "Døve og hørselshemmede kan bruke nødmeldingstjenesten.";
 
 /** Normalises a typed number to E.164. Bare 8-digit numbers are Norwegian. */
 export function normalizePhone(raw: string): string {

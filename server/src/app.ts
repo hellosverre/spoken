@@ -156,7 +156,8 @@ export function createApp(llm: LlmProvider = createLlm()) {
 
   function keyterms(text: string, callee: string): string[] {
     const words = `${callee} ${text}`.match(/[A-ZÆØÅ][\wæøåÆØÅ']{2,}|\b\w*(pizza|pepperoni|time|bestill)\w*\b/gi) ?? [];
-    return [...new Set(words.map((w) => w.trim()))].slice(0, 10);
+    // "KI-assistent" is in every opening and callees repeat it back ("er du en KI?").
+    return [...new Set(["KI-assistent", "KI", ...words.map((w) => w.trim())])].slice(0, 12);
   }
 
   async function route(req: Request, server: Server<WsData>): Promise<Response | undefined> {

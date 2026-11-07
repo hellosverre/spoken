@@ -79,6 +79,10 @@ callee µ-law ─┬─ local energy VAD (100 ms) ─┐
 - Live WS replays all past events on connect, so a late join sees the whole call.
 - Callee `transcript` events are emitted again with the same `id` once word confidences arrive (replace by id).
 
+## Call #1 (Sat 7 Nov, to the team's test number)
+
+Connected in 8.5 s; disclosure played from cache instantly (TTS first byte 0 ms). Then silence: Telnyx delivered the callee track as **PCMA (A-law)**, Scribe got it labelled µ-law and returned nothing, so the agent never got a turn; the callee hung up after 35 s (`normal_clearing`). Fixed: A-law → µ-law transcode from `media_format`, plus a silence check ("Hallo, hører du meg?" after 8 s, hang up after a second miss).
+
 ## Measured (Sat 7 Nov, Hugin → ElevenLabs, offline loopback)
 
 | Step | Result |
@@ -86,13 +90,23 @@ callee µ-law ─┬─ local energy VAD (100 ms) ─┐
 | TTS first byte, Flash v2.5, warm connection | ~150 ms (cold first request ~850 ms; prefetch during ringing warms it) |
 | TTS v4 vs Flash, same 110-char line | v4: 3.1 s total; Flash: 0.4 s total. **Flash is the default** (`TTS_MODEL`) |
 | Scribe: speech end → committed transcript | 0.71–0.81 s (0.5 s of that is the VAD silence window, `SCRIBE_SILENCE_SECS`) |
-| Scribe Norwegian accuracy on TTS audio | Near perfect; "KI-assistent" heard as "kundeserviceassistent" (Flash) / "ko i assistent" (v4) |
+| Scribe Norwegian accuracy on TTS audio | Near perfect; "KI-assistent" exact once boosted as a keyterm (before: "kundeserviceassistent") |
 | Word logprobs | −0.4…−1.3 even on correct words; mapped linearly (`1 + lp/2.5`), so only real misses go grey |
 
 The server logs `[latency] callee commit → agent audio: N ms` per turn and `tts first byte` per sentence on real calls.
+
+## Voice (after call #1: "too fast, too bright")
+
+Default **Brian** (`nPczCjzI2devNBz1zQrb`), Flash v2.5, `TTS_SPEED=0.88`, `TTS_STABILITY=0.7`. Offline A/B on the disclosure (`bun scripts/voices.ts`, WAVs in `.cache/voices/`):
+
+| Voice | Median pitch | Pace | Scribe heard |
+|---|---|---|---|
+| **Brian (default)** | 94 Hz | 14.4 chars/s | exact |
+| George | 129 Hz | 15.4 chars/s | exact |
+| Bill | 140 Hz | 13.3 chars/s | "den KI-assistent" |
 
 ## Accounts
 
 - Telnyx Call Control app **spoken** (`3087791926577989207`), webhook `https://spoken-api.hellosverre.com/telnyx/webhook`, on the Default outbound profile (US/CA/NO). From number +17733408724.
 - ElevenLabs key is on the **free** tier (10k chars/month). Fixed lines (disclosure, «Et øyeblikk…», card refusal, short phrases) are cached in `.cache/tts`.
-- Emergency text: verify "Nødmeldingstjenesten for døve (SMS 1412)" before the pitch.
+- Emergency text names no SMS number (unverified); it says "ring 113/112/110, eller bruk nødmeldingstjenesten".

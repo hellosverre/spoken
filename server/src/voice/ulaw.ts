@@ -57,3 +57,21 @@ export function typingSound(seconds = 4): Uint8Array {
   for (let i = 0; i < out.length; i++) u[i] = linearToUlaw(out[i]!);
   return u;
 }
+
+// Norwegian calls arrive as G.711 A-law (PCMA); Scribe and our VAD expect µ-law.
+export function alawToLinear(a: number): number {
+  const x = a ^ 0x55;
+  const sign = x & 0x80;
+  const exp = (x >> 4) & 0x07;
+  const mant = x & 0x0f;
+  let s = exp === 0 ? (mant << 4) + 8 : ((mant << 4) + 0x108) << (exp - 1);
+  return sign ? s : -s;
+}
+
+const ALAW_TO_ULAW = new Uint8Array(256).map((_, i) => linearToUlaw(alawToLinear(i)));
+
+export function alawToUlaw(buf: Uint8Array): Uint8Array {
+  const out = new Uint8Array(buf.length);
+  for (let i = 0; i < buf.length; i++) out[i] = ALAW_TO_ULAW[buf[i]!]!;
+  return out;
+}

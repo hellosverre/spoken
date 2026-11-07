@@ -6,9 +6,9 @@ import { config } from "../config.ts";
 import { designedVoices } from "../store.ts";
 
 export const PRESET_VOICES: Voice[] = [
-  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", description: "Rolig, trygg og tydelig. Standard.", preset: true },
-  { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", description: "Stødig og saklig, som en nyhetsoppleser.", preset: true },
-  { id: "SAz9YHcvj6GT2YYXdXww", name: "River", description: "Avslappet og nøytral.", preset: true },
+  { id: "nPczCjzI2devNBz1zQrb", name: "Brian", description: "Rolig, dyp og varm. Standard.", preset: true },
+  { id: "JBFqnCBsd6RMkjVDRZzb", name: "George", description: "Varm og vennlig.", preset: true },
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", description: "Lys, trygg og tydelig.", preset: true },
 ];
 
 export function listVoices(): Voice[] {

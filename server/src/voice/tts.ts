@@ -9,10 +9,14 @@ import { toSpeakable } from "./speakable.ts";
 const CACHE_DIR = join(import.meta.dir, "../../.cache/tts");
 try { mkdirSync(CACHE_DIR, { recursive: true }); } catch { /* read-only fs: no cache */ }
 
+// Calm and clear on a phone line: slower than default, steady delivery (Sverre, call #1).
+const TTS_SPEED = Number(process.env.TTS_SPEED ?? 0.88);
+const TTS_STABILITY = Number(process.env.TTS_STABILITY ?? 0.7);
+
 const memCache = new Map<string, Uint8Array>();
 
 function cacheKey(text: string, voiceId: string, model: string) {
-  return new Bun.CryptoHasher("sha1").update(`${model}|${voiceId}|${text}`).digest("hex");
+  return new Bun.CryptoHasher("sha1").update(`${model}|${voiceId}|${TTS_SPEED}|${TTS_STABILITY}|${text}`).digest("hex");
 }
 
 export interface TtsOptions {
@@ -45,7 +49,7 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
       model_id: model,
       language_code: "no",
       // A bit slow and clear for phone lines (SPEC).
-      voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: 0.95 },
+      voice_settings: { stability: TTS_STABILITY, similarity_boost: 0.75, style: 0, speed: TTS_SPEED },
     }),
     signal,
   });

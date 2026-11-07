@@ -130,3 +130,15 @@ describe("session safety", () => {
     await s.finish("test");
   });
 });
+
+describe("g711", () => {
+  test("A-law → µ-law keeps the signal", async () => {
+    const { alawToLinear, alawToUlaw, ulawToLinear } = await import("../src/voice/ulaw.ts");
+    for (const a of [0x55, 0xd5, 0x2a, 0xaa, 0x00, 0x80, 0x7f]) {
+      const lin = alawToLinear(a);
+      const back = ulawToLinear(alawToUlaw(new Uint8Array([a]))[0]!);
+      expect(Math.abs(back - lin)).toBeLessThanOrEqual(Math.max(16, Math.abs(lin) * 0.07));
+    }
+    expect(Math.abs(alawToLinear(0x55))).toBeLessThan(16); // A-law silence
+  });
+});
