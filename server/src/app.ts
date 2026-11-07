@@ -98,6 +98,9 @@ function taskForLlm(input: TaskInput, profile: Profile): TaskForLlm {
 
 /** Requests carrying a valid Bearer token → the account's data key (set in fetch, read by deviceOf). */
 const accountKey = new WeakMap<Request, string>();
+/** Account-scoped rate-limit key (IP limits stay as they are). */
+const acctKey = (req: Request) => `acct:${accountKey.get(req) ?? "none"}`;
+const REAL_CALLS_PER_ACCOUNT_DAY = 10;
 
 /** The app's device id (header, or ?device= for GET /api/calls). */
 /** Valid 2–3 distinct places for a parallel info call: the planner's targets, else numbers typed in the request. */
@@ -117,10 +120,9 @@ function planTargets(fromLlm: { name: string; phone?: string }[] | undefined, te
 }
 
 function deviceOf(req: Request): string | undefined {
-  const acct = accountKey.get(req); // logged in: the account's data key, whatever device this is
-  if (acct) return acct;
-  const d = req.headers.get("x-spoken-device") ?? new URL(req.url).searchParams.get("device");
-  return isDeviceId(d) ? d.toLowerCase() : undefined;
+  // Every data route is behind the login gate: the account's data key, whatever device this is.
+  // (X-Spoken-Device is only a hint for linking, in /api/auth/verify.)
+  return accountKey.get(req);
 }
 
 function validTask(b: any): TaskInput | string {
@@ -199,7 +201,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
   async function answerTask(taskId: string, req: Request) {
     const t = tasks.get(taskId);
-    if (!t) return err(404, "unknown task");
+    if (!t || t.device !== deviceOf(req)) return err(404, "unknown task");
     const b = await body(req);
     const answers: Record<string, string> = {};
     if (b?.answers && typeof b.answers === "object") {
@@ -257,7 +259,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
   async function startCall(taskId: string, req: Request, server: Server<WsData>) {
     const t = tasks.get(taskId);
-    if (!t) return err(404, "unknown task");
+    if (!t || t.device !== deviceOf(req)) return err(404, "unknown task");
     const b = await body(req);
     if (b?.approved !== true) return err(400, "approved: true is required (the user must tap OK)");
     if (!t.plan) return err(409, "answer the questions first (POST /api/tasks/:id/answers)");
@@ -286,6 +288,8 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       }
     }
     if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+    if (!takeCallSlot(acctKey(req), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+    if (real && !takeCallSlot(`real:${acctKey(req)}`, REAL_CALLS_PER_ACCOUNT_DAY)) return err(429, `Maks ${REAL_CALLS_PER_ACCOUNT_DAY} ekte samtaler per dag.`);
 
     // The call language can still be changed on the plan screen (POST …/start {callLang}).
     if (b.callLang === "no" || b.callLang === "en") t.plan.callLang = b.callLang;
@@ -348,7 +352,10 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       if (bad) return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
     }
     if (overLimit(`compare:${userKey(req, server)}`, 6, 10 * 60_000)) return err(429, "For mange sammenligninger. Vent litt og prøv igjen.");
-    for (const _ of targets) if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+    for (const _ of targets) {
+      if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay) || !takeCallSlot(acctKey(req), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+      if (real && !takeCallSlot(`real:${acctKey(req)}`, REAL_CALLS_PER_ACCOUNT_DAY)) return err(429, `Maks ${REAL_CALLS_PER_ACCOUNT_DAY} ekte samtaler per dag.`);
+    }
 
     const profile = await profileFor(deviceOf(req));
     const callLang = v.callLang ?? callLangFor(v.text, config.callLang);
@@ -387,15 +394,19 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
     if (path === "/health") return json({ ok: true, callProvider: config.callProvider, llm: llm.name });
 
+    // Every /api route except /api/auth/* needs a valid session (Authorization header, or ?token= for
+    // websockets). Webhooks and media sockets (/vonage, /telnyx, /elks) keep their own per-call tokens.
+    if (path.startsWith("/api/") && !path.startsWith("/api/auth/") && !accountKey.has(req)) {
+      return err(401, "login required");
+    }
+
     // Live audio, binary frames (see call/audio-hub.ts). Browsers can't set headers on a websocket,
     // so the device and the optional session token come in the query string.
     const audio = path.match(/^\/api\/calls\/([\w-]+)\/audio$/);
     if (audio && m === "GET") {
       const callId = audio[1]!;
       const q = url.searchParams;
-      const me = q.get("token") ? await auth.resolve(`Bearer ${q.get("token")}`) : null;
-      const given = q.get("device");
-      const key = me?.device ?? (isDeviceId(given) ? given.toLowerCase() : undefined);
+      const key = accountKey.get(req);
       if (!audioHub.allows(callId, key)) return err(403, "no live audio for this call");
       if (server.upgrade(req, { data: { kind: "audio", callId } satisfies WsData })) return undefined;
       return err(426, "websocket upgrade required");
@@ -470,7 +481,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     }
 
     if (path === "/api/tasks" && m === "POST") {
-      if (overLimit(`task:${userKey(req, server)}`, 30, 10 * 60_000)) return err(429, "For mange forespørsler. Vent litt og prøv igjen.");
+      if (overLimit(`task:${userKey(req, server)}`, 30, 10 * 60_000) || overLimit(`task:${acctKey(req)}`, 30, 10 * 60_000)) return err(429, "For mange forespørsler. Vent litt og prøv igjen.");
       return createTask(req);
     }
     let r = path.match(/^\/api\/tasks\/([\w-]+)\/answers$/);
@@ -591,9 +602,14 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
   return {
     async fetch(req: Request, server: Server<WsData>) {
       try {
-        if (req.headers.has("authorization") && !new URL(req.url).pathname.startsWith("/api/auth/")) {
-          const me = await auth.resolve(req.headers.get("authorization"));
-          if (me) accountKey.set(req, me.device);
+        const u = new URL(req.url);
+        if (!u.pathname.startsWith("/api/auth/")) {
+          const qt = u.searchParams.get("token");
+          const authz = req.headers.get("authorization") ?? (qt ? `Bearer ${qt}` : null);
+          if (authz) {
+            const me = await auth.resolve(authz);
+            if (me) { accountKey.set(req, me.device); }
+          }
         }
         return await route(req, server);
       } catch (e) {

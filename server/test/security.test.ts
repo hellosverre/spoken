@@ -6,13 +6,13 @@ let s: ReturnType<typeof startServer>;
 beforeAll(() => { s = startServer(); });
 afterAll(() => s.stop());
 
-test("public PUT /api/profile without a device id cannot overwrite the default profile", async () => {
+test("public PUT /api/profile without a login cannot overwrite the default profile", async () => {
   const r = await fetch(`${s.base}/api/profile`, {
     method: "PUT",
-    headers: { "cf-connecting-ip": "203.0.113.7" },
+    headers: { "cf-connecting-ip": "203.0.113.7", "x-test-anonymous": "1" },
     body: JSON.stringify({ name: "Hacker", hearCall: false, personality: "short", lang: "no" }),
   });
-  expect(r.status).toBe(400);
+  expect(r.status).toBe(401);
   expect(((await (await fetch(`${s.base}/api/profile`)).json()) as any).name).not.toBe("Hacker");
 });
 

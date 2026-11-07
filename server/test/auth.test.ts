@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app.ts";
-import { CODE_TTL_MS, MAX_TRIES, createAuth, vonageSms, type SmsSender } from "../src/auth.ts";
+import { CODE_TTL_MS, MAX_TRIES, SESSION_TTL_MS, createAuth, vonageSms, type SmsSender } from "../src/auth.ts";
 import { FallbackDb } from "../src/db.ts";
+import { startServer } from "./helpers.ts";
 import { config } from "../src/config.ts";
 
 const D1 = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
@@ -149,35 +150,98 @@ describe("Vonage SMS sender", () => {
 });
 
 describe("HTTP", () => {
-  test("Bearer token makes another device see the account's contacts; anonymous still works", async () => {
+  test("login is required for every /api route except auth; open routes stay open", async () => {
+    const s = startServer();
+    try {
+      const anon = (method: string, path: string, body?: unknown) => s.send(method, path, body, "");
+      const routes: [string, string][] = [
+        ["GET", "/api/profile"], ["PUT", "/api/profile"], ["GET", "/api/contacts"], ["POST", "/api/contacts"], ["DELETE", "/api/contacts/x"],
+        ["GET", "/api/calls"], ["GET", "/api/calls/c_x"], ["POST", "/api/calls/c_x/hangup"], ["POST", "/api/tasks"], ["POST", "/api/tasks/t_x/answers"],
+        ["POST", "/api/tasks/t_x/call"], ["POST", "/api/compare"], ["GET", "/api/compare/x"], ["POST", "/api/feedback"], ["GET", "/api/voices"],
+        ["POST", "/api/voices/design"], ["GET", "/api/incoming"], ["GET", "/api/calls/c_x/audio"], ["GET", "/api/calls/c_x/live"],
+      ];
+      for (const [m, p] of routes) {
+        const r = await anon(m, p, m === "POST" || m === "PUT" ? {} : undefined);
+        expect([m, p, r.status, r.data]).toEqual([m, p, 401, { error: "login required" }]);
+      }
+      // junk token, wrong scheme
+      expect((await s.send("GET", "/api/profile", undefined, "x".repeat(43))).status).toBe(401);
+      expect((await fetch(`${s.base}/api/profile?token=${"y".repeat(43)}`, { headers: { "x-test-anonymous": "1" } })).status).toBe(401);
+      // open
+      expect((await fetch(`${s.base}/health`)).status).toBe(200);
+      expect((await anon("GET", "/api/auth/me")).status).toBe(401); // auth's own answer, not the gate's
+      expect((await fetch(`${s.base}/vonage/answer`, { method: "POST", body: "{}", headers: { "content-type": "application/json" } })).status).not.toBe(401);
+      // and with a session the same routes work
+      expect((await s.get("/api/profile")).status).toBe(200);
+      expect((await s.get("/api/voices")).status).toBe(200);
+    } finally { s.stop(); }
+  });
+
+  test("an expired session gets 401", async () => {
+    let t = 1_000_000;
     const db = new FallbackDb(null);
-    const { auth, code } = (() => { const r = rig(); return { auth: createAuth(db, { sms: async (_t, text) => { r.sent.push({ to: "", text }); return "sms"; } }), code: r.code }; })();
+    let text = "";
+    const auth = createAuth(db, { sms: async (_to, tx) => { text = tx; return "dev"; }, now: () => t });
+    await auth.start(PHONE, "ip");
+    const v = await auth.verify(PHONE, text.match(/\d{6}/)![0], D1);
+    if (!v.ok) throw new Error("verify");
+    expect(await auth.resolve(`Bearer ${v.value.token}`)).not.toBeNull();
+    t += SESSION_TTL_MS + 1;
+    expect(await auth.resolve(`Bearer ${v.value.token}`)).toBeNull();
+    // and over HTTP: the app built on an auth whose clock has moved on
     const app = createApp(undefined, db, auth);
     const server = Bun.serve({ port: 0, fetch: app.fetch, websocket: app.websocket });
-    const base = `http://localhost:${server.port}`;
-    const call = async (path: string, init: RequestInit & { dev?: string; token?: string } = {}) => {
-      const r = await fetch(base + path, {
-        ...init,
-        headers: { "Content-Type": "application/json", ...(init.dev ? { "X-Spoken-Device": init.dev } : {}), ...(init.token ? { Authorization: `Bearer ${init.token}` } : {}) },
-      });
-      return { status: r.status, data: (await r.json()) as any };
-    };
     try {
-      expect((await call("/api/auth/me")).status).toBe(401);
-      expect((await call("/api/auth/start", { method: "POST", body: JSON.stringify({ phone: PHONE }) })).status).toBe(200);
-      const v = await call("/api/auth/verify", { method: "POST", body: JSON.stringify({ phone: PHONE, code: code(), device: D1 }) });
-      expect(v.status).toBe(200);
-      const token = v.data.token as string;
-      await call("/api/contacts", { method: "POST", dev: D1, body: JSON.stringify({ name: "Pizza", phone: "+4722000001" }) });
-      // Device 2 anonymous: sees nothing. With the token: sees device 1's contact.
-      expect((await call("/api/contacts", { dev: D2 })).data).toEqual([]);
-      const seen = await call("/api/contacts", { dev: D2, token });
-      expect(seen.data.map((c: any) => c.name)).toEqual(["Pizza"]);
-      expect((await call("/api/auth/me", { token })).data).toEqual({ phone: PHONE });
-      await call("/api/auth/logout", { method: "POST", token });
-      expect((await call("/api/contacts", { dev: D2, token })).data).toEqual([]);
-    } finally {
-      server.stop(true);
-    }
+      const r = await fetch(`http://localhost:${server.port}/api/profile`, { headers: { Authorization: `Bearer ${v.value.token}` } });
+      expect(r.status).toBe(401);
+      expect(await r.json()).toEqual({ error: "login required" });
+    } finally { server.stop(true); }
+  });
+
+  test("two accounts never see each other's data; logout kills the session", async () => {
+    const s = startServer();
+    try {
+      const a = await s.login("+4791000001");
+      const b = await s.login("+4791000002");
+      expect(a).not.toBe(b);
+      const asA = (m: string, p: string, body?: unknown) => s.send(m, p, body, a);
+      const asB = (m: string, p: string, body?: unknown) => s.send(m, p, body, b);
+      expect((await asA("POST", "/api/contacts", { name: "Pizza", phone: "+4722000001" })).status).toBe(201);
+      expect((await asA("PUT", "/api/profile", { name: "Anna", hearCall: true, personality: "warm", lang: "no" })).status).toBe(200);
+      expect((await asA("POST", "/api/feedback", { source: "profile", comment: "hei" })).status).toBe(201);
+      expect((await asB("GET", "/api/contacts")).data).toEqual([]);
+      expect((await asB("GET", "/api/profile")).data.name).toBe("");
+      expect((await asA("GET", "/api/profile")).data.name).toBe("Anna");
+      expect((await asA("GET", "/api/contacts")).data.map((c: any) => c.name)).toEqual(["Pizza"]);
+      // B cannot delete A's contact, nor use A's task
+      const id = (await asA("GET", "/api/contacts")).data[0].id;
+      expect((await asB("DELETE", `/api/contacts/${id}`)).status).toBe(404);
+      const task = await asA("POST", "/api/tasks", { text: "Bestill pizza hos Pizzabakeren", lang: "no", phone: "22000001" });
+      expect(task.status).toBe(200);
+      expect((await asB("POST", `/api/tasks/${task.data.taskId}/answers`, { answers: {} })).status).toBe(404);
+      // X-Spoken-Device is only a hint: claiming A's device does not give B A's data
+      const spoof = await fetch(`${s.base}/api/contacts`, { headers: { Authorization: `Bearer ${b}`, "X-Spoken-Device": (await s.db.getSession(await sha(a)))!.primaryDevice } });
+      expect(await spoof.json()).toEqual([]);
+      // logout
+      expect((await asA("POST", "/api/auth/logout")).status).toBe(200);
+      expect((await asA("GET", "/api/contacts")).status).toBe(401);
+      expect((await asB("GET", "/api/contacts")).status).toBe(200);
+    } finally { s.stop(); }
+  });
+
+  test("a websocket takes the session as ?token=", async () => {
+    const s = startServer();
+    try {
+      const token = await s.login("+4791000003");
+      const anon = await fetch(`${s.base}/api/calls/c_none/live`, { headers: { "x-test-anonymous": "1" } });
+      expect(anon.status).toBe(401);
+      const authed = await fetch(`${s.base}/api/calls/c_none/live?token=${token}`);
+      expect(authed.status).toBe(404); // past the gate: just an unknown call
+    } finally { s.stop(); }
   });
 });
+
+async function sha(token: string) {
+  const { createHash } = await import("node:crypto");
+  return createHash("sha256").update(token).digest("hex");
+}

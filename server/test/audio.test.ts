@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createApp } from "../src/app.ts";
+import "./helpers.ts"; // logs the test requests in
 import { AudioHub, WHO_AGENT, WHO_CALLEE, audioHub } from "../src/call/audio-hub.ts";
 
 const OWNER = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
@@ -90,6 +91,8 @@ describe("/api/calls/:id/audio", () => {
         const r = await fetch(`http://localhost:${server.port}/api/calls/c_audio_test/audio?${q}`);
         expect(r.status).toBe(403);
       }
+      // (the owner's account is created by this request; the test socket then carries its token)
+      await fetch(`http://localhost:${server.port}/api/profile?device=${OWNER}`);
       const ws = new WebSocket(`${base}/api/calls/c_audio_test/audio?device=${OWNER}`);
       ws.binaryType = "arraybuffer";
       const frames: Uint8Array[] = [];
