@@ -41,6 +41,8 @@ export const config = {
   holdAskSec: num("HOLD_ASK_SEC", 30),
   holdRemindSec: num("HOLD_REMIND_SEC", 20),
   holdMaxSec: num("HOLD_MAX_SEC", 120),
+  // No progress (approval asked/answered, user instruction) for this long → wrap up politely.
+  unproductiveSec: num("UNPRODUCTIVE_SEC", 120),
 };
 
 export type Config = typeof config;

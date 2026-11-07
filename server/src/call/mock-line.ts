@@ -75,6 +75,8 @@ export class MockLine implements CallLine {
   }
 
   stopSpeaking() { this.stopSpeak?.(); }
+  silenceMs() { return this.talking ? 0 : Infinity; }
+  private talking = false;
   startWaitingSound(kind: "typing" | "music" = "typing") { this.waitingSound = kind; }
   stopWaitingSound() { this.waitingSound = false; }
 
@@ -112,6 +114,7 @@ export class MockLine implements CallLine {
     const parts = text.split(" ");
     this.ev.calleeSpeech();
     this.pulse("callee", (Math.ceil(parts.length / 3) * 330 + 250) * this.speed);
+    this.talking = true;
     for (let i = 1; i <= parts.length; i += 3) {
       await this.wait(330);
       if (this.closed) return;
@@ -119,6 +122,7 @@ export class MockLine implements CallLine {
     }
     await this.wait(250);
     if (this.closed) return;
+    this.talking = false;
     const words: Word[] = parts.map((w) => ({ text: w, confidence: UNSURE.has(w) ? 0.52 : 0.93 }));
     this.ev.calleeFinal(id, text, words);
   }

@@ -106,6 +106,32 @@ STT heard: «Der går det bra», «Okay», «Med røret ett», «Så har vi grup
 | meta-llama/llama-4-maverick | 464 ms | 674 ms | 3 issues | dropped the time |
 | openai/gpt-4.1-mini | 724 ms | 880 ms | all ok | asks [[ASK]] too early |
 
+## Fixes after the call #5 review
+
+| # | Issue | Cause | Fix | Test |
+|---|---|---|---|---|
+| 1 | Half-sentences, then a different continuation | Not speculation (0/62 spec runs ever reached TTS). Turns were cancelled mid-sentence when the callee kept talking or said «ja» | Agent waits for 600 ms of real callee silence before its first word (`SPEAK_AFTER_SILENCE_MS`); a bare «ja/mm» mid-turn no longer cancels; speculation off (`SPECULATE=1` to enable) | `call5.test.ts` 1 |
+| 2 | Kept talking after «Ha det!» | Goodbye without [[END]] | Rest of the reply dropped after a goodbye, hang-up right after; later input ignored | 2 |
+| 3 | Re-introductions, repeated «på vegne av» | Model | Code strips greetings, self-intros and repeated «på vegne av {name}» after the first errand line, unless the callee asks who is calling; prompt rule | 3 |
+| 4 | «en time etter tolv på natta» → 00:30 | LLM did time maths | `src/time.ts` parses Norwegian times (klokka/halv/kvart/over/på/«en time etter»/digital/«tjuefem null null») → «⟨tid: HH:MM⟩», «⟨ugyldig tid⟩», «⟨uklar tid⟩» hints; any time the agent says must come from the plan/callee/user, else it asks «Hvilket klokkeslett mener du?» once | `time.test.ts`, 4 |
+| 5 | 5.5 min loop | No exit | 3rd goal question since the last progress → approval card to the user (shop's last words + «Godta det de tilbyr / Prøv noe annet / Legg på»); no progress for `UNPRODUCTIVE_SEC` (120) → polite wrap-up, `partial` | 5 |
+| 6 | «Hallo, hører du meg?» while the callee talked | Timer only looked at commits | Needs 8 s with no voice energy and no partials | – |
+| 7 | Messages for the user | – | «si til / hils / gi beskjed / melding til …» → note «Beskjed til Sverre: «…»» + `result.details.beskjed` | 7 |
+| 8 | Duplicate callee lines | Server already reuses the id (call #5: 47 ids × 2–3 sends) | Web must upsert by id (told Form) | – |
+| 9 | 35 barge-ins | 25 followed by real speech, ~10 noise/laughs; 22 energy VAD, 13 partials | Energy VAD 200 ms at RMS 1500 (was 100 ms at 1100); partials «ja/mm» don't barge in | – |
+
+## Call #5 (Sat 7 Nov, Sverre stress-testing as the shop)
+
+5.5 min, `failed` («Ikke bestilt: ingen stor pepperoni igjen, tilbudt henting var ikke 18:00»). He said the pizza was sold out, offered «klokka 25:00» and «1. januar», trolled. The agent refused to book an impossible time, asked for clarification, and only offered alternatives through the approval card (fired once). Realtime heard «Sjefen min» right this time. Problems: «Ja,/Mm,» before almost every reply (36×), re-introduced itself 3× («Jeg ringer på vegne av Sverre…»), kept talking after its own «Ha det!». Median total 2.26 s. Cost: Telnyx $0.2442 (360 s billed), LLM $0.00596 (23 req), TTS 2693 chars, STT 318 s. ElevenLabs free tier now at 5894/10000 chars.
+
+Fixes: backchannel only if content isn't ready at 1.2 s, max once per 3 turns, never after a callee question, varied «Ja./Okei./Skjønner.»; filler at 2.5 s; rephrase once per call without re-introducing; «ha det» without [[END]] ends the call; batch wait (≤ 0.8 s) only when an unsure word is a number or a content word. Tests: `test/backchannel.test.ts`.
+
+## Call #4 (Sat 7 Nov, merged main, Haiku 5.5, Sverre as the shop)
+
+88 s, outcome `done` («Bestilt: 1 stor pepperoni, hentes 18:00 på navnet Sverre»). Approval card fired at 37 s (auto-JA by the test script). Cost: Telnyx $0.0814 (120 s billed), LLM $0.00134 (9 req), TTS 597 chars, STT 87 s realtime + 11 batch segments.
+
+Latency regressed: median total ~2.37 s (STT ~650, LLM ~610, TTS ~150) because realtime marks unsure words on almost every real-line segment, so the confidence gate waited 0.6–1.0 s for batch on nearly every turn. Batch fixed real errors («passordet … dronning» → «personen … pepperoni», «Vil gi pizzabestilling» → «Hvilken pizza vil du ha?») but realtime marked none of those words unsure. Misaligned windows produced wrong revisions («I Storo.» → «Bestill levering»); revisions now need word overlap.
+
 ## Approval timeout → hold (Sverre, Sat 7 Nov)
 
 User hasn't answered an approval card after `HOLD_ASK_SEC` (30): agent asks «Beklager ventetiden. Jeg får ikke helt kontakt med {name} akkurat nå. Har du mulighet til å vente litt?».

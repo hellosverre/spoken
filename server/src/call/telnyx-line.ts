@@ -13,8 +13,11 @@ import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
 
 const FRAME = 160; // 20 ms of µ-law at 8 kHz
 const LEAD_MS = 120; // how far ahead of real time we send, to ride out jitter
-const BARGE_RMS = Number(process.env.BARGE_RMS ?? 1100);
-const BARGE_FRAMES = 5; // 100 ms of loud audio while we talk = barge-in
+// Call #5: 35 barge-ins, ~10 were laughs/noise. Now 200 ms of loud audio, and partials must be
+// real words, not «mm»/«ja».
+const BARGE_RMS = Number(process.env.BARGE_RMS ?? 1500);
+const BARGE_FRAMES = 10;
+const BACKCHANNEL_TEXT = /^(ja|jo|mm+|mhm|hm+|okei|ok|ja ja|aha|å|åh|eh|ehm|nei)[.!,]?$/i;
 const VOICED_RMS = Number(process.env.VOICED_RMS ?? 600); // "callee is talking" for the STT timing
 
 // Batch second opinion per segment (STT_BATCH=0 turns it off).
@@ -120,6 +123,8 @@ export class TelnyxLine implements CallLine {
   constructor(private o: TelnyxLineOpts) {
     lines.set(o.callId, this);
   }
+
+  silenceMs() { return this.lastVoicedAt ? Date.now() - this.lastVoicedAt : Infinity; }
 
   async start(events: LineEvents) {
     this.ev = events;
@@ -231,7 +236,7 @@ export class TelnyxLine implements CallLine {
 
         // Only real, current speech may barge in: late partials of the previous utterance
         // used to cut the agent off right as it started (replay, Sat 7 Nov).
-        if (Date.now() - this.lastVoicedAt < 200) this.ev.calleeSpeech();
+        if (Date.now() - this.lastVoicedAt < 200 && !BACKCHANNEL_TEXT.test(text.trim())) this.ev.calleeSpeech();
         this.ev.calleePartial(`c_${this.segId}`, text);
       },
       committed: (text) => {
@@ -324,7 +329,10 @@ export class TelnyxLine implements CallLine {
         this.saveSegment({ ...seg, batch: r.text, batchMs: Date.now() - t0 });
         // Only replace realtime when batch looks like the same utterance (guards bad windows).
         const n = (t: string) => norm(t).split(" ").filter(Boolean).length;
-        const plausible = n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
+        // and must share at least one word ("I Storo." → "Bestill levering" on call #4 was the wrong window).
+        const rw = new Set(norm(realtime).split(" "));
+        const overlap = norm(r.text).split(" ").some((w) => w && rw.has(w));
+        const plausible = overlap && n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
         if (r.text && plausible && norm(r.text) !== norm(realtime)) this.ev.calleeRevised?.(id, r.text, r.words);
       })
       .catch((e) => console.warn("[scribe-batch]", (e as Error).message));
