@@ -3,7 +3,9 @@ import { KeyboardAvoidingView, ScrollView, Text, View, type TextInputInstance } 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { em, F, makeStyles, PAD, small } from "../lib/theme";
 import { useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
-import { Mark, Wordmark } from "./Icon";
+import { Glow } from "./Art";
+import { Hero } from "./drawings/Hero";
+import { Wordmark } from "./Icon";
 import { Btn, Field, Rise } from "./ui";
 
 /**
@@ -29,12 +31,13 @@ export function Login() {
 
   return (
     <KeyboardAvoidingView behavior="padding" style={[styles.root, { paddingTop: insets.top }]}>
+      <Glow cx={0.15} cy={0.18} r={0.75} />
       <View style={styles.topbar}>
         <Wordmark />
       </View>
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: 24 + insets.bottom }]} keyboardShouldPersistTaps="handled">
         <Rise i={0} on={on}>
-          <Mark w={34} h={26} r={14} tuck={4} />
+          <Hero width={210} />
         </Rise>
         <Rise i={1} on={on}>
           <Text style={styles.h} accessibilityRole="header">
@@ -91,7 +94,7 @@ const useStyles = makeStyles((C) => ({
   root: { flex: 1, backgroundColor: C.app },
   topbar: { paddingHorizontal: PAD, paddingTop: 14, paddingBottom: 6, minHeight: 34, justifyContent: "center" },
   body: { flexGrow: 1, justifyContent: "center", paddingHorizontal: PAD },
-  h: { fontFamily: F.semibold, fontSize: 36, lineHeight: 39, letterSpacing: em(-0.022, 36), color: C.ink, marginTop: 22, marginBottom: 10 },
+  h: { fontFamily: F.semibold, fontSize: 40, lineHeight: 43, letterSpacing: em(-0.026, 40), color: C.ink, marginTop: 26, marginBottom: 10 },
   lede: { fontFamily: F.regular, fontSize: 15, lineHeight: 22, color: C.muted, maxWidth: 300 },
   form: { gap: 14, marginTop: 28 },
   bad: { fontFamily: F.regular, fontSize: 13.5, color: C.danger },

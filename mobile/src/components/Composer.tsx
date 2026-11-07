@@ -65,6 +65,7 @@ const useStyles = makeStyles((C) => ({
     paddingVertical: 5,
     paddingRight: 5,
     paddingLeft: 14,
+    boxShadow: C.lift,
   },
   input: {
     flex: 1,

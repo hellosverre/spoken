@@ -10,6 +10,13 @@ import { useSpoken } from "./use-spoken";
    web's uppercase mono labels are left out here on purpose, so the app reads
    like plain writing rather than a terminal. */
 
+/** Supporting tints for preset cards and art. Each is a foreground and a soft background. */
+export type TintKey = "violet" | "amber" | "teal" | "rose" | "sky" | "lime";
+export interface Tint {
+  fg: string;
+  bg: string;
+}
+
 export interface Palette {
   bg: string;
   app: string;
@@ -26,6 +33,13 @@ export interface Palette {
   accent2: string;
   danger: string;
   scrim: string;
+  /** The accent as a quiet tint, behind icons and the active speaker. */
+  accentSoft: string;
+  /** Lift for cards and sheets: a soft shadow on light, a hairline glow on dark. */
+  lift: string;
+  /** Strength of the decorative accent glow (0..1). */
+  glow: number;
+  tints: Record<TintKey, Tint>;
 }
 
 export const DARK: Palette = {
@@ -43,6 +57,17 @@ export const DARK: Palette = {
   accent2: "#C7D0FF",
   danger: "#E5484D",
   scrim: "rgba(0,0,0,0.6)",
+  accentSoft: "rgba(165,180,255,0.12)",
+  lift: "0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.35)",
+  glow: 0.32,
+  tints: {
+    violet: { fg: "#B9A8FF", bg: "rgba(185,168,255,0.14)" },
+    amber: { fg: "#FFC46B", bg: "rgba(255,196,107,0.13)" },
+    teal: { fg: "#5FD8C4", bg: "rgba(95,216,196,0.13)" },
+    rose: { fg: "#FF8FA8", bg: "rgba(255,143,168,0.13)" },
+    sky: { fg: "#7CC4FF", bg: "rgba(124,196,255,0.13)" },
+    lime: { fg: "#B5E36B", bg: "rgba(181,227,107,0.13)" },
+  },
 };
 
 export const LIGHT: Palette = {
@@ -60,6 +85,17 @@ export const LIGHT: Palette = {
   accent2: "#3A4BCF",
   danger: "#D93B40",
   scrim: "rgba(10,12,17,0.35)",
+  accentSoft: "rgba(85,102,232,0.09)",
+  lift: "0 1px 2px rgba(10,12,17,0.05), 0 6px 18px rgba(10,12,17,0.06)",
+  glow: 0.2,
+  tints: {
+    violet: { fg: "#6B4FE0", bg: "rgba(107,79,224,0.10)" },
+    amber: { fg: "#B86A00", bg: "rgba(232,150,20,0.13)" },
+    teal: { fg: "#0E8A78", bg: "rgba(14,160,138,0.11)" },
+    rose: { fg: "#D2335C", bg: "rgba(226,60,100,0.10)" },
+    sky: { fg: "#1C74C9", bg: "rgba(40,130,220,0.11)" },
+    lime: { fg: "#4E8A10", bg: "rgba(100,170,30,0.12)" },
+  },
 };
 
 export type Scheme = "dark" | "light";

@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { AccessibilityInfo, Platform, Vibration } from "react-native";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
+import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
 
 export type Screen = "intro" | "login" | "home" | "call";
@@ -70,6 +71,10 @@ export interface State {
   themePref: ThemePref;
   profile: Profile;
   presets: StoredPreset[];
+  /** Call through the Spoken server (real-call.ts); off = the on-phone scripted demos. */
+  serverCalls: boolean;
+  /** Demo passcode for real calls; empty = the server runs calls in mock mode. */
+  passcode: string;
 }
 
 type Pending = { type: "repeat" } | { type: "thanks" } | { type: "text"; text: string };
@@ -101,12 +106,16 @@ const INITIAL: State = {
   themePref: "system",
   profile: { name: "Ingrid", phone: "" },
   presets: DEFAULT_PRESETS,
+  serverCalls: true,
+  passcode: "",
 };
 
 const HANG = Symbol("hang");
 const ABORT = Symbol("abort");
 const LANG_KEY = "spoken-lang";
 const PREFS_KEY = "spoken-prefs";
+/** This phone's id for the server (profile, contacts, call history). Made once, as on the web. */
+const DEVICE_KEY = "spoken-device";
 const DEMO_LOGIN = { user: "demo", pass: "demo" };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -144,6 +153,10 @@ export class SpokenStore {
   private flushing = false;
   private lastThem = "";
   private askResolve: ((v: string) => void) | null = null;
+  /** Real calls: the chat is waiting for an answer to a server question. */
+  private chatAnswer: ((text: string) => void) | null = null;
+  /** Real calls: where mid-call messages and hang-up go. */
+  private realSink: { instruction(text: string): void; hangup(): void } | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
   private reduce = false;
   private motionSub: { remove(): void } | undefined;
@@ -182,11 +195,15 @@ export class SpokenStore {
     this.motionSub = AccessibilityInfo.addEventListener("reduceMotionChanged", (v) => {
       this.reduce = v;
     });
-    const [saved, prefs, reduce] = await Promise.all([
+    const [saved, prefs, reduce, device] = await Promise.all([
       AsyncStorage.getItem(LANG_KEY).catch(() => null),
       AsyncStorage.getItem(PREFS_KEY).catch(() => null),
       AccessibilityInfo.isReduceMotionEnabled().catch(() => false),
+      AsyncStorage.getItem(DEVICE_KEY).catch(() => null),
     ]);
+    const deviceId = device || newDeviceId();
+    if (!device) AsyncStorage.setItem(DEVICE_KEY, deviceId).catch(() => {});
+    configureRealCalls({ deviceId });
     this.reduce = reduce;
     if (saved === "en" || saved === "no") this.set({ lang: saved });
     localPresetRepo
@@ -194,9 +211,16 @@ export class SpokenStore {
       .then((presets) => presets && this.set({ presets }))
       .catch(() => {});
     try {
-      const p = JSON.parse(prefs ?? "null") as Partial<Pick<State, "themePref" | "profile">> | null;
-      if (p) this.set((s) => ({ themePref: p.themePref ?? s.themePref, profile: { ...s.profile, ...p.profile } }));
+      const p = JSON.parse(prefs ?? "null") as Partial<Pick<State, "themePref" | "profile" | "serverCalls" | "passcode">> | null;
+      if (p)
+        this.set((s) => ({
+          themePref: p.themePref ?? s.themePref,
+          profile: { ...s.profile, ...p.profile },
+          serverCalls: p.serverCalls ?? s.serverCalls,
+          passcode: p.passcode ?? s.passcode,
+        }));
     } catch {}
+    this.syncRealCalls();
     this.intro();
   }
 
@@ -297,8 +321,8 @@ export class SpokenStore {
   runPreset(req: PresetRequest) {
     this.demo = false;
     this.set({ tab: "chat" });
-    // The contact (req.contact) is ignored until the real call server can take it.
-    this.sendRequest(req.text);
+    // Real calls send the preset's contact to the server, so its number skips the lookup; scripted ones ignore it.
+    this.sendRequest(req.text, false, req.contact);
   }
 
   savePreset(p: StoredPreset) {
@@ -322,9 +346,30 @@ export class SpokenStore {
     localPresetRepo.save(presets).catch(() => {});
   }
 
+  /** Profile: call through the server, or play the scripted demos on the phone. */
+  setServerCalls(serverCalls: boolean) {
+    this.set({ serverCalls });
+    this.savePrefs();
+  }
+
+  setPasscode(passcode: string) {
+    this.set({ passcode: passcode.trim() });
+    this.savePrefs();
+  }
+
+  private syncRealCalls() {
+    configureRealCalls({
+      enabled: this.state.serverCalls,
+      passcode: this.state.passcode,
+      // As on the web: a wrong code is forgotten, so the next call asks the server as a demo.
+      onWrongPasscode: () => this.setPasscode(""),
+    });
+  }
+
   private savePrefs() {
-    const { themePref, profile } = this.state;
-    AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ themePref, profile })).catch(() => {});
+    const { themePref, profile, serverCalls, passcode } = this.state;
+    this.syncRealCalls();
+    AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ themePref, profile, serverCalls, passcode })).catch(() => {});
   }
 
   replay() {
@@ -339,6 +384,7 @@ export class SpokenStore {
   /* ---------- home ---------- */
 
   goHome(tab: Tab = "home") {
+    this.chatAnswer = null;
     this.introId++;
     this.homeId++;
     this.callId++;
@@ -363,12 +409,65 @@ export class SpokenStore {
 
   submitDraft() {
     this.demo = false;
+    if (this.chatAnswer) {
+      const text = this.state.draft.trim();
+      if (!text) return;
+      const answer = this.chatAnswer;
+      this.chatAnswer = null;
+      this.set({ draft: "" });
+      this.pushThread({ id: this.uid++, kind: "me", text });
+      answer(text);
+      return;
+    }
     this.sendRequest(this.state.draft);
   }
 
   preset(key: ScenarioKey) {
     this.demo = false;
-    this.sendRequest(SCENARIOS[key][this.state.lang].request);
+    this.sendRequest(SCENARIOS[key][this.state.lang].request, true);
+  }
+
+  /** Real call: the server asks its clarify questions in the chat, then its plan fills the card. */
+  private async sendRealRequest(text: string, contact: { name: string; phone: string } | null = null) {
+    const id = ++this.homeId;
+    const stop = () => id !== this.homeId;
+    this.chatAnswer = null;
+    this.set({ threaded: true, thread: [{ id: this.uid++, kind: "me", text }], draft: "" });
+    const dots = this.uid++;
+    this.pushThread({ id: dots, kind: "dots" });
+    const dropDots = () => this.set((s) => ({ thread: s.thread.filter((i) => i.id !== dots) }));
+    const bot = async (line: string) => {
+      if (stop()) return;
+      dropDots();
+      const b = this.uid++;
+      this.pushThread({ id: b, kind: "bot", text: "" });
+      await this.typeInto((t) => this.patchThread(b, { text: t }), line, 10, stop);
+    };
+    try {
+      const key = await planRealCall(
+        text,
+        this.state.lang,
+        {
+          bot,
+          askUser: async (q) => {
+            await bot(q);
+            this.set((s) => ({ focusTick: s.focusTick + 1 }));
+            return new Promise<string>((resolve) => { this.chatAnswer = resolve; });
+          },
+        },
+        // Your Profile name and phone go to the server (per device), so the call says your name.
+        { profile: this.state.profile, contact },
+      );
+      if (stop()) return;
+      dropDots();
+      if (!key) return;
+      await bot(this.t.planIntro);
+      if (stop()) return;
+      this.set({ scenario: key });
+      this.pushThread({ id: this.uid++, kind: "plan", scenario: key, request: text, pressed: false });
+    } catch (e) {
+      if (!stop()) await bot(e instanceof Error ? e.message : String(e));
+    }
   }
 
   editPlan(text: string) {
@@ -386,9 +485,10 @@ export class SpokenStore {
     }));
   }
 
-  async sendRequest(raw: string) {
+  async sendRequest(raw: string, scripted = false, contact: { name: string; phone: string } | null = null) {
     const text = raw.trim();
     if (!text) return;
+    if (!scripted && !this.demo && realEnabled()) return this.sendRealRequest(text, contact);
     const id = ++this.homeId;
     const stop = () => id !== this.homeId;
     const scenario = detect(text);
@@ -472,13 +572,18 @@ export class SpokenStore {
       pill: "ringing", speaker: null, speakerNote: "ringing", screen: "call",
     });
     this.sys(`${this.t.calling} ${L.contact} · ${sc.number}`);
-    await sleep(2300);
-    if (id !== this.callId) return;
-    if (this.hangup) return this.finish(id, { hung: true });
-
-    this.set({ pill: "live", speakerNote: "listening" });
-    this.startTimer();
-    this.sys(this.t.connected);
+    const live = isLive(this.state.scenario);
+    const connected = () => {
+      this.set({ pill: "live", speakerNote: "listening" });
+      this.startTimer();
+      this.sys(this.t.connected);
+    };
+    if (!live) {
+      await sleep(2300);
+      if (id !== this.callId) return;
+      if (this.hangup) return this.finish(id, { hung: true });
+      connected();
+    }
 
     const guard = () => {
       if (id !== this.callId) throw ABORT;
@@ -556,9 +661,39 @@ export class SpokenStore {
 
     let outcome: Outcome;
     try {
-      outcome = await sc.run(lang, { say, ask });
+      const sayMore = async (who: Who, text: string) => {
+        guard();
+        const last = [...this.state.transcript].reverse().find((l) => l.kind === who);
+        if (!last || last.kind === "you" || last.kind === "sys") return say(who, text);
+        const words = text.split(" ");
+        this.set({ speaker: who });
+        for (let i = 0; i < words.length; i++) {
+          guard();
+          this.set((s) => ({
+            transcript: s.transcript.map((l) => (l.id === last.id && l.kind === who ? { ...l, words: [...l.words, words[i]] } : l)),
+          }));
+          await sleep(90 + (/[.,!?]$/.test(words[i]) ? 140 : 0));
+        }
+        this.set({ speaker: null, speakerNote: "listening" });
+      };
+      const io: LiveIO = {
+        say,
+        sayMore,
+        ask,
+        note: (text) => id === this.callId && this.sys(text),
+        connected: () => id === this.callId && connected(),
+        attach: (sink) => { this.realSink = sink; },
+      };
+      outcome = await sc.run(lang, io);
+      this.realSink = null;
     } catch (e) {
+      this.realSink = null;
       if (e === ABORT) return;
+      if (live && e !== HANG) {
+        // Server or network problem on a real call: say so, don't fake a line.
+        this.sys(e instanceof Error ? e.message : String(e));
+        return this.finish(id, { ok: false, title: e instanceof Error ? e.message : "Samtalen feilet", rows: [] });
+      }
       if (e !== HANG) throw e;
       try {
         await say("ai", this.t.hang, true);
@@ -596,6 +731,13 @@ export class SpokenStore {
   }
 
   endCall() {
+    if (this.realSink) {
+      // The server says goodbye and hangs up; its result ends the call screen.
+      this.realSink.hangup();
+      this.demo = false;
+      this.askResolve?.("hang");
+      return;
+    }
     this.hangup = true;
     this.demo = false;
     this.askResolve?.("hang");
@@ -610,11 +752,15 @@ export class SpokenStore {
     const text = raw.trim();
     if (!text) return;
     this.noteYou(text);
+    if (this.realSink) return this.realSink.instruction(text);
     this.pending.push({ type: "text", text });
   }
 
   chip(type: Chip) {
     this.noteYou(type === "repeat" ? this.t.chipRepeat : this.t.chipThanks);
+    if (this.realSink) {
+      return this.realSink.instruction(type === "repeat" ? "Be dem gjenta det de sa." : "Takk dem.");
+    }
     this.pending.push({ type });
   }
 }

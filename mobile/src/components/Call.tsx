@@ -9,6 +9,8 @@ import { ease, em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Composer } from "./Composer";
 import { Chip } from "./Home";
+import { Glow, PulseRings } from "./Art";
+import { DoneArt, NothingAgreedArt } from "./drawings/ResultArt";
 import { Icon, Mark } from "./Icon";
 import { Btn, Press, T } from "./ui";
 
@@ -86,25 +88,49 @@ function Speaker() {
 
   return (
     <View style={styles.speaker}>
+      {/* The glow sits on whoever is talking: neutral for them, the accent for Spoken. */}
+      <SideGlow on={who === "them"} side="left" color={C.ink} />
+      <SideGlow on={who === "ai"} side="right" color={C.accent} />
       <View style={styles.pods}>
-        <View style={[styles.pod, styles.podThem, who === "ai" && styles.quiet]}>
-          <T size={13} weight="medium">
-            {init}
-          </T>
+        <View style={styles.podWrap}>
+          <PulseRings active={who === "them"} color={C.muted} size={56} />
+          <View style={[styles.pod, styles.podThem, who === "ai" && styles.quiet]}>
+            <T size={15} weight="semibold">
+              {init}
+            </T>
+          </View>
         </View>
         <View style={styles.wave} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
           {Array.from({ length: 9 }, (_, i) => (
             <Bar key={i} i={i} who={who} />
           ))}
         </View>
-        <View style={[styles.pod, styles.podAi, who === "them" && styles.quiet]}>
-          <Mark w={18} h={14} r={8} tuck={2} color={C.inv} />
+        <View style={styles.podWrap}>
+          <PulseRings active={who === "ai"} color={C.accent} size={56} />
+          <View style={[styles.pod, styles.podAi, who === "them" && styles.quiet]}>
+            <Mark w={26} h={16} color={C.inv} />
+          </View>
         </View>
       </View>
       <Text style={[styles.speakerLabel, who && { color: C.muted }]} accessibilityLiveRegion="polite">
         {label}
       </Text>
     </View>
+  );
+}
+
+/** A glow on one side of the speaker card that fades in while that side talks. */
+function SideGlow({ on, side, color }: { on: boolean; side: "left" | "right"; color: string }) {
+  const { C } = useTheme();
+  const o = useSharedValue(0);
+  useEffect(() => {
+    o.value = withTiming(on ? 1 : 0, { duration: on ? 250 : 500, easing: ease });
+  }, [on, o]);
+  const anim = useAnimatedStyle(() => ({ opacity: o.value }));
+  return (
+    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, anim]}>
+      <Glow color={color} opacity={C.glow * (color === C.ink ? 0.45 : 1)} cx={side === "left" ? 0.12 : 0.88} cy={0.4} r={0.7} />
+    </Animated.View>
   );
 }
 
@@ -123,7 +149,7 @@ function Bar({ i, who }: { i: number; who: "them" | "ai" | null }) {
     s.value = withDelay(offset, withRepeat(withSequence(withTiming(1, { duration: 400 }), withTiming(0.2, { duration: 400 })), -1));
   }, [who, offset, s]);
   const anim = useAnimatedStyle(() => ({ transform: [{ scaleY: s.value }] }));
-  const color = who === "ai" ? C.accent : who === "them" ? C.muted : C.line2;
+  const color = who === "ai" ? C.accent : who === "them" ? C.ink : C.line2;
   return <Animated.View style={[styles.bar, { backgroundColor: color }, anim]} />;
 }
 
@@ -205,8 +231,8 @@ function CallFooter() {
       ) : (
         <>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
-            <Chip label={t.chipRepeat} onPress={() => store.chip("repeat")} />
-            <Chip label={t.chipThanks} onPress={() => store.chip("thanks")} />
+            <Chip icon="replay" label={t.chipRepeat} onPress={() => store.chip("repeat")} />
+            <Chip icon="heart" label={t.chipThanks} onPress={() => store.chip("thanks")} />
           </ScrollView>
           <Composer
             value={value}
@@ -324,7 +350,7 @@ function AskSheet({ sheet, first }: { sheet: Extract<SheetContent, { kind: "ask"
             />
           ))}
         </View>
-        <Btn kind="ghost" block label={cfg.decline} onPress={() => store.choose("no")} />
+        <Btn kind="ghost" block label={cfg.decline} icon={<Icon name="x" color={C.ink} size={18} />} onPress={() => store.choose("no")} />
       </View>
     </>
   );
@@ -338,9 +364,7 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
 
   return (
     <>
-      <Animated.View entering={FadeIn.duration(350)} style={[styles.badge, !sheet.ok && { backgroundColor: C.surface2 }]}>
-        <Icon name={sheet.ok ? "check" : "x"} color={sheet.ok ? C.inv : C.muted} size={22} strokeWidth={2.2} />
-      </Animated.View>
+      <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={132} /> : <NothingAgreedArt width={132} />}</Animated.View>
       <Text style={styles.h3} accessibilityRole="header">
         {sheet.title}
       </Text>
@@ -361,22 +385,35 @@ const useStyles = makeStyles((C) => ({
   num: { fontFamily: F.regular, fontSize: 13, color: C.dim },
   timer: { color: C.muted, fontVariant: ["tabular-nums"] },
   endbtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.danger, alignItems: "center", justifyContent: "center" },
-  speaker: { marginVertical: 4, backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 12, paddingTop: 14, paddingHorizontal: 16, paddingBottom: 10, gap: 8 },
-  pods: { flexDirection: "row", alignItems: "center", gap: 12 },
-  pod: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  speaker: {
+    marginVertical: 4,
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 22,
+    paddingTop: 22,
+    paddingHorizontal: 20,
+    paddingBottom: 14,
+    gap: 14,
+    overflow: "hidden",
+    boxShadow: C.lift,
+  },
+  pods: { flexDirection: "row", alignItems: "center", gap: 14 },
+  podWrap: { width: 56, height: 56 },
+  pod: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center" },
   podThem: { backgroundColor: C.surface2 },
   podAi: { backgroundColor: C.accent },
   quiet: { opacity: 0.35 },
-  wave: { flex: 1, flexDirection: "row", gap: 4, justifyContent: "center", alignItems: "center", height: 28 },
-  bar: { width: 3, height: 28, borderRadius: 2 },
-  speakerLabel: { ...small(13), textAlign: "center", color: C.dim, minHeight: 18 },
+  wave: { flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", alignItems: "center", height: 36 },
+  bar: { width: 4, height: 36, borderRadius: 2 },
+  speakerLabel: { fontFamily: F.medium, fontSize: 13.5, textAlign: "center", color: C.dim, minHeight: 18 },
   transcript: { gap: 12, paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 16 },
   msg: { maxWidth: "88%", gap: 4 },
   left: { alignSelf: "flex-start" },
   right: { alignSelf: "flex-end", alignItems: "flex-end" },
   who: { ...small(12.5), color: C.dim, paddingHorizontal: 2 },
-  txt: { paddingVertical: 10, paddingHorizontal: 14, borderRadius: 16 },
-  themTxt: { backgroundColor: C.surface, borderBottomLeftRadius: 6 },
+  txt: { paddingVertical: 11, paddingHorizontal: 15, borderRadius: 20 },
+  themTxt: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.line2, borderBottomLeftRadius: 6 },
   aiTxt: { backgroundColor: C.ink, borderBottomRightRadius: 6 },
   youTxt: { borderWidth: 1, borderColor: C.line2, borderBottomRightRadius: 6 },
   lineText: { fontFamily: F.regular, fontSize: 17, lineHeight: 24, letterSpacing: em(-0.006, 17), color: C.ink },

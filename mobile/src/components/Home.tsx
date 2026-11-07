@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { KeyboardAvoidingView, Pressable, ScrollView, Text, View, type ScrollViewInstance } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, Text, useWindowDimensions, View, type ScrollViewInstance } from "react-native";
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SCENARIOS } from "../lib/scenarios";
@@ -7,7 +7,8 @@ import type { Tab, ThreadItem } from "../lib/store";
 import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Composer } from "./Composer";
-import { Icon, Mark, Wordmark, type IconName } from "./Icon";
+import { CHAT_HERO_RATIO, ChatHero } from "./drawings/ChatHero";
+import { Icon, Wordmark, type IconName } from "./Icon";
 import { Presets } from "./Presets";
 import { Profile } from "./Profile";
 import { Btn, Dots, Press, Rise, T } from "./ui";
@@ -83,7 +84,9 @@ function Pane({ children }: { children: ReactNode }) {
 function ChatPane({ screenOn }: { screenOn: boolean }) {
   const store = useStore();
   const t = useCopy();
+  const m = useMobileCopy();
   const styles = useStyles();
+  const lang = useSpoken((s) => s.lang);
   const thread = useSpoken((s) => s.thread);
   const threaded = useSpoken((s) => s.threaded);
   const draft = useSpoken((s) => s.draft);
@@ -95,7 +98,7 @@ function ChatPane({ screenOn }: { screenOn: boolean }) {
       <ScrollView
         ref={scroll}
         style={styles.grow}
-        contentContainerStyle={[styles.chatScroll, !threaded && styles.centre]}
+        contentContainerStyle={styles.chatScroll}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: thread.at(-1)?.kind === "plan" })}
       >
@@ -108,26 +111,19 @@ function ChatPane({ screenOn }: { screenOn: boolean }) {
         ) : (
           <View style={styles.empty}>
             <Rise i={0} on={screenOn}>
-              <Mark w={34} h={26} r={14} tuck={4} />
+              <ChatHeader title={t.ask} lede={t.askSub} />
             </Rise>
-            <Rise i={1} on={screenOn}>
-              <Text style={styles.greet} accessibilityRole="header">
-                {t.ask}
-              </Text>
-            </Rise>
-            <Rise i={2} on={screenOn}>
-              <Text style={styles.lede}>{t.askSub}</Text>
+            {/* Real example requests instead of generic chips: tap one to send it. */}
+            <Rise i={1} on={screenOn} style={styles.examples}>
+              <Text style={styles.examplesL}>{m.tryOne}</Text>
+              {(["pizza", "doctor"] as const).map((k) => (
+                <Example key={k} icon={k} text={SCENARIOS[k][lang].request} onPress={() => store.preset(k)} />
+              ))}
             </Rise>
           </View>
         )}
       </ScrollView>
       <View style={styles.composer}>
-        {threaded ? null : (
-          <View style={styles.presets}>
-            <Chip icon="pizza" label={t.sugPizza} onPress={() => store.preset("pizza")} />
-            <Chip icon="doctor" label={t.sugDoctor} onPress={() => store.preset("doctor")} />
-          </View>
-        )}
         <Composer
           value={draft}
           onChange={(v) => store.setDraft(v)}
@@ -139,6 +135,45 @@ function ChatPane({ screenOn }: { screenOn: boolean }) {
         />
       </View>
     </Pane>
+  );
+}
+
+/**
+ * The top of the empty chat: the illustration edge to edge, with the heading set on
+ * its lower part, which fades into the page (see drawings/ChatHero).
+ */
+function ChatHeader({ title, lede }: { title: string; lede: string }) {
+  const styles = useStyles();
+  const { width } = useWindowDimensions();
+  const height = width / CHAT_HERO_RATIO;
+  return (
+    <View style={[styles.hero, { minHeight: height }]}>
+      <View style={styles.heroArt} accessible={false} importantForAccessibility="no-hide-descendants" pointerEvents="none">
+        <ChatHero width={width} />
+      </View>
+      <View style={[styles.heroText, { paddingTop: height * 0.5 }]}>
+        <Text style={styles.greet} accessibilityRole="header">
+          {title}
+        </Text>
+        <Text style={[styles.lede, styles.ledeLeft]}>{lede}</Text>
+      </View>
+    </View>
+  );
+}
+
+function Example({ icon, text, onPress }: { icon: IconName; text: string; onPress: () => void }) {
+  const { C } = useTheme();
+  const styles = useStyles();
+  return (
+    <Press onPress={onPress} accessibilityLabel={text} scale={0.98} style={styles.example}>
+      <View style={styles.exampleIc}>
+        <Icon name={icon} color={C.accent} size={18} />
+      </View>
+      <Text style={styles.exampleText} numberOfLines={2}>
+        {text}
+      </Text>
+      <Icon name="chevron" color={C.dim} size={16} />
+    </Press>
   );
 }
 
@@ -224,9 +259,9 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
       <View style={styles.actsCol}>
         <Btn block label={t.start} pressed={item.pressed} icon={<Icon name="phone" color={C.inv} />} onPress={() => store.startCall()} />
         <View style={styles.acts}>
-          <Btn kind="ghost" label={t.edit} onPress={() => store.editPlan(item.request)} style={styles.grow} />
+          <Btn kind="ghost" label={t.edit} icon={<Icon name="pencil" color={C.ink} size={17} />} onPress={() => store.editPlan(item.request)} style={styles.grow} />
           {/* Mobile: drop the plan without calling, back to an empty chat. */}
-          <Btn kind="ghost" label={m.cancel} onPress={() => store.newChat()} style={styles.grow} />
+          <Btn kind="ghost" label={m.cancel} icon={<Icon name="x" color={C.ink} size={17} />} onPress={() => store.newChat()} style={styles.grow} />
         </View>
       </View>
     </Animated.View>
@@ -295,13 +330,21 @@ const useStyles = makeStyles((C) => ({
   panes: { flex: 1, minHeight: 0 },
   pane: { flex: 1 },
   chatScroll: { flexGrow: 1, paddingHorizontal: PAD },
-  centre: { justifyContent: "center" },
-  empty: { alignItems: "center", paddingVertical: 24, paddingHorizontal: 8 },
-  greet: { fontFamily: F.semibold, fontSize: 36, lineHeight: 39, letterSpacing: em(-0.022, 36), color: C.ink, textAlign: "center", marginTop: 22, marginBottom: 10 },
+  empty: { paddingBottom: 12 },
+  // Edge to edge: cancels the scroll view's side padding.
+  hero: { marginHorizontal: -PAD },
+  heroArt: { position: "absolute", top: 0, left: 0, right: 0 },
+  heroText: { paddingHorizontal: PAD },
+  greet: { fontFamily: F.semibold, fontSize: 34, lineHeight: 37, letterSpacing: em(-0.024, 34), color: C.ink, marginBottom: 10, maxWidth: 300 },
   lede: { fontFamily: F.regular, fontSize: 15, lineHeight: 22, color: C.muted, textAlign: "center", maxWidth: 290 },
+  ledeLeft: { textAlign: "left", maxWidth: 320 },
+  examples: { marginTop: 26, gap: 8 },
+  examplesL: { fontFamily: F.medium, fontSize: 13, color: C.dim, marginBottom: 2 },
+  example: { flexDirection: "row", alignItems: "center", gap: 12, padding: 12, borderRadius: 16, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface, boxShadow: C.lift },
+  exampleIc: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: C.accentSoft },
+  exampleText: { flex: 1, fontFamily: F.regular, fontSize: 14.5, lineHeight: 20, color: C.ink },
   thread: { gap: 10, paddingTop: 16, paddingBottom: 24 },
   composer: { paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 6, backgroundColor: C.app },
-  presets: { flexDirection: "row", justifyContent: "center", gap: 6, paddingBottom: 8 },
   chip: { height: 30, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, flexDirection: "row", alignItems: "center", gap: 7 },
   chipText: { fontFamily: F.regular, fontSize: 13, color: C.muted },
   bubble: { maxWidth: "84%", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 18 },
@@ -309,12 +352,12 @@ const useStyles = makeStyles((C) => ({
   bot: { alignSelf: "flex-start", backgroundColor: C.surface, borderBottomLeftRadius: 6 },
   bubbleText: { fontFamily: F.regular, fontSize: 16, lineHeight: 22, color: C.ink },
   meText: { color: C.inv },
-  plan: { alignSelf: "stretch", backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 14, padding: 16, gap: 14 },
+  plan: { alignSelf: "stretch", backgroundColor: C.surface, borderWidth: 1, borderColor: C.line, borderRadius: 18, padding: 18, gap: 16, boxShadow: C.lift },
   who: { flexDirection: "row", gap: 12, alignItems: "center", paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: C.line },
-  av: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: C.surface2 },
+  av: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: C.accentSoft },
   fieldL: { ...small(13), color: C.dim, marginBottom: 4 },
   checks: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  check: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: C.accent },
+  check: { paddingVertical: 5, paddingHorizontal: 11, borderRadius: 999, backgroundColor: C.accentSoft },
   quote: { borderLeftWidth: 1, borderLeftColor: C.accent, paddingLeft: 12 },
   actsCol: { gap: 8 },
   acts: { flexDirection: "row", gap: 8 },

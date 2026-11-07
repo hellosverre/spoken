@@ -59,22 +59,24 @@ export interface PresetRequest {
 
 const f = (id: string, label: string, value: string): PresetField => ({ id, label, value });
 
+// Built-ins name who to call but leave the number empty: the call server looks it up
+// from the request text, so they use names its demo directory knows (server/src/directory.ts).
 const BUILT_INS: Record<BuiltInKey, Record<Lang, PresetContent>> = {
   pizza: {
     en: {
       title: "Order a pizza",
       icon: "pizza",
-      contactName: "Løkka Pizza",
-      contactPhone: "+47 22 12 34 56",
-      template: "Order a {Pizza} for pickup at {Time}, max {Budget} kr",
+      contactName: "Domino's Storo",
+      contactPhone: "",
+      template: "Order a {Pizza} from Domino's Storo for pickup at {Time}, max {Budget} kr",
       fields: [f("pizza", "Pizza", "large pepperoni"), f("time", "Time", "18:30"), f("budget", "Budget", "250")],
     },
     no: {
       title: "Bestill pizza",
       icon: "pizza",
-      contactName: "Løkka Pizza",
-      contactPhone: "+47 22 12 34 56",
-      template: "Bestill en {Pizza} til henting {Tid}, maks {Budsjett} kr",
+      contactName: "Domino's Storo",
+      contactPhone: "",
+      template: "Bestill en {Pizza} fra Domino's Storo til henting {Tid}, maks {Budsjett} kr",
       fields: [f("pizza", "Pizza", "stor pepperoni"), f("time", "Tid", "18:30"), f("budget", "Budsjett", "250")],
     },
   },
@@ -82,17 +84,17 @@ const BUILT_INS: Record<BuiltInKey, Record<Lang, PresetContent>> = {
     en: {
       title: "Book a doctor",
       icon: "doctor",
-      contactName: "Birkelunden legesenter",
-      contactPhone: "+47 22 65 43 21",
-      template: "Book an appointment with {Doctor} about {Reason}, {When}",
+      contactName: "Legekontoret",
+      contactPhone: "",
+      template: "Book an appointment at the legekontor with {Doctor} about {Reason}, {When}",
       fields: [f("doctor", "Doctor", "Dr. Nilsen"), f("reason", "Reason", "my sore knee"), f("when", "When", "any morning this week")],
     },
     no: {
       title: "Bestill legetime",
       icon: "doctor",
-      contactName: "Birkelunden legesenter",
-      contactPhone: "+47 22 65 43 21",
-      template: "Bestill time hos {Lege} for {Grunn}, {Når}",
+      contactName: "Legekontoret",
+      contactPhone: "",
+      template: "Bestill time på legekontoret hos {Lege} for {Grunn}, {Når}",
       fields: [f("doctor", "Lege", "dr. Nilsen"), f("reason", "Grunn", "kneet mitt"), f("when", "Når", "en formiddag denne uka")],
     },
   },
@@ -101,7 +103,7 @@ const BUILT_INS: Record<BuiltInKey, Record<Lang, PresetContent>> = {
       title: "Call mom",
       icon: "heart",
       contactName: "Mom",
-      contactPhone: "+47 913 40 552",
+      contactPhone: "",
       template: "Call mom and tell her {Message}",
       fields: [f("message", "Message", "I'll be late for dinner")],
     },
@@ -109,7 +111,7 @@ const BUILT_INS: Record<BuiltInKey, Record<Lang, PresetContent>> = {
       title: "Ring mamma",
       icon: "heart",
       contactName: "Mamma",
-      contactPhone: "+47 913 40 552",
+      contactPhone: "",
       template: "Ring mamma og si at {Beskjed}",
       fields: [f("message", "Beskjed", "jeg kommer sent til middag")],
     },
@@ -118,17 +120,17 @@ const BUILT_INS: Record<BuiltInKey, Record<Lang, PresetContent>> = {
     en: {
       title: "Book a haircut",
       icon: "scissors",
-      contactName: "Frisør Grünerløkka",
-      contactPhone: "+47 22 38 12 00",
-      template: "Book a haircut on {Day}, around {Time}",
+      contactName: "Frisøren",
+      contactPhone: "",
+      template: "Book a haircut at the frisør on {Day}, around {Time}",
       fields: [f("day", "Day", "Friday"), f("time", "Time", "16:00")],
     },
     no: {
       title: "Bestill frisør",
       icon: "scissors",
-      contactName: "Frisør Grünerløkka",
-      contactPhone: "+47 22 38 12 00",
-      template: "Bestill klipp på {Dag}, rundt {Tid}",
+      contactName: "Frisøren",
+      contactPhone: "",
+      template: "Bestill klipp hos frisøren på {Dag}, rundt {Tid}",
       fields: [f("day", "Dag", "fredag"), f("time", "Tid", "16:00")],
     },
   },
@@ -164,11 +166,12 @@ export function fillTemplate(p: PresetContent, values: Record<string, string> = 
 }
 
 export function toRequest(p: Preset, values: Record<string, string>): PresetRequest {
-  return {
-    presetId: p.id,
-    text: fillTemplate(p, values),
-    contact: p.contactName.trim() ? { name: p.contactName.trim(), phone: p.contactPhone.trim() } : null,
-  };
+  const name = p.contactName.trim();
+  const phone = p.contactPhone.trim();
+  let text = fillTemplate(p, values);
+  // No number: the server finds one from the text, so make sure the text names who to call.
+  if (name && !phone && text && !text.toLowerCase().includes(name.toLowerCase())) text = `${text} (${name})`;
+  return { presetId: p.id, text, contact: name ? { name, phone } : null };
 }
 
 /** Where presets are kept. Today the phone; later the server. */

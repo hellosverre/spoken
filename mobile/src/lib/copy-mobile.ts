@@ -31,11 +31,15 @@ const en = {
   youLabel: "You",
   // Home tab: presets
   homeTab: "Home",
+  greet: { morning: "Good morning", day: "Hi", evening: "Good evening", night: "Up late" },
+  tryOne: "Try one",
   presetsH: "Presets",
-  presetsSub: "Calls you make often. Tap one, fill in the details, and Spoken takes it from there.",
   edit: "Edit",
   done: "Done",
   newPreset: "New preset",
+  noPresets: "No presets left.",
+  showMore: "Show more",
+  showLess: "Show less",
   restore: "Restore built-in presets",
   demoH: "Watch a demo",
   noContact: "Spoken looks up the number",
@@ -69,6 +73,13 @@ const en = {
   deleteQ: "Delete this preset?",
   deleteBody: "You can't undo this.",
   needName: "Give it a name and say what Spoken should do.",
+  // Profile: calls
+  callsH: "Calls",
+  serverL: "Use the Spoken server",
+  serverS: "Spoken plans and makes the call. Off: scripted demos on this phone.",
+  passcodeL: "Demo code for real calls",
+  passcodeS: "Without it, calls are demo calls: no phone rings.",
+  passcodeSet: "Saved. Calls can ring real phones.",
 };
 
 export type MobileCopy = typeof en;
@@ -99,11 +110,15 @@ const no: MobileCopy = {
   aiLabel: "Spoken",
   youLabel: "Du",
   homeTab: "Hjem",
+  greet: { morning: "God morgen", day: "Hei", evening: "God kveld", night: "Sent oppe" },
+  tryOne: "Prøv en",
   presetsH: "Snarveier",
-  presetsSub: "Samtaler du tar ofte. Trykk på en, fyll inn detaljene, så tar Spoken det derfra.",
   edit: "Rediger",
   done: "Ferdig",
   newPreset: "Ny snarvei",
+  noPresets: "Ingen snarveier igjen.",
+  showMore: "Vis flere",
+  showLess: "Vis færre",
   restore: "Hent tilbake innebygde snarveier",
   demoH: "Se en demo",
   noContact: "Spoken slår opp nummeret",
@@ -137,6 +152,12 @@ const no: MobileCopy = {
   deleteQ: "Slette denne snarveien?",
   deleteBody: "Dette kan ikke angres.",
   needName: "Gi den et navn og skriv hva Spoken skal gjøre.",
+  callsH: "Samtaler",
+  serverL: "Bruk Spoken-serveren",
+  serverS: "Spoken planlegger og ringer. Av: skriptede demoer på telefonen.",
+  passcodeL: "Demo-kode for ekte samtaler",
+  passcodeS: "Uten den er samtalene demoer: ingen telefon ringer.",
+  passcodeSet: "Lagret. Samtaler kan ringe ekte telefoner.",
 };
 
 export const MOBILE_COPY: Record<Lang, MobileCopy> = { en, no };

@@ -1,13 +1,19 @@
 import { useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
-import { BUILT_IN_KEYS, resolvePreset, type Preset } from "../lib/presets";
+import { BUILT_IN_KEYS, resolvePreset, toRequest, type Preset } from "../lib/presets";
 import { em, F, makeStyles, PAD, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
+import { Glow, useTint } from "./Art";
+import { HeroDuet } from "./drawings/Hero";
+import { hasPresetArt, PresetArt } from "./drawings/PresetArt";
 import { Icon } from "./Icon";
 import { List, Row } from "./List";
 import { PresetEditor, UsePresetSheet } from "./PresetSheets";
 import { Press, T } from "./ui";
+
+/** With more presets than this, the grid shows these first and a Show more button. */
+const FOLD_AT = 4;
 
 /**
  * The Home tab (the web's Demo tab): presets for calls you make often, plus the
@@ -25,6 +31,10 @@ export function Presets() {
   const missingBuiltIn = BUILT_IN_KEYS.some((k) => !stored.some((p) => p.builtIn === k));
 
   const [editing, setEditing] = useState(false);
+  // Long lists fold to the first few; edit mode always shows them all.
+  const [expanded, setExpanded] = useState(false);
+  const folds = presets.length > FOLD_AT && !editing;
+  const shown = folds && !expanded ? presets.slice(0, FOLD_AT) : presets;
   const [using, setUsing] = useState<Preset | null>(null);
   // undefined = editor closed, null = new preset, Preset = editing that one.
   const [editorFor, setEditorFor] = useState<Preset | null | undefined>(undefined);
@@ -32,7 +42,7 @@ export function Presets() {
   const open = (p: Preset) => {
     if (editing) return setEditorFor(p);
     // Nothing to fill in: send it straight away.
-    if (!p.fields.length) return store.runPreset({ presetId: p.id, text: p.template, contact: null });
+    if (!p.fields.length) return store.runPreset(toRequest(p, {}));
     setUsing(p);
   };
 
@@ -49,62 +59,55 @@ export function Presets() {
           <Text style={styles.h} accessibilityRole="header">
             {m.presetsH}
           </Text>
-          <Pressable
-            accessibilityRole="button"
+          <Press
+            accessibilityLabel={editing ? m.done : m.edit}
             accessibilityState={{ selected: editing }}
             onPress={() => setEditing((e) => !e)}
-            hitSlop={10}
+            hitSlop={8}
+            scale={0.9}
             style={[styles.editBtn, editing && styles.editBtnOn]}
           >
-            <Text style={[styles.editText, editing && { color: C.inv }]}>{editing ? m.done : m.edit}</Text>
-          </Pressable>
+            <Icon name={editing ? "check" : "pencil"} color={editing ? C.inv : C.ink} size={18} strokeWidth={editing ? 2.4 : 1.8} />
+          </Press>
         </View>
-        <Text style={styles.lede}>{m.presetsSub}</Text>
+
+        {presets.length === 0 ? (
+          <View style={styles.empty}>
+            <HeroDuet width={170} />
+            <Text style={styles.emptyText}>{m.noPresets}</Text>
+            <Pressable accessibilityRole="button" onPress={() => store.restorePresets()} style={styles.more}>
+              <Icon name="replay" color={C.accent} size={16} />
+              <Text style={styles.moreText}>{m.restore}</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.grid}>
-          {presets.map((p) => (
+          {shown.map((p) => (
             <Animated.View key={p.id} layout={LinearTransition.duration(250)} exiting={FadeOut.duration(180)} style={styles.cell}>
-              <Press
-                onPress={() => open(p)}
-                accessibilityLabel={editing ? `${m.editPreset}: ${p.title}` : p.title}
-                accessibilityHint={p.contactName || undefined}
-                style={[styles.card, editing && styles.cardEditing]}
-              >
-                <View style={styles.cardTop}>
-                  <View style={styles.badge}>
-                    <Icon name={p.icon} color={C.accent} size={20} />
-                  </View>
-                  {editing ? <Icon name="pencil" color={C.dim} size={16} /> : null}
-                </View>
-                <View>
-                  <T size={15} weight="medium" numberOfLines={2}>
-                    {p.title}
-                  </T>
-                  <T size={13} color={C.dim} numberOfLines={1}>
-                    {p.contactName || m.noContact}
-                  </T>
-                </View>
-              </Press>
-              {editing ? (
-                <Animated.View entering={FadeIn.duration(150)} style={styles.deleteWrap}>
-                  <Press accessibilityLabel={`${m.deletePreset}: ${p.title}`} onPress={() => confirmDelete(p)} scale={0.9} style={styles.delete}>
-                    <Icon name="trash" color="#fff" size={15} strokeWidth={2} />
-                  </Press>
-                </Animated.View>
-              ) : null}
+              <PresetCard preset={p} editing={editing} onPress={() => open(p)} onDelete={() => confirmDelete(p)} />
             </Animated.View>
           ))}
           <Animated.View layout={LinearTransition.duration(250)} style={styles.cell}>
             <Press onPress={() => setEditorFor(null)} accessibilityLabel={m.newPreset} style={[styles.card, styles.newCard]}>
               <View style={[styles.badge, styles.newBadge]}>
-                <Icon name="plus" color={C.muted} size={20} />
+                <Icon name="plus" color={C.accent} size={22} />
               </View>
-              <T size={15} weight="medium" color={C.muted}>
+              <T size={16} weight="semibold" color={C.ink} style={styles.cardTitle}>
                 {m.newPreset}
               </T>
             </Press>
           </Animated.View>
         </View>
+
+        {folds ? (
+          <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((x) => !x)} style={styles.more}>
+            <Text style={styles.moreText}>{expanded ? m.showLess : m.showMore}</Text>
+            <View style={{ transform: [{ rotate: expanded ? "-90deg" : "90deg" }] }}>
+              <Icon name="chevron" color={C.accent} size={16} />
+            </View>
+          </Pressable>
+        ) : null}
 
         {editing && missingBuiltIn ? (
           <Pressable accessibilityRole="button" onPress={() => store.restorePresets()} style={styles.restore}>
@@ -152,27 +155,87 @@ export function Presets() {
   );
 }
 
+/** One preset: its own colour tint, a soft glow in that colour, title and who it calls. */
+function PresetCard({ preset: p, editing, onPress, onDelete }: { preset: Preset; editing: boolean; onPress(): void; onDelete(): void }) {
+  const m = useMobileCopy();
+  const { C } = useTheme();
+  const styles = useStyles();
+  const tint = useTint(p.icon);
+  return (
+    <>
+      <Press
+        onPress={onPress}
+        accessibilityLabel={editing ? `${m.editPreset}: ${p.title}` : p.title}
+        accessibilityHint={p.contactName || undefined}
+        style={[styles.card, editing && styles.cardEditing]}
+      >
+        {editing ? null : <Glow color={tint.fg} opacity={C.glow * 0.7} cx={0} cy={0} r={0.85} />}
+        <View style={styles.cardTop}>
+          {hasPresetArt(p.icon) ? (
+            <PresetArt icon={p.icon} tint={tint} size={58} />
+          ) : (
+            <View style={[styles.badge, { backgroundColor: tint.bg }]}>
+              <Icon name={p.icon} color={tint.fg} size={22} />
+            </View>
+          )}
+          {editing ? <Icon name="pencil" color={C.dim} size={16} /> : null}
+        </View>
+        <View style={styles.cardText}>
+          <T size={16} weight="semibold" numberOfLines={2} style={styles.cardTitle}>
+            {p.title}
+          </T>
+          <T size={13} color={C.muted} numberOfLines={1}>
+            {p.contactName || m.noContact}
+          </T>
+        </View>
+      </Press>
+      {editing ? (
+        <Animated.View entering={FadeIn.duration(150)} style={styles.deleteWrap}>
+          <Press accessibilityLabel={`${m.deletePreset}: ${p.title}`} onPress={onDelete} scale={0.9} style={styles.delete}>
+            <Icon name="trash" color="#fff" size={15} strokeWidth={2} />
+          </Press>
+        </Animated.View>
+      ) : null}
+    </>
+  );
+}
+
 const useStyles = makeStyles((C) => ({
   grow: { flex: 1 },
-  body: { paddingHorizontal: PAD, paddingTop: 20, paddingBottom: 24 },
-  headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 6, marginBottom: 8 },
-  h: { fontFamily: F.semibold, fontSize: 28, lineHeight: 31, letterSpacing: em(-0.02, 28), color: C.ink },
-  editBtn: { height: 34, paddingHorizontal: 14, borderRadius: 999, borderWidth: 1, borderColor: C.line2, justifyContent: "center" },
-  editBtnOn: { backgroundColor: C.ink, borderColor: C.ink },
-  editText: { fontFamily: F.medium, fontSize: 14, color: C.ink },
-  lede: { fontFamily: F.regular, fontSize: 15, lineHeight: 22, color: C.muted, marginBottom: 20 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  body: { paddingHorizontal: PAD, paddingTop: 18, paddingBottom: 32 },
+  headRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 6, marginBottom: 16 },
+  h: { fontFamily: F.semibold, fontSize: 28, lineHeight: 32, letterSpacing: em(-0.022, 28), color: C.ink },
+  empty: { alignItems: "center", gap: 12, paddingVertical: 20, marginBottom: 8 },
+  emptyText: { fontFamily: F.medium, fontSize: 15, color: C.muted, textAlign: "center" },
+  editBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.surface2, alignItems: "center", justifyContent: "center" },
+  editBtnOn: { backgroundColor: C.accent },
+  more: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, alignSelf: "center", marginTop: 14, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 999, backgroundColor: C.accentSoft },
+  moreText: { fontFamily: F.medium, fontSize: 14, color: C.accent },
+  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   // Two columns; a card alone on its row stays half width.
   cell: { flexBasis: "45%", flexGrow: 1, maxWidth: "50%" },
-  card: { minHeight: 118, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface, justifyContent: "space-between", gap: 12 },
-  cardEditing: { borderColor: C.line2, borderStyle: "dashed" },
+  card: {
+    minHeight: 132,
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.line,
+    backgroundColor: C.surface,
+    justifyContent: "space-between",
+    gap: 14,
+    overflow: "hidden",
+    boxShadow: C.lift,
+  },
+  cardEditing: { borderColor: C.line2, borderStyle: "dashed", boxShadow: "none" },
   cardTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  badge: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: C.surface2 },
-  newCard: { backgroundColor: "transparent", borderStyle: "dashed", borderColor: C.line2 },
-  newBadge: { backgroundColor: "transparent", borderWidth: 1, borderColor: C.line2 },
+  cardText: { gap: 2 },
+  cardTitle: { lineHeight: 20 },
+  badge: { width: 44, height: 44, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: C.accentSoft },
+  newCard: { backgroundColor: "transparent", borderStyle: "dashed", borderColor: C.line2, boxShadow: "none" },
+  newBadge: { backgroundColor: C.accentSoft },
   deleteWrap: { position: "absolute", top: -8, right: -8 },
   delete: { width: 30, height: 30, borderRadius: 15, backgroundColor: C.danger, alignItems: "center", justifyContent: "center", borderWidth: 2, borderColor: C.app },
   restore: { flexDirection: "row", alignItems: "center", gap: 8, alignSelf: "flex-start", marginTop: 16, paddingVertical: 6 },
   restoreText: { fontFamily: F.medium, fontSize: 14, color: C.accent },
-  section: { fontFamily: F.semibold, fontSize: 15, color: C.ink, marginTop: 30, marginBottom: 10, marginLeft: 2 },
+  section: { fontFamily: F.semibold, fontSize: 17, letterSpacing: em(-0.01, 17), color: C.ink, marginTop: 34, marginBottom: 12 },
 }));
