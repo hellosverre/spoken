@@ -557,9 +557,15 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       return json(device ? await profileFor(device) : defaultProfile);
     }
     if (path === "/api/profile" && m === "PUT") {
-      const v = validProfile(await body(req));
+      const raw = await body(req);
+      const v = validProfile(raw);
       if (typeof v === "string") return err(400, v);
       const device = deviceOf(req);
+      // Screens that don't know about the voice must not erase it: keep the saved one unless sent.
+      if (device && (raw?.voiceId === undefined || raw?.voiceId === null)) {
+        const prev = await db.getProfile(device);
+        if (prev?.voiceId) v.voiceId = prev.voiceId;
+      }
       if (device) await db.putProfile(device, v);
       else if (isPublic(req)) return err(400, "X-Spoken-Device is required");
       else setProfile(v);
