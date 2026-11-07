@@ -185,7 +185,7 @@ describe("blocked numbers", () => {
 describe("REST basics", () => {
   test("voices and profile", async () => {
     const v = await s.get("/api/voices");
-    expect(v.data.filter((x: any) => x.preset).length).toBe(3);
+    expect(v.data.filter((x: any) => x.preset).length).toBe(8);
     const p = await fetch(`${s.base}/api/profile`, { method: "PUT", body: JSON.stringify({ name: "Ingvild", hearCall: false, personality: "short", lang: "no" }) });
     expect((await p.json() as any).name).toBe("Ingvild");
     const { plan } = await planFor("Bestill pizza fra Peppes til 19:00");

@@ -89,6 +89,10 @@ export interface Voice {
   name: string;
   description: string;
   preset: boolean;
+  gender?: "male" | "female";
+  lang?: "no" | "en";
+  /** ElevenLabs sample mp3, fetched once by the server; absent until known. */
+  previewUrl?: string;
 }
 
 export interface Profile {
