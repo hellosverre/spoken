@@ -10,7 +10,6 @@ const INK = "var(--ink)";
 const ACCENT = "var(--accent)";
 const MUTED = "var(--muted)";
 const FG = "var(--t-fg)";
-const BG = "var(--t-bg)";
 
 function Drawing({ viewBox, className, children }: { viewBox: string; className?: string; children: ReactNode }) {
   return (
@@ -47,54 +46,12 @@ const ICON_TINT: Record<PresetIcon, string> = {
 /** Each preset icon has its own colour (data-tint in globals.css), so the grid reads at a glance. */
 export const tintOf = (icon: PresetIcon) => ICON_TINT[icon];
 
-const PRESET_ART: Partial<Record<PresetIcon, ReactNode>> = {
-  // One slice: crust along the top, cheese body, pepperoni.
-  pizza: (
-    <>
-      <path d="M32 57L10.5 18.5A25 25 0 0 1 53.5 18.5z" fill={FG} fillOpacity={0.14} stroke={FG} {...STROKE} />
-      <path d="M13.8 24.4A19 19 0 0 1 50.2 24.4" fill="none" stroke={FG} strokeOpacity={0.55} {...STROKE} />
-      <circle cx={25} cy={31} r={3.6} fill={FG} fillOpacity={0.85} />
-      <circle cx={38.5} cy={33} r={3.2} fill={FG} fillOpacity={0.85} />
-      <circle cx={31.5} cy={45} r={2.8} fill={FG} fillOpacity={0.85} />
-    </>
-  ),
-  // A clipboard with a cross and a few lines.
-  doctor: (
-    <>
-      <rect x={14} y={12} width={36} height={44} rx={7} fill={FG} fillOpacity={0.12} stroke={FG} {...STROKE} />
-      <rect x={24} y={8} width={16} height={9} rx={3} fill={BG} stroke={FG} {...STROKE} />
-      <path d="M32 24v12M26 30h12" stroke={FG} {...STROKE} strokeWidth={2.5} />
-      <path d="M22 43h20M22 49h12" stroke={FG} strokeOpacity={0.55} {...STROKE} />
-    </>
-  ),
-  // A heart with a small handset tucked in, and sound coming off it.
-  heart: (
-    <>
-      <path d="M32 54s-20-11.5-20-26a10.5 10.5 0 0 1 20-5 10.5 10.5 0 0 1 20 5c0 14.5-20 26-20 26z" fill={FG} fillOpacity={0.16} stroke={FG} {...STROKE} />
-      <path d="M26 26h3.5l1.8 4.4-2.2 1.3a9.6 9.6 0 0 0 4.4 4.4l1.3-2.2 4.4 1.8v3.5a1.8 1.8 0 0 1-1.8 1.8A14 14 0 0 1 24.2 27.8 1.8 1.8 0 0 1 26 26z" fill="none" stroke={FG} {...STROKE} strokeWidth={1.8} />
-      <path d="M52 12c3 3 3 8 0 11M57 8c5 5 5 14 0 19" fill="none" stroke={FG} strokeOpacity={0.6} {...STROKE} />
-    </>
-  ),
-  // Open scissors: two finger rings, blades crossing at the pivot.
-  scissors: (
-    <>
-      <path d="M25 43L42.5 8L45.5 10.5L29.5 44.5z" fill={FG} fillOpacity={0.16} stroke={FG} {...STROKE} />
-      <path d="M39 43L21.5 8L18.5 10.5L34.5 44.5z" fill={FG} fillOpacity={0.16} stroke={FG} {...STROKE} />
-      <circle cx={20} cy={50} r={7} fill={BG} stroke={FG} {...STROKE} />
-      <circle cx={44} cy={50} r={7} fill={BG} stroke={FG} {...STROKE} />
-      <circle cx={32} cy={32.5} r={2.2} fill={FG} />
-    </>
-  ),
-};
-
-export const hasPresetArt = (icon: PresetIcon) => icon in PRESET_ART;
+/* The preset pictures are generated 3D illustrations in public/presets (one per PresetIcon). */
+export const hasPresetArt = (icon: PresetIcon) => icon.length > 0;
 
 export function PresetArt({ icon }: { icon: PresetIcon }) {
-  return (
-    <Drawing className="preset-art" viewBox="0 0 64 64">
-      {PRESET_ART[icon]}
-    </Drawing>
-  );
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img className="preset-art" src={`/presets/${icon}.png`} alt="" aria-hidden="true" width={58} height={58} draggable={false} />;
 }
 
 /* ---------- big drawings ---------- */
