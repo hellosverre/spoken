@@ -118,7 +118,10 @@ const FILLER_WORDS = new Set(["det", "den", "jeg", "du", "vi", "de", "ha", "har"
 // Start the LLM on a partial that has been stable this long (speculative turn).
 const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
 // Callee text that sounds cut off mid-sentence: wait this long for more before answering.
-const HOLD_MS = 450;
+const HOLD_MS = 900; // after «Det blir…»: let them finish the sentence
+// A line without . ? ! may be a pause mid-sentence: wait until they've really stopped talking.
+const HOLD_OPEN_MS = Number(process.env.HOLD_OPEN_MS ?? 600);
+const DONE_SILENCE_MS = 700;
 // Word confidences arrive ~20 ms after the commit; batch revisions ~0.7 s.
 const WORDS_WAIT_MS = 250; // call #6: confidences came 130 ms after the commit
 const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
@@ -138,11 +141,13 @@ const REFUSAL_HINT = "⟨svar på om de vil snakke med en KI⟩";
 const BARGE_TAIL_MS = Number(process.env.BARGE_TAIL_MS ?? 400);
 // Questions and normal sentences are finished even if they end in «det»/«den» («vi har ikke det.»).
 const CONNECTOR_END = /\b(og|eller|men|fordi|at|som|hvis|altså|eh|ehm|øh|liksom|til|med|for|om)[.…]?$/i;
+// Words that end a sentence only when nothing follows; with a full stop they are fine («Det går fint, det.»).
+const OPEN_END = /\b(så|da|den|det|en|et|på|i|av|klokka|kl|cirka|ca|rundt|kanskje|and|or|but|because|so|the|a|to|with|about|um|uh)[…,]?$/i;
 function soundsUnfinished(text: string): boolean {
   const t = text.trim();
   if (/\?$/.test(t)) return false;
   if (/(,|…|\.\.\.|-)$/.test(t)) return true;
-  if (CONNECTOR_END.test(t)) return true;
+  if (CONNECTOR_END.test(t) || OPEN_END.test(t)) return true;
   // «Det blir.» / «Det koster.» : a cut-off before the number
   return t.split(/\s+/).length <= 3 && /\b(blir|koster|er|var)[.]?$/i.test(t);
 }
@@ -669,6 +674,19 @@ export class CallSession {
     if (soundsUnfinished(clean)) {
       this.debug("hold_unfinished", { text: clean });
       this.holdTimer = setTimeout(() => { this.holdTimer = undefined; if (this.segItems.has(id)) this.requestTurn(); }, HOLD_MS);
+      return;
+    }
+    // No closing . ? ! : maybe just a breath. Start only once the line has been quiet for a while.
+    if (!/[.?!]$/.test(clean.replace(/\s*⟨.*?⟩/g, "").trim()) && Number.isFinite(this.init.line.silenceMs?.() ?? Infinity)) {
+      this.debug("hold_open", { text: clean });
+      const id1 = id;
+      const check = () => {
+        this.holdTimer = undefined;
+        if (!this.segItems.has(id1) || this.ended) return;
+        if ((this.init.line.silenceMs?.() ?? Infinity) < DONE_SILENCE_MS) { this.holdTimer = setTimeout(check, 200); return; }
+        this.startGate(id1);
+      };
+      this.holdTimer = setTimeout(check, HOLD_OPEN_MS);
       return;
     }
     // «Okay?» / «Ja, men» on its own: give the callee a moment to go on before we answer.
