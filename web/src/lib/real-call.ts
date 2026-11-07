@@ -25,12 +25,25 @@ function base(): string {
   return API === "/" ? window.location.origin : API.replace(/\/$/, "");
 }
 
+/** This phone's id for the server (profile, contacts, call history). Made once, kept in localStorage. */
+const DEVICE_KEY = "spoken-device";
+function deviceId(): string {
+  try {
+    let d = localStorage.getItem(DEVICE_KEY);
+    if (!d) { d = crypto.randomUUID(); localStorage.setItem(DEVICE_KEY, d); }
+    return d;
+  } catch {
+    return "";
+  }
+}
+
 async function http<T>(method: string, path: string, body?: unknown, extra: Record<string, string> = {}): Promise<T> {
   let res: Response;
   try {
+    const device = deviceId();
     res = await fetch(base() + path, {
       method,
-      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...extra },
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(device ? { "X-Spoken-Device": device } : {}), ...extra },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -115,8 +128,25 @@ const prettyPhone = (p: string) => p.replace(/^\+47(\d{2})(\d{2})(\d{2})(\d{2})$
  * Chat step: task → server clarify questions (answered in the chat) → plan. Returns the
  * scenario key to show in the plan card, or null if the server blocked the task.
  */
-export async function planRealCall(text: string, lang: Lang, chat: ChatPort): Promise<ScenarioKey | null> {
-  const phone = text.match(/\+?\d[\d \-]{6,16}\d/)?.[0].replace(/[ \-]/g, "");
+/** The app's profile tab (name, phone) merged into the server profile, so the call says the right name. */
+async function syncProfile(app: { name: string; phone: string }, lang: Lang) {
+  if (!app.name.trim()) return;
+  try {
+    const cur = await http<Record<string, unknown>>("GET", "/api/profile");
+    await http("PUT", "/api/profile", {
+      hearCall: true, personality: "warm", ...cur, lang,
+      name: app.name.trim(), ...(app.phone.trim() ? { phone: app.phone.trim() } : {}),
+    });
+  } catch { /* the call still works with the server's default profile */ }
+}
+
+export async function planRealCall(
+  text: string, lang: Lang, chat: ChatPort,
+  opts: { profile?: { name: string; phone: string }; contact?: { name: string; phone: string } | null } = {},
+): Promise<ScenarioKey | null> {
+  if (opts.profile) await syncProfile(opts.profile, lang);
+  // A preset's contact number wins; otherwise a number typed in the task text.
+  const phone = opts.contact?.phone?.replace(/[ \-]/g, "") || text.match(/\+?\d[\d \-]{6,16}\d/)?.[0].replace(/[ \-]/g, "");
   const c = await http<Clarify>("POST", "/api/tasks", { text, lang, ...(phone ? { phone } : {}) });
   const answers: Record<string, string> = {};
   // Questions are off for now: the server plans from the request alone.

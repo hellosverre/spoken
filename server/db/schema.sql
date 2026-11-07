@@ -35,3 +35,6 @@ create index if not exists call_results_device on public.call_results(device_id,
 alter table public.profiles enable row level security;
 alter table public.contacts enable row level security;
 alter table public.call_results enable row level security;
+-- Newer Supabase projects don't grant table rights to service_role by default (PostgREST gave
+-- 42501 "permission denied"). The server's role only; anon/authenticated get nothing. Applied Sat 7 Nov.
+grant select, insert, update, delete on public.profiles, public.contacts, public.call_results to service_role;

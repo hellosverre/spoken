@@ -139,6 +139,8 @@ export class SpokenStore {
   private chatAnswer: ((text: string) => void) | null = null;
   /** Real calls: where mid-call messages and hang-up go. */
   private realSink: { instruction(text: string): void; hangup(): void } | null = null;
+  /** The contact of the preset being run (real calls only). */
+  private presetContact: { name: string; phone: string } | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
 
   subscribe = (fn: () => void) => {
@@ -328,7 +330,8 @@ export class SpokenStore {
   runPreset(req: PresetRequest) {
     this.demo = false;
     this.set({ tab: "chat" });
-    // The contact (req.contact) is not sent yet: the server finds the number from the text.
+    // Real calls send the preset's contact number to the server; scripted ones ignore it.
+    this.presetContact = req.contact;
     this.sendRequest(req.text);
   }
 
@@ -425,6 +428,8 @@ export class SpokenStore {
       await this.typeInto((t) => this.patchThread(b, { text: t }), line, 10, stop);
     };
     try {
+      const contact = this.presetContact;
+      this.presetContact = null;
       const key = await planRealCall(text, this.state.lang, {
         bot,
         askUser: async (q) => {
@@ -432,7 +437,7 @@ export class SpokenStore {
           this.set((s) => ({ focusTick: s.focusTick + 1 }));
           return new Promise<string>((resolve) => { this.chatAnswer = resolve; });
         },
-      });
+      }, { profile: this.state.profile, contact });
       if (stop()) return;
       dropDots();
       if (!key) return;
