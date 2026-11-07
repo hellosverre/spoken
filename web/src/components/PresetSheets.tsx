@@ -14,6 +14,7 @@ import {
   type PresetRequest,
 } from "@/lib/presets";
 import { cx, useAppCopy, useStore } from "@/lib/use-spoken";
+import { tintOf } from "./Art";
 import { Icon } from "./Icon";
 import { Confirm, Field, HeadButton, PageSheet } from "./ui";
 
@@ -46,7 +47,7 @@ export function UsePresetSheet({
         }}
       >
         <div className="use-head">
-          <span className="pbadge big">
+          <span className="pbadge big" data-tint={tintOf(preset.icon)}>
             <Icon name={preset.icon} />
           </span>
           <div>

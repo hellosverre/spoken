@@ -12,6 +12,11 @@ export function Pitch() {
     [t.f2t, t.f2s],
     [t.f3t, t.f3s],
   ];
+  const built = [
+    ["Scribe v2 Realtime", t.b1s],
+    ["Scribe v2", t.b2s],
+    ["Flash v2.5", t.b3s],
+  ];
 
   return (
     <aside className="pitch" aria-label="About Spoken">
@@ -36,6 +41,17 @@ export function Pitch() {
           </li>
         ))}
       </ul>
+      <section className="built" aria-label={t.builtH}>
+        <span className="label">{t.builtH}</span>
+        <ul>
+          {built.map(([name, sub]) => (
+            <li key={name}>
+              <b>{name}</b>
+              <span>{sub}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
       <div className="pitch-actions">
         <button className="btn primary" onClick={() => store.playDemo()}>
           {t.demo}
