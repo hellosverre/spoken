@@ -4,7 +4,8 @@ export type Lang = "no" | "en";
 
 export interface TaskInput {
   text: string; // "Bestill en stor pepperoni fra Domino's Storo til 18:00"
-  lang: Lang; // UI language; the call itself uses the callee's language
+  lang: Lang; // UI language
+  callLang?: Lang; // language spoken on the call; default: «in English» / «på norsk» in the text, else CALL_LANG
   phone?: string; // E.164 if the user typed a number
   contactId?: string; // a saved place
 }
@@ -31,6 +32,7 @@ export interface Plan {
   willShare: Shareable[];
   needsApprovalFor: string[]; // e.g. ["price over 0 kr", "booking a time"]
   voiceId: string;
+  callLang?: Lang; // language spoken on the call (missing = "no"); the user can switch it mid-call
   blocked?: { reason: string; alternative?: string }; // e.g. emergency number
 }
 

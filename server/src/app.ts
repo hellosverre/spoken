@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
 import { timingSafeEqual } from "node:crypto";
+import { callLangFor } from "./call/lines.ts";
 import { MockLine } from "./call/mock-line.ts";
 import { MockLlm } from "./llm/mock.ts";
 import { CallSession } from "./call/session.ts";
@@ -26,6 +27,12 @@ const CALL_LEXICON = [
   "levere", "pepperoni", "pizza", "kroner", "klokka", "navnet", "navn", "telefonnummer", "adresse", "betale",
   "betaling", "kort", "vipps", "kontant", "ett øyeblikk", "vent litt", "på vent", "minutter", "time", "timen",
   "avbestille", "reservere", "bord", "ledig", "stengt", "åpent", "allergi", "glutenfri", "laktosefri",
+];
+// The same for English calls. Norwegian names from the task (Storo, Grünerløkka) still come first.
+const CALL_LEXICON_EN = [
+  "AI", "pickup", "pick up", "delivery", "order", "pepperoni", "pizza", "kroner", "o'clock", "name",
+  "phone number", "address", "pay", "card", "Vipps", "cash", "one moment", "hold on", "on hold", "minutes",
+  "appointment", "cancel", "reserve", "table", "available", "closed", "open", "allergy", "gluten-free", "lactose-free",
 ];
 
 type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine };
@@ -50,7 +57,7 @@ function userKey(req: Request, server: Server<WsData>): string {
 }
 
 function taskForLlm(input: TaskInput, profile: Profile): TaskForLlm {
-  return { text: input.text, lang: input.lang, phone: input.phone, profile };
+  return { text: input.text, lang: input.lang, callLang: input.callLang ?? callLangFor(input.text, config.callLang), phone: input.phone, profile };
 }
 
 /** The app's device id (header, or ?device= for GET /api/calls). */
@@ -63,8 +70,9 @@ function validTask(b: any): TaskInput | string {
   if (!b || typeof b.text !== "string" || !b.text.trim()) return "text is required";
   if (b.text.length > 1000) return "text is too long (max 1000)";
   if (b.lang !== undefined && b.lang !== "no" && b.lang !== "en") return "lang must be no or en";
+  if (b.callLang !== undefined && b.callLang !== "no" && b.callLang !== "en") return "callLang must be no or en";
   if (b.phone !== undefined && typeof b.phone !== "string") return "phone must be a string";
-  return { text: b.text.trim(), lang: b.lang ?? "no", phone: b.phone?.trim() || undefined, contactId: b.contactId };
+  return { text: b.text.trim(), lang: b.lang ?? "no", ...(b.callLang ? { callLang: b.callLang } : {}), phone: b.phone?.trim() || undefined, contactId: b.contactId };
 }
 
 function validProfile(b: any): Profile | string {
@@ -129,7 +137,8 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     t.answers = answers;
     const profile = t.profile;
     const voiceId = profile.voiceId || config.elevenlabs.defaultVoice;
-    const opening = ensureDisclosure("", profile.name);
+    const callLang = t.input.callLang ?? callLangFor(t.input.text, config.callLang);
+    const opening = ensureDisclosure("", profile.name, callLang);
     if (t.blocked) {
       t.plan = { taskId, callee: { name: "", phone: "", source: "user" }, goal: t.input.text, opening, willShare: [], needsApprovalFor: [], voiceId, blocked: t.blocked };
       return json(t.plan);
@@ -158,6 +167,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       willShare: p.willShare.includes("name") ? p.willShare : ["name", ...p.willShare],
       needsApprovalFor: p.needsApprovalFor.some((x) => /^pris/i.test(x)) ? p.needsApprovalFor : ["pris over 0 kr", ...p.needsApprovalFor],
       voiceId,
+      callLang,
       ...(blocked ? { blocked } : {}),
     };
     return json(t.plan);
@@ -189,11 +199,13 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     }
     if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
 
+    // The call language can still be changed on the plan screen (POST …/start {callLang}).
+    if (b.callLang === "no" || b.callLang === "en") t.plan.callLang = b.callLang;
     const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
     const line = real
-      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal), maxSec })
-      : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed);
+      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang), maxSec })
+      : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed, t.plan.callLang ?? "no");
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
     const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
     const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile }, line, llm: callLlm, secrets: { fnr }, maxSec, taskText: t.input.text });
@@ -212,12 +224,12 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
 
-  function keyterms(text: string, callee: string, userName: string, goal = ""): string[] {
+  function keyterms(text: string, callee: string, userName: string, goal = "", lang: "no" | "en" = "no"): string[] {
     // Names and nouns from the task, then the call lexicon. Scribe realtime allows 50.
     const fromTask = `${callee} ${text}`.match(/[A-ZÆØÅ][\wæøåÆØÅ']{2,}|\b[\wæøå]{6,}\b/g) ?? [];
     // The ordered item as one phrase: «cola zero» was heard as «barne-gulag, zero» (c_cc7521a0c46d).
     const item = parseErrand(goal, userName).item?.replace(/^(en|ei|et|én|to|tre|fire|fem|seks|\d+)\s+/i, "").trim();
-    return [...new Set(["KI-assistent", userName, ...(item && item.length <= 40 ? [item] : []), ...fromTask.map((w) => w.trim()), ...CALL_LEXICON].filter(Boolean))].slice(0, 50);
+    return [...new Set([lang === "en" ? "AI assistant" : "KI-assistent", userName, ...(item && item.length <= 40 ? [item] : []), ...fromTask.map((w) => w.trim()), ...(lang === "en" ? CALL_LEXICON_EN : CALL_LEXICON)].filter(Boolean))].slice(0, 50);
   }
 
   async function route(req: Request, server: Server<WsData>): Promise<Response | undefined> {

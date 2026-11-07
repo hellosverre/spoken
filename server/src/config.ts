@@ -17,6 +17,8 @@ export const config = {
   port: num("PORT", 8787),
   publicUrl: env("PUBLIC_URL", "http://localhost:8787").replace(/\/$/, ""),
   callProvider: (env("CALL_PROVIDER", "mock") as CallProvider),
+  /** Call language when neither a cue («in English», «på norsk») nor the task's own language decides it. */
+  callLang: (env("CALL_LANG", "en") === "no" ? "no" : "en") as "no" | "en",
   llmProvider: (env("LLM_PROVIDER", "mock") as LlmProviderName),
   llmApiKey: env("LLM_API_KEY", env("OPENROUTER_API_KEY")),
   llmModel: env("LLM_MODEL"),

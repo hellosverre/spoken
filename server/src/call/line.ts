@@ -1,7 +1,7 @@
 // The audio side of a call. A line dials, plays agent speech and reports what the
 // callee says. Mock and Telnyx implement it; CallSession never knows which one it has.
 
-import type { CallStatus, Word } from "../../../shared/contract.ts";
+import type { CallStatus, Lang, Word } from "../../../shared/contract.ts";
 
 export type SpeakKind = "say" | "filler";
 
@@ -50,6 +50,8 @@ export interface CallLine {
   silenceMs?(): number;
   /** ms of our own audio still to play (0 when quiet, Infinity while TTS is still arriving). */
   speechLeftMs?(): number;
+  /** The call switched language mid-call (STT and TTS follow). */
+  setLang?(lang: Lang): void;
   /** True if this line sends calleeRevised for segments. */
   readonly revises?: boolean;
   /** True on a real phone line: the person answering speaks first, so we wait for their greeting. */

@@ -2,25 +2,26 @@
 // safety gates between the LLM and the speaker. Works the same over mock and Telnyx lines.
 
 import type {
-  CallResult, CallStatus, LiveCommand, LiveEvent, Outcome, Plan, Profile, TranscriptLine, Word,
+  CallResult, CallStatus, Lang, LiveCommand, LiveEvent, Outcome, Plan, Profile, TranscriptLine, Word,
 } from "../../../shared/contract.ts";
 import { config } from "../config.ts";
 import { mockSummary } from "../llm/mock.ts";
 import type { AgentContext, HistoryItem, LlmProvider, Tone, Usage } from "../llm/types.ts";
 import {
-  ADDRESS_REFUSAL, PICKUP_NO_ADDRESS, CARD_REFUSAL, FNR_REFUSAL, detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim,
+  detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim,
 } from "../safety.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLine, LineMetric } from "./line.ts";
 import { timeHint, timesIn, withoutTimes } from "../time.ts";
-import { numberHint } from "./numbers.ts";
+import { isNumberish, numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
+import { LINES, langFromText } from "./lines.ts";
 import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 import { asksUserWhereCallee, fixCardOptions, priceWarning } from "./approval.ts";
 
-export const WAIT_PHRASE = "Et øyeblikk…";
+export const WAIT_PHRASE = LINES.no.wait;
 
 /**
  * Per-turn latency for the "Built with ElevenLabs" panel. Proposed for shared/contract.ts
@@ -48,18 +49,17 @@ interface TurnTiming {
 /** A quiet voice: maybe the callee, maybe someone near them (c_73b6b5529e9b). */
 const FAINT_HINT = "⟨svak stemme⟩";
 // Agent lines that mean "I didn't get that". Two turns of these in a row → change strategy.
-const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (deg )?ikke|linja er (litt )?dårlig|unnskyld,? hva sa du)/i;
+const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (deg )?ikke|linja er (litt )?dårlig|unnskyld,? hva sa du|say that again|could you repeat|can you repeat|didn't (quite )?(catch|hear|understand)|the line is (a bit )?bad|sorry,? what did you say)/i;
 // Short fillers for when a reply is slow (> FILLER_AFTER_MS). Rotated, never the same twice in a row.
 // Never «Et øyeblikk» again and again (call #8): short, different, at most 2 per call.
-const FILLERS = ["La meg se.", "Ett sekund."];
+// The lines themselves are in lines.ts, per call language.
 const MAX_FILLERS = 2;
 // Extras the plan didn't cover: the user decides, not the agent (call #8: «Ingen drikke»).
-const EXTRAS_Q = /\b(drikke|brus|cola|tillegg|ekstra|dressing|saus|dip|bunn|størrelse|dessert|salat|hvitløk|ost|topping|glutenfri|levering)\b/i;
+const EXTRAS_Q = /\b(drikke|brus|cola|tillegg|ekstra|dressing|saus|dip|bunn|størrelse|dessert|salat|hvitløk|ost|topping|glutenfri|levering|drinks?|soda|coke|extras?|sauce|crust|size|salad|garlic|cheese|toppings?|gluten[- ]free|delivery)\b/i;
 const FILLER_AFTER_MS = 2500;
 // Instant cached backchannel when content is not ready this long after the callee's commit.
 // Backchannel only when the reply is clearly slow, at most once every 3 turns, never after a
 // question (Sverre, call #5: «mm» after everything sounded robotic).
-const BACKCHANNELS = ["Ja.", "Okei.", "Skjønner."];
 // First backchannel of a call if the reply isn't ready at 1.2 s; later ones only past 2 s.
 
 const BACKCHANNEL_LATER_MS = 2000;
@@ -88,12 +88,12 @@ const AFTER_OPENING_MS = Number(process.env.AFTER_OPENING_MS ?? 2000);
 // Speculative LLM on partials: 0 of 62 matched on call #5, so off unless SPECULATE=1.
 const SPECULATE = process.env.SPECULATE === "1";
 // Callee says only «ja»/«mm» while we're mid-turn: listening noise, not a new turn.
-const CALLEE_BACKCHANNEL = /^(ja|jo|mm+|mhm|hm+|okei|ok|ja ja|aha|å|åh|eh|ehm)[.!,]?$/i;
-const GOODBYE = /\b(ha det( bra| godt)?|ha en (fin|god|strålende) (dag|kveld|helg))\b/i;
+const CALLEE_BACKCHANNEL = /^(ja|jo|mm+|mhm|hm+|okei|ok|okay|ja ja|aha|å|åh|eh|ehm|yes|yeah|yep|uh[- ]huh|right|um|uh)[.!,]?$/i;
+const GOODBYE = /\b(ha det( bra| godt)?|ha en (fin|god|strålende) (dag|kveld|helg)|goodbye|bye|have a (nice|good|great) (day|evening|weekend))\b/i;
 // Unsure words worth waiting ~0.7 s for a batch re-transcription: numbers and real content words.
 // Words where a mishearing changes the meaning: numbers, negations, names. Only these make us
 // wait for the batch second opinion; everything else is answered from realtime and corrected silently.
-const WHO_ARE_YOU = /(hvem (er (du|det)|ringer|snakker jeg med)|hvor ringer du fra|hvor (kom|kommer) du fra|hva (er (dette|det her)|slags (samtale|tjeneste))|er du (en )?(robot|maskin|ki|data|menneske|ekte))/i;
+const WHO_ARE_YOU = /(hvem (er (du|det)|ringer|snakker jeg med)|hvor ringer du fra|hvor (kom|kommer) du fra|hva (er (dette|det her)|slags (samtale|tjeneste))|er du (en )?(robot|maskin|ki|data|menneske|ekte)|who (is this|are you|am i (speaking|talking) (to|with))|where are you calling from|what is this( about| call)?|are you (an? )?(robot|machine|ai|bot|human|real person))/i;
 const NUMBER_WORDS = /^(null|en|ett|én|to|tre|fire|fem|seks|sju|syv|åtte|ni|ti|elleve|tolv|tretten|fjorten|femten|seksten|sytten|atten|nitten|tjue\p{L}*|tretti\p{L}*|førti\p{L}*|femti\p{L}*|hundre\p{L}*|tusen|halv|kvart|kroner|kr)$/iu;
 const NEGATIONS = /^(ikke|ikkje|ekte|ingen|inga|ingenting|aldri|nei|nope|verken)$/i;
 export function isContentWord(raw: string, sentenceStart = false): boolean {
@@ -114,6 +114,11 @@ const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
 // Think while the batch second opinion runs; only the speaking waits for it (c_cc7521a0c46d:
 // median reply 2.4 s, of which 0.8 s was this wait before the LLM even started). OVERLAP_BATCH=0 = old way.
 const OVERLAP_BATCH = process.env.OVERLAP_BATCH !== "0";
+// When speech waits for the batch check. «numbers» (default): only for an unsure number, price or
+// time, since those end up on approval cards. Other fixes arrive afterwards: the transcript is
+// patched and the LLM sees the corrected line next turn. «content» = the old rule (any unsure
+// noun or name, ~0.8 s on most lines), «off» = never wait.
+const BATCH_HOLD = (process.env.BATCH_HOLD ?? "numbers") as "numbers" | "content" | "off";
 // The callee «talked over» us but said nothing real (noise, «mm»): say the cut sentence again.
 const BARGE_RESUME_MS = Number(process.env.BARGE_RESUME_MS ?? 1500);
 const PLAIN_NO = /^(nei|nei takk|nei,? (takk|det vil jeg ikke|det går ikke)|no|no thanks|no,? thank you)[.!]?$/i;
@@ -201,6 +206,9 @@ export class CallSession {
   private listeners = new Set<Listener>();
   private history: HistoryItem[] = [];
   private tone: Tone = "friendly";
+  /** Language spoken on the phone (Plan.callLang); the user can switch it mid-call. */
+  private lang: Lang;
+  private get L() { return LINES[this.lang]; }
   private simpler = false;
   private speaking = false;
   private turnAbort?: AbortController;
@@ -280,8 +288,10 @@ export class CallSession {
     this.callId = init.callId;
     this.taskId = init.taskId;
     this.errand = parseErrand(init.plan.goal, init.profile.name);
+    this.lang = init.plan.callLang ?? "no";
     this.hold = new HoldFlow({
       userName: init.profile.name,
+      lines: () => this.L.hold,
       say: (t) => this.say(t, "filler"),
       note: (t, level) => this.note(t, level),
       sound: (k) => (k === "off" ? this.init.line.stopWaitingSound() : this.init.line.startWaitingSound(k)),
@@ -337,7 +347,7 @@ export class CallSession {
   async start() {
     this.startedAt = Date.now();
     this.emit({ type: "status", status: "dialing", at: this.startedAt });
-    this.init.line.prefetch?.([ensureDisclosure(this.init.plan.opening, this.init.profile.name), WAIT_PHRASE, CARD_REFUSAL, ...BACKCHANNELS]);
+    this.init.line.prefetch?.([this.opening(), this.L.wait, this.L.card, ...this.L.backchannels]);
     void this.init.llm.warm?.();
     // Keep the LLM's TLS connection warm while the call is up (no request for 20 s → ping).
     this.warmTimer = setInterval(() => {
@@ -395,9 +405,16 @@ export class CallSession {
     this.setStatus(s);
   }
 
+  private opening() {
+    // The plan's opening is kept only if it is in the call's language; the disclosure is rebuilt.
+    const other = this.lang === "en" ? /KI-assistent/i : /AI assistant/i;
+    const op = this.init.plan.opening;
+    return ensureDisclosure(other.test(op) ? "" : op, this.init.profile.name, this.lang);
+  }
+
   private async sayOpening() {
     // The disclosure is generated here, not by the model, and always goes first.
-    const opening = ensureDisclosure(this.init.plan.opening, this.init.profile.name);
+    const opening = this.opening();
     const line = this.init.line;
     if (!line.answersFirst) { await this.say(opening); return; }
     this.openingPending = true;
@@ -504,8 +521,8 @@ export class CallSession {
     }
 
     // After the user approved the deal, a clear yes from the callee is what makes the result «done».
-    if (this.approvedCommit && !/\?|\b(ikke|nei|feil|galt|stemmer ikke)\b/i.test(clean) &&
-        /\b(ja|jo|greit|fint|supert|perfekt|flott|notert|klar|i orden|det går|skal bli|ordner)\b/i.test(clean)) {
+    if (this.approvedCommit && !/\?|\b(ikke|nei|feil|galt|stemmer ikke|not|no|wrong|can'?t|cannot)\b/i.test(clean) &&
+        /\b(ja|jo|greit|fint|supert|perfekt|flott|notert|klar|i orden|det går|skal bli|ordner|yes|yeah|sure|great|lovely|perfect|done|noted|ready|all set|will do|sounds good|no problem)\b/i.test(clean)) {
       this.confirmedByCallee = true;
     }
 
@@ -529,8 +546,8 @@ export class CallSession {
 
     // «Hvem er du? / Hvor ringer du fra?»: a fixed, natural answer instead of whatever the model says.
     if (WHO_ARE_YOU.test(clean)) {
-      const name = this.init.profile.name || "brukeren";
-      const line = `Jeg er en KI-assistent. ${name} ba meg ringe for å ${this.init.plan.goal}.`;
+      const name = this.init.profile.name || this.L.user;
+      const line = this.L.whoAreYou(name, this.init.plan.goal);
       if (!this.recentTurns.some((t) => t.has(norm(line)))) {
         this.debug("who_are_you", { text: clean });
         this.recentTurns = [...this.recentTurns, new Set([norm(line)])].slice(-3);
@@ -541,17 +558,17 @@ export class CallSession {
     const ask = detectSecretAsk(clean);
     if (ask === "card") {
       this.note("Nektet å oppgi kortnummer.", "warn");
-      void this.say(CARD_REFUSAL, "say", true);
+      void this.say(this.L.card, "say", true);
       return;
     }
     if (ask === "fnr" && !(this.init.plan.willShare.includes("fnr") && this.init.secrets?.fnr)) {
       this.note("Nektet å oppgi fødselsnummer (ikke godkjent for denne samtalen).", "warn");
-      void this.say(FNR_REFUSAL, "say", true);
+      void this.say(this.L.fnr, "say", true);
       return;
     }
     if (ask === "address" && !this.init.plan.willShare.includes("address")) {
-      if (/\bhent/i.test(this.init.plan.goal)) { void this.say(PICKUP_NO_ADDRESS, "say", true); return; }
-      void this.requestApproval("Mottakeren spør etter adressen din. Kan jeg oppgi den?", ["JA", "NEI"], "address", ADDRESS_REFUSAL);
+      if (/\b(hent|pick ?up|collect)/i.test(this.init.plan.goal)) { void this.say(this.L.pickupNoAddress, "say", true); return; }
+      void this.requestApproval("Mottakeren spør etter adressen din. Kan jeg oppgi den?", ["JA", "NEI"], "address", this.L.address);
       return;
     }
     // The running turn hasn't said anything yet: drop it and answer this line too
@@ -605,7 +622,9 @@ export class CallSession {
     if (this.spec) this.dropSpec("unsure words");
     // Wait for the batch second opinion only if an unsure word matters (a number, a name, a noun);
     // on a real line nearly every segment has some unsure filler word (call #4).
-    const matters = !!numHint || unsure.some((w) => isContentWord(w));
+    const matters = BATCH_HOLD === "off" ? false
+      : BATCH_HOLD === "content" ? !!numHint || unsure.some((w) => isContentWord(w))
+      : !!numHint || unsure.some((w) => isNumberish(w));
     if (!gate) return;
     if (!matters) { gate.go(); return; }
     clearTimeout(gate.timer);
@@ -813,6 +832,8 @@ export class CallSession {
       profileFacts: facts,
       tone: this.tone,
       simpler: this.simpler,
+      lang: this.lang,
+      uiLang: this.init.profile.lang,
       history: [...this.history],
     };
   }
@@ -848,7 +869,7 @@ export class CallSession {
     // A short cached «Ja.» / «Okei.» / «Skjønner.» only if real content still isn't ready at 1.2 s.
     const backTimer = mayBackchannel ? setTimeout(() => {
       if (spokeAnything || stop || abort.signal.aborted || this.ended || this.pending) return;
-      const options = BACKCHANNELS.filter((b) => b !== this.lastBackchannel);
+      const options = this.L.backchannels.filter((b) => b !== this.lastBackchannel);
       backchannel = options[turnNo % options.length]!;
       this.lastBackchannel = backchannel;
       this.lastBackchannelTurn = turnNo;
@@ -860,7 +881,7 @@ export class CallSession {
     const fillerTimer = setTimeout(() => {
       if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending || this.fillers >= MAX_FILLERS) return;
       this.fillers++;
-      const f = FILLERS.find((x) => x !== this.lastFiller) ?? FILLERS[0]!;
+      const f = this.L.fillers.find((x) => x !== this.lastFiller) ?? this.L.fillers[0]!;
       this.lastFiller = f;
       this.debug("filler", { text: f, afterMs: FILLER_AFTER_MS });
       void this.say(f, "filler");
@@ -1043,7 +1064,7 @@ export class CallSession {
           this.debug("refusal_unsure", { lastCallee });
           stop = true;
           spokeAnything = true;
-          await this.say("Beklager, jeg hørte deg ikke helt. Er det greit at jeg spør om noe kort?", "say", false, abort.signal, turnLine);
+          await this.say(this.L.refusalUnsure, "say", false, abort.signal, turnLine);
           return;
         }
         this.endTag = { outcome, summary: s.summary };
@@ -1069,7 +1090,7 @@ export class CallSession {
         console.error("[session] LLM failed:", (e as Error).message);
         this.note("KI-en svarte ikke i tide.", "warn");
         if (!spokeAnything) {
-          const f = FILLERS.find((x) => x !== this.lastFiller) ?? FILLERS[0]!;
+          const f = this.L.fillers.find((x) => x !== this.lastFiller) ?? this.L.fillers[0]!;
           this.lastFiller = f;
           await this.say(f, "filler");
         }
@@ -1124,15 +1145,13 @@ export class CallSession {
    * 1st: allowed as is. 2nd: rephrase the errand as a yes/no question. 3rd: end politely.
    */
   private escalation(dup: boolean): { text: string; end?: boolean } | null {
-    const name = this.init.profile.name || "brukeren";
-    if (this.confusedRun >= 3) {
-      return { text: `Beklager, jeg tror vi misforstår hverandre litt. ${name} tar kontakt igjen. Ha det bra!`, end: true };
-    }
+    const name = this.init.profile.name || this.L.user;
+    if (this.confusedRun >= 3) return { text: this.L.misunderstood(name), end: true };
     // Don't re-introduce ourselves (the callee complained on call #5); once per call.
-    const rephrase = "Unnskyld, er det mulig?";
+    const rephrase = this.L.rephrase;
     if (this.confusedRun === 2 || dup) {
       if (this.rephrased || this.recentTurns.some((t) => t.has(norm(rephrase)))) {
-        return { text: `Beklager, jeg tror vi misforstår hverandre litt. ${name} tar kontakt igjen. Ha det bra!`, end: true };
+        return { text: this.L.misunderstood(name), end: true };
       }
       if (this.confusedRun === 2) this.note("Mottakeren er vanskelig å forstå; jeg prøver å spørre enklere.", "warn");
       this.rephrased = true;
@@ -1152,12 +1171,13 @@ export class CallSession {
       willShare: this.init.plan.willShare,
       fnr: this.init.secrets?.fnr,
       address: this.init.profile.address,
+      lang: this.lang,
     });
     if (f.blocked) this.note(f.blocked, "warn");
     if (!f.text) return { interrupted: false };
     // What the user sees never contains the fnr itself.
     const shown = text.replaceAll("{{FNR}}", "[fødselsnummer]").replaceAll("{{ADDRESS}}", this.init.profile.address ?? "[adresse]");
-    const shownSafe = text.includes("{{") && f.text !== FNR_REFUSAL ? shown : f.text;
+    const shownSafe = text.includes("{{") && f.text !== this.L.fnr ? shown : f.text;
     const id = group?.id ?? nid("a");
     const at = group?.at ?? Date.now();
     if (group) group.parts.push(shownSafe);
@@ -1233,8 +1253,7 @@ export class CallSession {
     if (this.ended) return;
     this.debug("wrap_up", { summary });
     this.note(summary, "warn");
-    const name = this.init.profile.name || "brukeren";
-    await this.say(`Takk for hjelpen så langt. Jeg gir beskjed til ${name}, så tar vi kontakt igjen. Ha det bra!`, "filler");
+    await this.say(this.L.wrapUp(this.init.profile.name || this.L.user), "filler");
     await this.finish("wrap up", { outcome: "partial", summary });
   }
 
@@ -1337,7 +1356,7 @@ export class CallSession {
       const quiet = this.init.line.silenceMs?.() ?? Infinity;
       if (quiet < 8000 || this.lastPartialAt > since) { this.armSilenceNudge(); return; }
       this.nudged++;
-      void this.say(this.nudged === 1 ? "Hallo, hører du meg?" : "Jeg hører deg dessverre ikke. Jeg prøver igjen senere. Ha det!", "filler").then(() => {
+      void this.say(this.nudged === 1 ? this.L.hello : this.L.cantHear, "filler").then(() => {
         if (this.nudged >= 2 && !this.ended) void this.finish("silence", { outcome: "failed", summary: "Hørte ingenting fra mottakeren." });
       });
     }, 8000);
@@ -1348,9 +1367,9 @@ export class CallSession {
     // Internal LLM hints («⟨tid: 18:00⟩», «⟨usikre ord: …⟩») never reach the user's card.
     const question = rawQuestion.replace(/\s*⟨[^⟩]*⟩/g, "").replace(/\s+»/g, "»").trim();
     // One natural wait line per call, a shorter one the second time, then silence (+ typing sound).
-    const name = this.init.profile.name || "brukeren";
+    const name = this.init.profile.name || this.L.user;
     if (spoken === undefined) {
-      spoken = [`Et lite øyeblikk, jeg sjekker med ${name}.`, `Jeg sjekker det med ${name}.`][this.waitLines] ?? "";
+      spoken = this.L.checking(name)[this.waitLines] ?? "";
       this.waitLines++;
     }
     this.lastApprovalAt = Date.now();
@@ -1423,6 +1442,8 @@ export class CallSession {
         const text = cmd.text.trim().slice(0, 500);
         if (!text) return;
         if (this.pending?.kind === "choice") { this.answer(this.pending.id, text); break; }
+        const lang = langFromText(text);
+        if (lang && lang !== this.lang) this.setLang(lang);
         this.history.push({ role: "user", text: `[instruks] ${text}` });
         this.progress();
         this.note(`Instruks sendt: ${text}`);
@@ -1445,13 +1466,21 @@ export class CallSession {
     }
   }
 
+  /** «Speak English» / «snakk norsk» from the user: prompt, fixed lines, STT and TTS switch. */
+  setLang(lang: Lang) {
+    this.lang = lang;
+    this.init.line.setLang?.(lang);
+    this.debug("call_lang", { lang });
+    this.note(lang === "en" ? "Snakker engelsk nå." : "Snakker norsk nå.");
+  }
+
   private async userHangup() {
     this.turnAbort?.abort();
     this.hold.cancel();
     if (this.pending) { clearTimeout(this.pending.timer); this.pending = undefined; this.init.line.stopWaitingSound(); }
     if (this.status === "connected") {
       if (this.speaking) this.init.line.stopSpeaking();
-      await Promise.race([this.say("Jeg må dessverre avslutte nå. Takk, ha det bra!", "filler"), Bun.sleep(5000)]);
+      await Promise.race([this.say(this.L.mustEnd, "filler"), Bun.sleep(5000)]);
     }
     await this.finish("user hangup", { outcome: "partial", summary: "Avsluttet av deg." });
   }

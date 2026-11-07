@@ -13,6 +13,7 @@ import { transcribeSegment } from "../voice/scribe-batch.ts";
 import { tts } from "../voice/tts.ts";
 import { alawToUlaw, g711ToPcm16, holdMusic, levelOf, pcmRms, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
 import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
+import type { Lang } from "../../../shared/contract.ts";
 
 const FRAME = 160; // 20 ms of µ-law at 8 kHz
 const LEAD_MS = 120; // how far ahead of real time we send, to ride out jitter
@@ -77,6 +78,8 @@ export interface TelnyxLineOpts {
   to: string;
   voiceId?: string;
   keyterms: string[];
+  /** Language spoken on the call (STT and TTS); default Norwegian. */
+  lang?: Lang;
   /** Per-call time limit (s), at most MAX_CALL_SEC. Test calls use 60. */
   maxSec?: number;
   /** Replay harness: no Telnyx dial/hangup; media is fed through attach()/onMedia(). */
@@ -91,6 +94,7 @@ export class TelnyxLine implements CallLine {
   private readonly token = crypto.randomUUID().replace(/-/g, "");
   private ws?: ServerWebSocket<any>;
   private scribe?: ScribeStream;
+  private lang: Lang;
   private answered = false;
   private streaming = false;
   private connectedSent = false;
@@ -150,6 +154,7 @@ export class TelnyxLine implements CallLine {
   private committedIds = new Map<string, string>();
 
   constructor(private o: TelnyxLineOpts) {
+    this.lang = o.lang ?? "no";
     lines.set(o.callId, this);
   }
 
@@ -186,7 +191,7 @@ export class TelnyxLine implements CallLine {
   /** Warm the TTS cache while the phone rings, so the disclosure plays instantly. */
   prefetch(texts: string[]) {
     for (const t of texts) {
-      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
+      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, lang: this.lang, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
     }
   }
 
@@ -300,7 +305,7 @@ export class TelnyxLine implements CallLine {
         if (id) { const c = meanConf(words); if (c !== undefined) this.rtConf.set(id, c); this.ev.calleeWords?.(id, text, words); }
       },
       error: (msg) => console.error(`[scribe] ${msg}`),
-    }, this.o.keyterms);
+    }, this.o.keyterms, "", undefined, this.lang);
     this.scribe.connect();
     this.ticker = setInterval(() => this.tick(), 20);
   }
@@ -370,7 +375,7 @@ export class TelnyxLine implements CallLine {
     const seg = { id, startMs: from - this.audioStartAt, endMs: to - this.audioStartAt, realtime, peak: Math.round(peak), speaker: Math.round(this.speaker.level) };
     if (!STT_BATCH) { this.saveSegment({ ...seg }); this.ev.calleeBatchDone?.(id); return; }
     const t0 = Date.now();
-    transcribeSegment(pcm, this.o.keyterms)
+    transcribeSegment(pcm, this.o.keyterms, undefined, this.lang)
       .then((r) => {
         const rtConf = this.rtConf.get(id);
         const batchConf = meanConf(r.words);
@@ -478,7 +483,7 @@ export class TelnyxLine implements CallLine {
     const t0 = Date.now();
     let first = true;
     try {
-      for await (const chunk of tts(text, { voiceId: this.o.voiceId, signal: abort.signal, cache: kind === "filler" || text.length <= 40, onBilled: this.billed })) {
+      for await (const chunk of tts(text, { voiceId: this.o.voiceId, lang: this.lang, signal: abort.signal, cache: kind === "filler" || text.length <= 40, onBilled: this.billed })) {
         if (abort.signal.aborted) break;
         if (first) {
           first = false;
@@ -494,6 +499,11 @@ export class TelnyxLine implements CallLine {
       this.producerDone = true;
     }
     return done;
+  }
+
+  setLang(lang: Lang) {
+    this.lang = lang;
+    this.scribe?.setLang(lang);
   }
 
   speechLeftMs() {

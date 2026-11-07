@@ -6,7 +6,18 @@ import type { Word } from "../../../shared/contract.ts";
 const WORD: Record<string, number> = {
   tretten: 13, fjorten: 14, femten: 15, seksten: 16, sytten: 17, atten: 18, nitten: 19,
   tretti: 30, førti: 40, femti: 50, seksti: 60, sytti: 70, åtti: 80, nitti: 90,
+  // English has the same trap: fifteen / fifty.
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
 };
+
+const ANY_NUMBER = /^(\d[\d:.,]*|null|en|ett|ei|to|tre|fire|fem|seks|sju|syv|åtte|ni|ti|elleve|tolv|hundre|tusen|kroner|kr|klokka|halv|kvart|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|hundred|thousand|half|quarter|o'?clock|pm|am)$/i;
+
+/** An unsure word that is (part of) a number, price or time: worth waiting for the batch check. */
+export function isNumberish(token: string): boolean {
+  const t = token.toLowerCase().replace(/^[«"(]+|[.,!?»")]+$/g, "");
+  return ANY_NUMBER.test(t) || WORD[t] !== undefined;
+}
 
 /** The number a -ten/-ti number is easily misheard as: 15 → 50, 150 → 115, 70 → 17. */
 export function soundAlike(n: number): number | undefined {

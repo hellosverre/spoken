@@ -1,7 +1,8 @@
 // Safety rules from CONTRACT.md, enforced in code. The LLM prompt repeats them,
 // but nothing here trusts the model to follow it.
 
-import type { Shareable } from "../../shared/contract.ts";
+import type { Lang, Shareable } from "../../shared/contract.ts";
+import { LINES } from "./call/lines.ts";
 
 // ---------- Numbers ----------
 
@@ -59,24 +60,24 @@ export function checkGoal(text: string): { ok: true } | { ok: false; reason: str
 
 // ---------- Disclosure ----------
 
-export function disclosureLine(name: string): string {
-  const who = name.trim() || "en bruker";
-  return `Hei, jeg er en KI-assistent som ringer på vegne av ${who}.`;
+export function disclosureLine(name: string, lang: Lang = "no"): string {
+  if (lang === "en") return `Hi, I'm an AI assistant calling on behalf of ${name.trim() || "a user"}.`;
+  return `Hei, jeg er en KI-assistent som ringer på vegne av ${name.trim() || "en bruker"}.`;
 }
 
 /** The first spoken line always starts with the disclosure, whatever the plan or model said. */
-export function ensureDisclosure(opening: string, name: string): string {
-  const d = disclosureLine(name);
-  const rest = opening.replace(/^.*?KI-assistent[^.!?]*[.!?]\s*/i, "").trim();
-  const sayNo = /si nei|takke nei/i.test(rest) ? "" : " Du kan gjerne si nei til å snakke med meg.";
+export function ensureDisclosure(opening: string, name: string, lang: Lang = "no"): string {
+  const d = disclosureLine(name, lang);
+  const rest = opening.replace(/^.*?(KI-assistent|AI assistant)[^.!?]*[.!?]\s*/i, "").trim();
+  const sayNo = /si nei|takke nei|say no/i.test(rest) ? "" : lang === "en" ? " You're welcome to say no to talking to me." : " Du kan gjerne si nei til å snakke med meg.";
   return `${d}${sayNo}${rest ? " " + rest : ""}`;
 }
 
 // ---------- Callee asks for secrets ----------
 
-const ASKS_CARD = /(kort ?nummer|kortnr|kortet ditt|kortdetaljer|kredittkort|bankkort|card number|cvv|cvc|sikkerhetskode|pin[- ]?kode|\bpin\b|utløpsdato)/i;
-const ASKS_FNR = /(fødselsnummer|personnummer|personnr|fnr|elleve siffer)/i;
-const ASKS_ADDRESS = /(adresse|hvor bor (du|han|hun)|leveringsadresse)/i;
+const ASKS_CARD = /(kort ?nummer|kortnr|kortet ditt|kortdetaljer|kredittkort|bankkort|card number|card details|credit card|debit card|long number on the card|cvv|cvc|sikkerhetskode|security code|pin[- ]?kode|\bpin\b|utløpsdato|expiry date|expiration date)/i;
+const ASKS_FNR = /(fødselsnummer|personnummer|personnr|fnr|elleve siffer|social security|national id|id number|personal number|birth number)/i;
+const ASKS_ADDRESS = /(adresse|hvor bor (du|han|hun)|leveringsadresse|address|where (do|does) (you|he|she|they) live)/i;
 
 export const CARD_REFUSAL = "Beklager, jeg kan ikke oppgi kortnummer, sikkerhetskode eller PIN over telefon. Kan vi betale ved henting, eller med en betalingslenke?";
 export const FNR_REFUSAL = "Beklager, jeg har ikke lov til å oppgi fødselsnummer i denne samtalen.";
@@ -112,7 +113,7 @@ function luhn(d: string): boolean {
  */
 export function filterOutgoing(
   text: string,
-  share: { willShare: Shareable[]; fnr?: string; address?: string },
+  share: { willShare: Shareable[]; fnr?: string; address?: string; lang?: Lang },
 ): { text: string; blocked?: string } {
   let out = text;
   const runs = out.match(/\d[\d \-]{9,}\d/g) ?? [];
@@ -123,9 +124,9 @@ export function filterOutgoing(
   }
   if (/\b(cvv|cvc|pin)\b[^.]*\d{3,4}/i.test(out)) return { text: "", blocked: "Stoppet en sikkerhetskode før den ble sagt." };
   // Meta talk about the system sounds robotic (call #7): never said on the phone.
-  if (/hvordan systemet (mitt )?fungerer|kan ikke si mer om (hvordan|systemet)|som en språkmodell|jeg er bare et program/i.test(out)) return { text: "", blocked: "Fjernet en setning om systemet." };
+  if (/hvordan systemet (mitt )?fungerer|kan ikke si mer om (hvordan|systemet)|som en språkmodell|jeg er bare et program|how (the|my) system works|as a language model|i'?m just a program/i.test(out)) return { text: "", blocked: "Fjernet en setning om systemet." };
   if (out.includes("{{FNR}}")) {
-    if (!share.willShare.includes("fnr") || !share.fnr) return { text: FNR_REFUSAL, blocked: "Fødselsnummer ikke godkjent for denne samtalen." };
+    if (!share.willShare.includes("fnr") || !share.fnr) return { text: share.lang === "en" ? LINES.en.fnr : FNR_REFUSAL, blocked: "Fødselsnummer ikke godkjent for denne samtalen." };
     out = out.replaceAll("{{FNR}}", share.fnr.split("").join(" "));
   }
   if (out.includes("{{ADDRESS}}")) {
@@ -147,19 +148,23 @@ const COMMIT_PAST = /\b(jeg (har )?|har jeg |da er det |det er )(bestilt|bestilt
 // Conditions and questions are not commitments: «Før jeg bekrefter …», «Skal jeg bestille?».
 const CONDITIONAL = /\b(før|hvis|når|dersom|om|etter at|så snart) jeg\b/i;
 
+// English: «I'll take it», «I confirm», «let's book it», «I've ordered», «we have a deal».
+const COMMIT_EN = /\b(i('ll| will)? (confirm|order|book|take (it|that|the|them|one)|accept|agree to|cancel|pay)|i'?m (confirming|ordering|booking|taking|accepting|cancelling|canceling|paying)|(that'?s|it'?s) a deal|we have a deal|go ahead and (book|order|put)|put (it|that|me) (in|down)|book (it|that)|let'?s (book|do|go with) (it|that)|yes,? (please,? )?(that|it) (works|is fine|sounds good)|we'?ll take (it|that|them)|i('ve| have)? (ordered|booked|confirmed|accepted|cancell?ed|paid|reserved))\b/i;
+const CONDITIONAL_EN = /\b(before|if|when|once|after|as soon as) i\b/i;
+
 export function isCommitment(text: string): boolean {
   const t = text.trim();
   if (/\?$/.test(t)) return false;
-  if (CONDITIONAL.test(t) && !/[.!]\s+\S/.test(t)) return false;
-  return COMMIT.test(t) || COMMIT_INVERTED.test(t) || COMMIT_PAST.test(t);
+  if ((CONDITIONAL.test(t) || CONDITIONAL_EN.test(t)) && !/[.!]\s+\S/.test(t)) return false;
+  return COMMIT.test(t) || COMMIT_INVERTED.test(t) || COMMIT_PAST.test(t) || COMMIT_EN.test(t);
 }
 
 /** Claims that the deal is done; only allowed once the callee clearly confirmed. */
 export function isDoneClaim(text: string): boolean {
-  return /(bestillingen er (klar|bekreftet|lagt inn|i orden|registrert)|da er (det|den) (bestilt|booket|i orden|notert|klart)|timen er (booket|bestilt|bekreftet))/i.test(text);
+  return /(bestillingen er (klar|bekreftet|lagt inn|i orden|registrert)|da er (det|den) (bestilt|booket|i orden|notert|klart)|timen er (booket|bestilt|bekreftet)|(the |your )?(order|booking|appointment|reservation) is (confirmed|placed|booked|done|all set)|(that'?s|it'?s|you'?re) (all )?(booked|ordered|confirmed|set))/i.test(text);
 }
 
 /** Callee is proposing something that would need a yes from the user. */
 export function calleeProposesCommitment(text: string): boolean {
-  return /(skal jeg (legge inn|booke|bestille|sette deg opp|reservere)|vil du ha (den|timen|det)|blir det \d|det (blir|koster) .*(kr|kroner)|passer (det|klokka|kl)|er det greit|kan du (komme|ta))/i.test(text);
+  return /(skal jeg (legge inn|booke|bestille|sette deg opp|reservere)|vil du ha (den|timen|det)|blir det \d|det (blir|koster) .*(kr|kroner)|passer (det|klokka|kl)|er det greit|kan du (komme|ta)|shall i (put|book|order|reserve)|do you want (it|that|the)|that('?s| will be| comes to) .*\d|it costs|does .* work for you|is that (ok|okay|fine|alright)|can you (come|make it))/i.test(text);
 }
