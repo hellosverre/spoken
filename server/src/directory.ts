@@ -14,6 +14,11 @@ const DIRECTORY: DirectoryEntry[] = [
   { match: /frisør/i, name: "Frisøren", phone: "+4722000004" },
 ];
 
+// Demo override for real calls: DIRECTORY_OVERRIDE="+47XXXXXXXX" sends every directory hit
+// (e.g. «Domino's Storo») to that number, so the phone demo rings a teammate, never a real shop.
+const OVERRIDE = process.env.DIRECTORY_OVERRIDE?.trim();
+
 export function lookup(text: string): DirectoryEntry | undefined {
-  return DIRECTORY.find((d) => d.match.test(text));
+  const hit = DIRECTORY.find((d) => d.match.test(text));
+  return hit && OVERRIDE ? { ...hit, phone: OVERRIDE } : hit;
 }
