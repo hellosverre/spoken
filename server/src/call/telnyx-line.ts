@@ -13,6 +13,8 @@ import { alawToUlaw, g711ToPcm16, holdMusic, levelOf, pcmRms, typingSound, ulawR
 import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
 
 const FRAME = 160; // 20 ms of µ-law at 8 kHz
+// Number words after toSpeakable(): what the batch second opinion is allowed to correct.
+const NUMBERISH = /^(\d+|null|en|ett|én|to|tre|fire|fem|seks|sju|syv|åtte|ni|ti|elleve|tolv|tretten|fjorten|femten|seksten|sytten|atten|nitten|tjue\p{L}*|tretti\p{L}*|førti\p{L}*|femti\p{L}*|seksti\p{L}*|sytti\p{L}*|åtti\p{L}*|nitti\p{L}*|hundre\p{L}*|tusen|halv|kvart|kroner|krone|kr)$/iu;
 const LEAD_MS = 120; // how far ahead of real time we send, to ride out jitter
 // Call #5: 35 barge-ins, ~10 were laughs/noise. Now 200 ms of loud audio, and partials must be
 // real words, not «mm»/«ja».
@@ -364,7 +366,11 @@ export class TelnyxLine implements CallLine {
         const rw = new Set(norm(realtime).split(" ").map(stem));
         const overlap = norm(r.text).split(" ").some((w) => w && rw.has(stem(w)));
         const plausible = overlap && n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
-        if (r.text && plausible && norm(r.text) !== norm(realtime)) this.ev.calleeRevised?.(id, r.text, r.words);
+        // Batch is only better at numbers (prices, times); elsewhere it made lines worse on call
+        // c_ba0df20d («hvor skal vi ha adressen» → «hvor så var adressen»). Keep realtime otherwise.
+        const nums = (t: string) => norm(t).split(" ").filter((w) => NUMBERISH.test(w)).join(" ");
+        const numbersDiffer = !!nums(r.text) && nums(r.text) !== nums(realtime);
+        if (r.text && plausible && numbersDiffer && norm(r.text) !== norm(realtime)) this.ev.calleeRevised?.(id, r.text, r.words);
       })
       .catch((e) => console.warn("[scribe-batch]", (e as Error).message));
   }
