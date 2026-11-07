@@ -11,6 +11,9 @@ import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, ty
 
 const API = process.env.NEXT_PUBLIC_SPOKEN_API ?? "";
 
+/** Ask the server's clarify questions in the chat before planning. */
+const ASK_QUESTIONS = false;
+
 export const REAL: ScenarioKey = "real" as ScenarioKey;
 
 export function realEnabled(): boolean {
@@ -111,9 +114,11 @@ const prettyPhone = (p: string) => p.replace(/^\+47(\d{2})(\d{2})(\d{2})(\d{2})$
  * scenario key to show in the plan card, or null if the server blocked the task.
  */
 export async function planRealCall(text: string, lang: Lang, chat: ChatPort): Promise<ScenarioKey | null> {
-  const c = await http<Clarify>("POST", "/api/tasks", { text, lang });
+  const phone = text.match(/\+?\d[\d \-]{6,16}\d/)?.[0].replace(/[ \-]/g, "");
+  const c = await http<Clarify>("POST", "/api/tasks", { text, lang, ...(phone ? { phone } : {}) });
   const answers: Record<string, string> = {};
-  if (c.questions.length) {
+  // Questions are off for now: the server plans from the request alone.
+  if (ASK_QUESTIONS && c.questions.length) {
     await chat.bot(c.summary);
     for (const q of c.questions) {
       const opts = q.options?.length ? `\n${q.options.map((o, i) => `${i + 1}. ${o}`).join("   ")}` : "";
