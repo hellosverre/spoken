@@ -48,8 +48,22 @@ export class MockLine implements CallLine {
     })();
   }
 
+  /** Fake voice loudness at ~15 Hz while someone "talks", so the live visual works in mock mode. */
+  private pulse(who: "callee" | "agent", ms: number) {
+    let t = 0;
+    const iv = setInterval(() => {
+      t += 66;
+      if (this.closed || t >= ms) { clearInterval(iv); this.ev.level?.(who, 0); return; }
+      const v = 0.35 + 0.3 * Math.abs(Math.sin(t / 140)) + 0.15 * Math.sin(t / 47);
+      this.ev.level?.(who, Math.round(Math.max(0.05, Math.min(1, v)) * 100) / 100);
+    }, 66);
+  }
+
   async speak(text: string, kind: SpeakKind) {
+    // No audio in mock: "audio starts" when speaking starts. STT/TTS figures stay null.
+    if (kind === "say") this.ev.metric?.({ kind: "first_audio", at: Date.now() });
     const words = text.split(/\s+/).length;
+    this.pulse("agent", words * 260 * this.speed);
     const done = new Promise<{ interrupted: boolean }>((resolve) => {
       const t = setTimeout(() => { this.timers.delete(t); this.stopSpeak = undefined; resolve({ interrupted: false }); }, words * 260 * this.speed);
       this.timers.add(t);
@@ -97,6 +111,7 @@ export class MockLine implements CallLine {
     const id = `c_${++this.seg}`;
     const parts = text.split(" ");
     this.ev.calleeSpeech();
+    this.pulse("callee", (Math.ceil(parts.length / 3) * 330 + 250) * this.speed);
     for (let i = 1; i <= parts.length; i += 3) {
       await this.wait(330);
       if (this.closed) return;

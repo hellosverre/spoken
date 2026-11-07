@@ -3,15 +3,26 @@
 
 import type { ServerWebSocket } from "bun";
 import { config } from "../config.ts";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { ScribeStream } from "../voice/scribe.ts";
+import { transcribeSegment } from "../voice/scribe-batch.ts";
 import { tts } from "../voice/tts.ts";
-import { alawToUlaw, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
+import { alawToUlaw, g711ToPcm16, levelOf, pcmRms, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
 import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
 
 const FRAME = 160; // 20 ms of µ-law at 8 kHz
 const LEAD_MS = 120; // how far ahead of real time we send, to ride out jitter
 const BARGE_RMS = Number(process.env.BARGE_RMS ?? 1100);
 const BARGE_FRAMES = 5; // 100 ms of loud audio while we talk = barge-in
+const VOICED_RMS = Number(process.env.VOICED_RMS ?? 600); // "callee is talking" for the STT timing
+
+// Batch second opinion per segment (STT_BATCH=0 turns it off).
+const STT_BATCH = process.env.STT_BATCH !== "0";
+// Dev calls only, with the callee's consent: raw callee audio to .cache/calls (gitignored). Delete after use.
+const SAVE_AUDIO = process.env.SAVE_CALL_AUDIO === "1";
+const AUDIO_DIR = join(import.meta.dir, "../../.cache/calls");
+if (SAVE_AUDIO) { try { mkdirSync(AUDIO_DIR, { recursive: true }); } catch { /* no dir */ } }
 
 const lines = new Map<string, TelnyxLine>(); // by callId
 const byControlId = new Map<string, TelnyxLine>();
@@ -40,9 +51,12 @@ export interface TelnyxLineOpts {
   to: string;
   voiceId?: string;
   keyterms: string[];
+  /** Replay harness: no Telnyx dial/hangup; media is fed through attach()/onMedia(). */
+  offline?: boolean;
 }
 
 export class TelnyxLine implements CallLine {
+  readonly revises = STT_BATCH;
   private ev!: LineEvents;
   private controlId = "";
   private readonly token = crypto.randomUUID().replace(/-/g, "");
@@ -68,6 +82,32 @@ export class TelnyxLine implements CallLine {
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
   private inboundAlaw = false;
+  private lastVoicedAt = 0;
+  private lastPartialAt = 0;
+  private lastCommittedNorm = "";
+  // Last ~20 s of callee audio, for the batch second opinion on each segment.
+  private recent: { at: number; pcm: Int16Array }[] = [];
+  private segOnsetAt = 0;
+  private audioStartAt = 0;
+  private sayFramePending = false;
+  private ttsChars = 0;
+  private sttSamples = 0;
+  private readonly sttFormat = (process.env.STT_INPUT || "pcm_8000") as "ulaw_8000" | "pcm_8000";
+  private lastLevel = { callee: 0, agent: 0 };
+  private lastLevelVal = { callee: 0, agent: 0 };
+
+  /** ~15 Hz loudness while someone talks; one final 0 when they stop. */
+  private emitLevel(who: "callee" | "agent", rms: number) {
+    const now = Date.now();
+    if (now - this.lastLevel[who] < 66) return;
+    const v = Math.round(levelOf(rms) * 100) / 100;
+    if (v < 0.04 && this.lastLevelVal[who] < 0.04) return;
+    this.lastLevel[who] = now;
+    this.lastLevelVal[who] = v;
+    this.ev.level?.(who, v < 0.04 ? 0 : v);
+  }
+  private costReported = false;
+  private billed = (n: number) => { this.ttsChars += n; };
 
   // latency
   private lastCommitAt = 0;
@@ -81,6 +121,11 @@ export class TelnyxLine implements CallLine {
 
   async start(events: LineEvents) {
     this.ev = events;
+    if (this.o.offline) {
+      this.answered = true;
+      this.ev.status("ringing");
+      return;
+    }
     const { apiKey, connectionId, fromNumber } = config.telnyx;
     if (!apiKey || !connectionId || !fromNumber) throw new Error("TELNYX_API_KEY / TELNYX_CONNECTION_ID / TELNYX_FROM_NUMBER missing");
     const wsBase = config.publicUrl.replace(/^http/, "ws");
@@ -105,7 +150,7 @@ export class TelnyxLine implements CallLine {
   /** Warm the TTS cache while the phone rings, so the disclosure plays instantly. */
   prefetch(texts: string[]) {
     for (const t of texts) {
-      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, cache: true })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
+      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
     }
   }
 
@@ -141,6 +186,10 @@ export class TelnyxLine implements CallLine {
         }, 8000);
         break;
       case "streaming.failed": this.ev.status("failed", `Lydstrømmen feilet: ${p.failure_reason ?? "ukjent"}`); break;
+      case "call.cost":
+        console.log(`[cost] telnyx call ${this.o.callId}: ${p.total_cost ?? "?"} ${p.currency ?? ""} (${p.billed_duration_secs ?? "?"} s billed)`);
+        this.ev.debug?.("telnyx_cost", { total: p.total_cost, currency: p.currency, billedSec: p.billed_duration_secs });
+        break;
       case "call.hangup": {
         this.hungUp = true;
         if (this.answered) this.ev.ended("callee hung up");
@@ -173,7 +222,14 @@ export class TelnyxLine implements CallLine {
     this.ws = ws;
     this.scribe = new ScribeStream({
       partial: (text) => {
-        this.ev.calleeSpeech();
+        // Scribe can repeat the just-committed text as a partial; that is not new speech.
+        const n = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+        if (n && this.lastCommittedNorm.startsWith(n) && Date.now() - this.lastCommitAt < 2000) return;
+        this.lastPartialAt = Date.now();
+
+        // Only real, current speech may barge in: late partials of the previous utterance
+        // used to cut the agent off right as it started (replay, Sat 7 Nov).
+        if (Date.now() - this.lastVoicedAt < 200) this.ev.calleeSpeech();
         this.ev.calleePartial(`c_${this.segId}`, text);
       },
       committed: (text) => {
@@ -181,7 +237,14 @@ export class TelnyxLine implements CallLine {
         this.lastCommitAt = Date.now();
         this.awaitingFirstAudio = true;
         this.committedIds.set(text.trim(), id);
-        this.ev.calleeFinal(id, text);
+        this.lastCommittedNorm = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
+        // Quiet speech can stay under the energy threshold; the last partial is a later bound.
+        const speechEndAt = Math.max(this.lastVoicedAt, this.lastPartialAt) || undefined;
+        this.ev.calleeFinal(id, text, undefined, { speechEndAt });
+        // Window = voice onset → voice end (+ margins), not partial/commit times (both lag).
+        const end = (this.lastVoicedAt || Date.now()) + 250;
+        this.secondOpinion(id, text, (this.segOnsetAt || end - 4000) - 250, end);
+        this.segOnsetAt = 0;
       },
       words: (text, words) => {
         const id = this.committedIds.get(text.trim());
@@ -207,8 +270,25 @@ export class TelnyxLine implements CallLine {
       case "media": {
         if (!m.media?.payload) return;
         const raw = new Uint8Array(Buffer.from(m.media.payload, "base64"));
-        const buf = this.inboundAlaw ? alawToUlaw(raw) : raw;
-        this.localVad(buf);
+        const pcm = g711ToPcm16(raw, this.inboundAlaw);
+        const rms = pcmRms(pcm);
+        if (rms > VOICED_RMS) {
+          // Voice onset of the current segment = first voiced frame after the last commit.
+          if (!this.segOnsetAt) this.segOnsetAt = Date.now();
+          this.lastVoicedAt = Date.now();
+        }
+        this.localVad(rms);
+        this.emitLevel("callee", rms);
+        this.sttSamples += pcm.length;
+        const now = Date.now();
+        this.recent.push({ at: now, pcm });
+        if (this.recent.length > 1000) this.recent.shift();
+        if (SAVE_AUDIO) {
+          if (!this.audioStartAt) this.audioStartAt = now;
+          try { appendFileSync(join(AUDIO_DIR, `${this.o.callId}.pcm`), new Uint8Array(pcm.buffer)); } catch { /* best effort */ }
+        }
+        // Scribe gets linear PCM decoded once from G.711; µ-law mode kept for A/B (STT_INPUT=ulaw_8000).
+        const buf = this.sttFormat === "ulaw_8000" ? (this.inboundAlaw ? alawToUlaw(raw) : raw) : new Uint8Array(pcm.buffer);
         this.inBatch.push(buf);
         if (this.inBatch.length >= 2) { // 40 ms per Scribe message
           const total = this.inBatch.reduce((a, b) => a + b.length, 0);
@@ -225,9 +305,37 @@ export class TelnyxLine implements CallLine {
     }
   }
 
-  private localVad(buf: Uint8Array) {
+  /** Re-transcribe the finished segment with batch Scribe; report it if it differs. */
+  private secondOpinion(id: string, realtime: string, from: number, to: number) {
+    const frames = this.recent.filter((f) => f.at >= from && f.at <= to);
+    if (!frames.length) return;
+    const pcm = new Int16Array(frames.reduce((n, f) => n + f.pcm.length, 0));
+    let o = 0;
+    for (const f of frames) { pcm.set(f.pcm, o); o += f.pcm.length; }
+    const seg = { id, startMs: from - this.audioStartAt, endMs: to - this.audioStartAt, realtime };
+    if (!STT_BATCH) { this.saveSegment({ ...seg }); return; }
+    const t0 = Date.now();
+    transcribeSegment(pcm, this.o.keyterms)
+      .then((r) => {
+        const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
+        this.ev.debug?.("stt_batch", { id, realtime, batch: r.text, ms: Date.now() - t0 });
+        this.saveSegment({ ...seg, batch: r.text, batchMs: Date.now() - t0 });
+        // Only replace realtime when batch looks like the same utterance (guards bad windows).
+        const n = (t: string) => norm(t).split(" ").filter(Boolean).length;
+        const plausible = n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
+        if (r.text && plausible && norm(r.text) !== norm(realtime)) this.ev.calleeRevised?.(id, r.text, r.words);
+      })
+      .catch((e) => console.warn("[scribe-batch]", (e as Error).message));
+  }
+
+  private saveSegment(s: Record<string, unknown>) {
+    if (!SAVE_AUDIO) return;
+    try { appendFileSync(join(AUDIO_DIR, `${this.o.callId}.segments.jsonl`), JSON.stringify(s) + "\n"); } catch { /* best effort */ }
+  }
+
+  private localVad(rms: number) {
     if (!this.speakResolve) { this.loudFrames = 0; return; }
-    if (ulawRms(buf) > BARGE_RMS) {
+    if (rms > BARGE_RMS) {
       if (++this.loudFrames === BARGE_FRAMES) { this.ev.debug?.("vad_loud", {}); this.ev.calleeSpeech(); }
     } else this.loudFrames = Math.max(0, this.loudFrames - 1);
   }
@@ -273,14 +381,20 @@ export class TelnyxLine implements CallLine {
         console.log(`[latency] callee commit → agent audio: ${now - this.lastCommitAt} ms`);
         this.ev.debug?.("latency", { commitToAudioMs: now - this.lastCommitAt });
       }
+      if (f && this.sayFramePending) {
+        this.sayFramePending = false;
+        this.ev.metric?.({ kind: "first_audio", at: now });
+      }
       if (!f && this.waiting && !this.speakResolve) {
         f = TYPING.subarray(this.typingOff, this.typingOff + FRAME);
         this.typingOff = (this.typingOff + FRAME) % (TYPING.length - FRAME);
       }
       if (!f) break;
+      if (this.speakResolve) this.emitLevel("agent", ulawRms(f));
       this.sendFrame(f);
       this.sentMs += 20;
     }
+    if (!this.speakResolve && this.lastLevelVal.agent >= 0.04) this.emitLevel("agent", 0);
     // Speech finished once everything is sent and has had time to play out.
     if (this.speakResolve && this.producerDone && this.buffered() <= 0 && now - this.clockStart >= this.sentMs) {
       const r = this.speakResolve;
@@ -301,16 +415,18 @@ export class TelnyxLine implements CallLine {
     const abort = new AbortController();
     this.speakAbort = abort;
     this.producerDone = false;
+    this.sayFramePending = kind === "say";
     const done = new Promise<{ interrupted: boolean }>((resolve) => { this.speakResolve = resolve; });
     const t0 = Date.now();
     let first = true;
     try {
-      for await (const chunk of tts(text, { voiceId: this.o.voiceId, signal: abort.signal, cache: kind === "filler" || text.length <= 40 })) {
+      for await (const chunk of tts(text, { voiceId: this.o.voiceId, signal: abort.signal, cache: kind === "filler" || text.length <= 40, onBilled: this.billed })) {
         if (abort.signal.aborted) break;
         if (first) {
           first = false;
           console.log(`[latency] tts first byte: ${Date.now() - t0} ms (${text.length} chars)`);
           this.ev.debug?.("tts", { firstByteMs: Date.now() - t0, chars: text.length, kind });
+          if (kind === "say") this.ev.metric?.({ kind: "tts_first_byte", ms: Date.now() - t0 });
         }
         this.chunks.push(chunk);
       }
@@ -341,7 +457,7 @@ export class TelnyxLine implements CallLine {
   }
 
   async hangup() {
-    if (!this.hungUp && this.controlId) {
+    if (!this.hungUp && this.controlId && !this.o.offline) {
       this.hungUp = true;
       try { await telnyx(`/calls/${encodeURIComponent(this.controlId)}/actions/hangup`, {}); }
       catch (e) { console.warn("[telnyx] hangup:", (e as Error).message); }
@@ -351,6 +467,10 @@ export class TelnyxLine implements CallLine {
   }
 
   private cleanup() {
+    if (!this.costReported) {
+      this.costReported = true;
+      this.ev?.cost?.({ ttsChars: this.ttsChars, sttSec: Math.round(this.sttSamples / 8000) });
+    }
     clearInterval(this.ticker);
     this.ticker = undefined;
     this.stopSpeaking();

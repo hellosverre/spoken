@@ -13,6 +13,15 @@ import { EMERGENCY_ALTERNATIVE, checkGoal, checkNumber, disclosureLine, ensureDi
 import { calls, profile, purge, setProfile, takeCallSlot, tasks } from "./store.ts";
 import { designVoice, listVoices } from "./voice/voices.ts";
 
+// Words that come up on service calls in Norwegian; boosted in Scribe on every call.
+// "sjefen" was heard as "rektor" on call #3.
+const CALL_LEXICON = [
+  "KI", "sjef", "sjefen", "sjefen min", "bestille", "bestilling", "bestillingen", "henting", "hente", "levering",
+  "levere", "pepperoni", "pizza", "kroner", "klokka", "navnet", "navn", "telefonnummer", "adresse", "betale",
+  "betaling", "kort", "vipps", "kontant", "ett øyeblikk", "vent litt", "på vent", "minutter", "time", "timen",
+  "avbestille", "reservere", "bord", "ledig", "stengt", "åpent", "allergi", "glutenfri", "laktosefri",
+];
+
 type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine };
 
 const CORS = {
@@ -104,7 +113,7 @@ export function createApp(llm: LlmProvider = createLlm()) {
       return json(t.plan);
     }
     const p = await llm.plan(taskForLlm(t.input), answers);
-    const rawPhone = t.input.phone ?? answers.phone ?? p.phone;
+    const rawPhone = t.input.phone || answers.phone || p.phone || lookup(t.input.text)?.phone;
     const source: Plan["callee"]["source"] = t.input.phone || answers.phone ? "user" : lookup(t.input.text) ? "lookup" : "user";
     let blocked: Plan["blocked"];
     let phone = "";
@@ -155,9 +164,9 @@ export function createApp(llm: LlmProvider = createLlm()) {
   }
 
   function keyterms(text: string, callee: string): string[] {
-    const words = `${callee} ${text}`.match(/[A-ZÆØÅ][\wæøåÆØÅ']{2,}|\b\w*(pizza|pepperoni|time|bestill)\w*\b/gi) ?? [];
-    // "KI-assistent" is in every opening and callees repeat it back ("er du en KI?").
-    return [...new Set(["KI-assistent", "KI", ...words.map((w) => w.trim())])].slice(0, 12);
+    // Names and nouns from the task, then the call lexicon. Scribe realtime allows 50.
+    const fromTask = `${callee} ${text}`.match(/[A-ZÆØÅ][\wæøåÆØÅ']{2,}|\b[\wæøå]{6,}\b/g) ?? [];
+    return [...new Set(["KI-assistent", profile.name, ...fromTask.map((w) => w.trim()), ...CALL_LEXICON].filter(Boolean))].slice(0, 50);
   }
 
   async function route(req: Request, server: Server<WsData>): Promise<Response | undefined> {

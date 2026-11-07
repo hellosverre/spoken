@@ -19,6 +19,8 @@ export function logprobToConfidence(lp: number): number {
   return Math.max(0, Math.min(1, 1 + lp / 2.5));
 }
 
+export type ScribeFormat = "ulaw_8000" | "pcm_8000" | "pcm_16000";
+
 export class ScribeStream {
   private ws?: WebSocket;
   private queue: string[] = [];
@@ -27,16 +29,23 @@ export class ScribeStream {
   private retries = 0;
   private sentFirst = false;
 
-  constructor(private h: ScribeHandlers, private keyterms: string[] = [], private previousText = "") {}
+  constructor(
+    private h: ScribeHandlers,
+    private keyterms: string[] = [],
+    private previousText = "",
+    /** pcm_8000 = 16-bit linear decoded straight from the phone's G.711 (best accuracy). */
+    private format: ScribeFormat = (process.env.STT_INPUT as ScribeFormat) || "pcm_8000",
+  ) {}
 
   connect() {
     if (!config.elevenlabs.apiKey) { this.h.error("ELEVENLABS_API_KEY missing"); return; }
     const q = new URLSearchParams({
       model_id: "scribe_v2_realtime",
-      audio_format: "ulaw_8000",
+      audio_format: this.format,
       language_code: "no",
       commit_strategy: "vad",
-      vad_silence_threshold_secs: process.env.SCRIBE_SILENCE_SECS ?? "0.5",
+      // Short window for fast turns; CallSession holds the turn if the text sounds unfinished.
+      vad_silence_threshold_secs: process.env.SCRIBE_SILENCE_SECS ?? "0.3",
       include_timestamps: "true",
     });
     for (const k of this.keyterms.slice(0, 20)) q.append("keyterms", k);
@@ -82,12 +91,13 @@ export class ScribeStream {
   }
 
   /** Raw µ-law bytes from the call. */
-  send(ulaw: Uint8Array) {
+  /** Encoded audio in the stream's format (µ-law bytes, or little-endian 16-bit PCM). */
+  send(audio: Uint8Array) {
     const msg: Record<string, unknown> = {
       message_type: "input_audio_chunk",
-      audio_base_64: Buffer.from(ulaw).toString("base64"),
+      audio_base_64: Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength).toString("base64"),
       commit: false,
-      sample_rate: 8000,
+      sample_rate: this.format === "pcm_16000" ? 16000 : 8000,
     };
     if (!this.sentFirst && this.previousText) msg.previous_text = this.previousText.slice(0, 500);
     this.sentFirst = true;

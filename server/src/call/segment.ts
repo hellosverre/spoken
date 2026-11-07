@@ -22,6 +22,13 @@ export function parseTag(body: string): Segment | null {
 
 export class Segmenter {
   private buf = "";
+  private spoke = false;
+
+  /**
+   * firstClause: let the first speech segment end at a comma, so TTS can start on
+   * "Ja, takk," while the model is still writing. Later segments stay whole sentences.
+   */
+  constructor(private firstClause = false) {}
 
   /** Feed a token; returns any segments that are complete. */
   push(tok: string): Segment[] {
@@ -43,7 +50,7 @@ export class Segmenter {
       if (sentEnd > 0) {
         const s = this.buf.slice(0, sentEnd).trim();
         this.buf = this.buf.slice(sentEnd);
-        if (s) out.push({ kind: "speech", text: s });
+        if (s) { out.push({ kind: "speech", text: s }); this.spoke = true; }
         continue;
       }
       if (tagStart === 0 || (tagStart > 0 && !this.buf.slice(0, tagStart).trim())) {
@@ -67,6 +74,13 @@ export class Segmenter {
       const before = text.slice(0, m.index);
       if (m[0] === "." && /\b(kl|ca|nr|evt|bl\.a|f\.eks|ca)$/i.test(before)) continue;
       if (before.trim().length >= 2) return m.index + 1;
+    }
+    if (this.firstClause && !this.spoke) {
+      const c = /[,;:](?=\s)/.exec(text);
+      if (c) {
+        const before = text.slice(0, c.index).trim();
+        if (before.length >= 10 && before.split(/\s+/).length >= 2) return c.index + 1;
+      }
     }
     return flush && text.trim() ? text.length : 0;
   }

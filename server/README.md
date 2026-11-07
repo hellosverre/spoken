@@ -83,6 +83,29 @@ callee µ-law ─┬─ local energy VAD (100 ms) ─┐
 
 Connected in 8.5 s; disclosure played from cache instantly (TTS first byte 0 ms). Then silence: Telnyx delivered the callee track as **PCMA (A-law)**, Scribe got it labelled µ-law and returned nothing, so the agent never got a turn; the callee hung up after 35 s (`normal_clearing`). Fixed: A-law → µ-law transcode from `media_format`, plus a silence check ("Hallo, hører du meg?" after 8 s, hang up after a second miss).
 
+## Call #3 (Sat 7 Nov, real LLM: OpenRouter `anthropic/claude-haiku-5.5`, Sverre playing the shop)
+
+Connected 8.9 s; 7 agent turns, 80 s; agent ended politely when the "shop" said it had to talk to someone. No price was offered, so no approval card. One barge-in, TTS stopped correctly. LLM cost: $0.00084 for the call turns + ~$0.0004 clarify/plan/summary.
+
+| Per turn (median of 7) | ms |
+|---|---|
+| STT (callee stops → Scribe commit, incl. 0.5 s VAD window) | ~900 |
+| LLM first token (Haiku 5.5 via OpenRouter) | ~620 (430–910) |
+| TTS first byte (Flash v2.5, warm) | ~165 |
+| **Total: callee stops → agent audio** | **~1.65 s** (1.5–2.3 s) |
+
+STT heard: «Der går det bra», «Okay», «Med røret ett», «Så har vi gruppe A», «Sa du klokka ett?», «Nei, bare sjekke», «Jeg må snakke med rektor». Short utterances get misheard; compare with what Sverre actually said.
+
+## LLM bench (OpenRouter, 3 Norwegian call turns × 3 runs, `bun scripts/llm-bench.ts`)
+
+| Model | TTFT | 1st sentence | Checks | Note |
+|---|---|---|---|---|
+| mistralai/mistral-small-2603 | 374 ms | 440 ms | ok after prompt fix | fastest; approval cards vague («Er det greit for deg?») |
+| **anthropic/claude-haiku-5.5 (default)** | 600 ms | 720 ms | all ok | best approval cards (item + price + time), cheapest ($0.10/$0.50 per M) |
+| google/gemini-3.1-flash-lite | 625 ms | 699 ms | all ok | «klokken», a bit stiff |
+| meta-llama/llama-4-maverick | 464 ms | 674 ms | 3 issues | dropped the time |
+| openai/gpt-4.1-mini | 724 ms | 880 ms | all ok | asks [[ASK]] too early |
+
 ## Debug log
 
 Every call writes `server/logs/<callId>.jsonl` (gitignored): all live events, each agent turn (`turn_start`/`turn_end` with what was said), fillers, escalations, skipped duplicates, barge-in, Telnyx webhooks, media format, TTS first byte and commit→audio latency. `CALL_LOG=0` turns it off; **turn it off for the public demo** (CONTRACT: no transcript stored server-side).
