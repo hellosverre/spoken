@@ -64,8 +64,12 @@ const BACKCHANNEL_EVERY = 3;
 // turns that were cancelled because the callee was still talking).
 // Adaptive end of turn: people answer questions fast, but a statement («Flott.») is often
 // followed by more («Hvilket navn …?»), so wait a little longer after statements.
-const SPEAK_AFTER_QUESTION_MS = Number(process.env.SPEAK_AFTER_QUESTION_MS ?? 300);
-const SPEAK_AFTER_SILENCE_MS = Number(process.env.SPEAK_AFTER_SILENCE_MS ?? 550);
+// Sverre's test: «Okay? … jeg er et lite barn» got two replies at 300/550 ms. A bit slower, and
+// one- or two-word lines («Okay?», «Ja, men») wait like statements: more usually follows.
+const SPEAK_AFTER_QUESTION_MS = Number(process.env.SPEAK_AFTER_QUESTION_MS ?? 500);
+const SPEAK_AFTER_SILENCE_MS = Number(process.env.SPEAK_AFTER_SILENCE_MS ?? 800);
+// A one- or two-word line waits this long for the rest of the sentence before we answer.
+const HOLD_SHORT_MS = Number(process.env.HOLD_SHORT_MS ?? 700);
 // Speculative LLM on partials: 0 of 62 matched on call #5, so off unless SPECULATE=1.
 const SPECULATE = process.env.SPECULATE === "1";
 // Callee says only «ja»/«mm» while we're mid-turn: listening noise, not a new turn.
@@ -196,6 +200,7 @@ export class CallSession {
   private lastBackchannel = "";
   private turnNo = 0;
   private rephrased = false;
+  private repeats = new Map<string, number>(); // agent lines said again, by normalised text
   private turnSpoke = false; // the running turn has started speaking
   private errand: Errand;
   private errandStated = false;
@@ -436,6 +441,14 @@ export class CallSession {
       this.holdTimer = setTimeout(() => { this.holdTimer = undefined; this.requestTurn(); }, HOLD_MS);
       return;
     }
+    // «Okay?» / «Ja, men» on its own: give the callee a moment to go on before we answer.
+    // Only on a line that measures voice (real calls); scripted test lines report Infinity.
+    if (clean.replace(/\s*⟨.*?⟩/g, "").trim().split(/\s+/).length <= 2 && Number.isFinite(this.init.line.silenceMs?.() ?? Infinity)) {
+      this.debug("hold_short", { text: clean });
+      const id0 = id;
+      this.holdTimer = setTimeout(() => { this.holdTimer = undefined; this.startGate(id0); }, HOLD_SHORT_MS);
+      return;
+    }
     this.startGate(id);
   }
 
@@ -652,6 +665,7 @@ export class CallSession {
     let sentences = 0;
     let rawText = "";
     let speechCapped = false; // one sentence per turn; two when answering a direct question
+    let askedInTurn = false;
     this.turnSpoke = false;
     const handle = async (s: Segment) => {
       if (stop || abort.signal.aborted) return;
@@ -673,7 +687,9 @@ export class CallSession {
         const lastCalleeText = [...this.history].reverse().find((h) => h.role === "callee")?.text.replace(/\s*⟨.*?⟩/g, "") ?? "";
         if (isMeta(s.text) || isEcho(s.text, lastCalleeText)) { this.debug("style_dropped", { text: s.text }); return; }
         if (isDoneClaim(s.text) && !this.confirmedByCallee) { this.debug("done_claim_dropped", { text: s.text }); return; }
-        if (speechCapped) { this.debug("turn_capped", { text: s.text }); return; }
+        // Capped turns may still ask one question (call c_ba0df20d dropped «Hva koster den?»).
+        const isQuestion = /\?\s*$/.test(s.text);
+        if (speechCapped && !(isQuestion && !askedInTurn)) { this.debug("turn_capped", { text: s.text }); return; }
         if (this.errandStated && errandParts(s.text, this.errand) >= 2) {
           const short = shortenErrand(s.text, this.errand, lastCalleeText);
           this.debug("errand_shortened", { original: s.text, short });
@@ -723,7 +739,9 @@ export class CallSession {
         const confused = CONFUSED.test(s.text);
         if (confused || dup) {
           if (confused && !turnConfused) { turnConfused = true; this.confusedRun = this.recentConfused.slice(-3).filter(Boolean).length + 1; }
-          const esc = this.escalation(dup);
+          // A repeated line alone never escalates (call c_ba0df20d hung up on a repeated price
+          // question); only real confusion does. The repeat is allowed once, then skipped.
+          const esc = this.escalation(dup && this.confusedRun >= 2);
           if (esc) {
             this.debug("escalate", { original: s.text, dup, confusedRun: this.confusedRun, replacement: esc.text });
             stop = true;
@@ -733,7 +751,13 @@ export class CallSession {
             if (esc.end) this.endTag = { outcome: "failed", summary: "Forsto ikke mottakeren; avsluttet høflig." };
             return;
           }
-          if (dup) { this.debug("skip_duplicate", { text: s.text }); return; }
+          if (dup && !confused) {
+            // Asking the same thing once more is normal on a bad line; a third time is a loop.
+            const times = (this.repeats.get(n) ?? 0) + 1;
+            this.repeats.set(n, times);
+            if (times > 1) { this.debug("skip_duplicate", { text: s.text }); return; }
+            this.debug("allow_repeat", { text: s.text });
+          }
         }
         spokeAnything = true;
         this.turnSpoke = true;
@@ -743,6 +767,7 @@ export class CallSession {
         if (errandParts(s.text, this.errand) >= 2) this.errandStated = true;
         // «Flott!» / «Ja.» don't count as the turn's sentence.
         if (endsSentence(s.text) && s.text.split(/\s+/).length >= 3 && ++sentences >= (askedQuestion ? 2 : 1)) speechCapped = true;
+        if (isQuestion) { askedInTurn = true; speechCapped = true; }
         if (GOODBYE.test(s.text)) saidBye = true;
         const r = await this.say(s.text, "say", false, abort.signal);
         if (r.interrupted) stop = true;
@@ -1004,7 +1029,8 @@ export class CallSession {
   private async waitForSilence(signal: AbortSignal) {
     const start = Date.now();
     const last = [...this.history].reverse().find((h) => h.role === "callee")?.text.replace(/\s*⟨.*?⟩/g, "") ?? "";
-    const need = /\?\s*$/.test(last) ? SPEAK_AFTER_QUESTION_MS : SPEAK_AFTER_SILENCE_MS;
+    const short = last.trim().split(/\s+/).length <= 2;
+    const need = /\?\s*$/.test(last) && !short ? SPEAK_AFTER_QUESTION_MS : SPEAK_AFTER_SILENCE_MS;
     while (!signal.aborted && !this.ended && Date.now() - start < 3000) {
       const quiet = this.init.line.silenceMs?.() ?? Infinity;
       if (quiet >= need) return;
@@ -1067,7 +1093,8 @@ export class CallSession {
     const no = /^(nei|no)$/i.test(choice.trim());
     if (p.kind === "address") {
       if (yes) this.init.plan.willShare.push("address");
-      this.history.push({ role: "user", text: yes ? "[godkjent] Du kan oppgi adressen: {{ADDRESS}}" : "[avslått] Ikke oppgi adressen." });
+      const canShare = yes && !!this.init.profile.address;
+      this.history.push({ role: "user", text: canShare ? "[godkjent] Du kan oppgi adressen: {{ADDRESS}}" : "[avslått] Ikke oppgi adressen." });
     } else if (p.kind === "stuck") {
       if (/godta/i.test(choice)) { this.approvalCredit = 1; this.approvedCommit = true; }
       this.history.push({ role: "user", text: /godta/i.test(choice)
