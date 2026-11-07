@@ -106,6 +106,38 @@ STT heard: «Der går det bra», «Okay», «Med røret ett», «Så har vi grup
 | meta-llama/llama-4-maverick | 464 ms | 674 ms | 3 issues | dropped the time |
 | openai/gpt-4.1-mini | 724 ms | 880 ms | all ok | asks [[ASK]] too early |
 
+## Approval timeout → hold (Sverre, Sat 7 Nov)
+
+User hasn't answered an approval card after `HOLD_ASK_SEC` (30): agent asks «Beklager ventetiden. Jeg får ikke helt kontakt med {name} akkurat nå. Har du mulighet til å vente litt?».
+Yes (or no answer in 10 s) → «Tusen takk!» + soft generated hold music (Am–F–C–G sine pads, ~20 dB under speech), «Takk for at du venter, jeg er straks tilbake.» every `HOLD_REMIND_SEC` (20).
+No, or `HOLD_MAX_SEC` (120) since the card → callback line, call ends `partial`. User answers any time → music off, «Takk for at du ventet!», call continues.
+Notes for the web app (agreed with Form): «Venter på svaret ditt – spør om personen kan vente.», «Personen venter… N s (ventemusikk på)», «Personen venter… N s», «Ventemusikk av – du svarte, samtalen fortsetter.», «Personen kunne ikke vente – tilbød å ringe tilbake senere.» Tests: `test/hold.test.ts`.
+
+## STT accuracy (Sat 7 Nov)
+
+- Scribe input is 16-bit PCM decoded once from Telnyx G.711 (`STT_INPUT=pcm_8000`, `ulaw_8000` for A/B).
+- 40-term call lexicon + task names as keyterms (`CALL_LEXICON` in `app.ts`).
+- Word confidences < 0.6 reach the LLM as «⟨usikre ord: …⟩»; the prompt says reinterpret from context or ask one short question.
+- Batch Scribe v2 re-transcribes every finished segment (voice onset → offset, ~0.6 s) and replaces the live text when it differs and looks like the same utterance. The turn waits for it (max `REVISION_WAIT_MS`=1000) only when realtime had unsure words. `STT_BATCH=0` turns it off.
+
+WER on 10 Norwegian shop sentences, TTS'd, band-limited to 8 kHz + A-law (`bun scripts/stt-wer.ts`):
+
+| Variant | WER |
+|---|---|
+| A: A-law→µ-law, ulaw_8000 (call #3 path) | 2.7 % |
+| B: A-law→PCM16, pcm_8000 | 5.3 % |
+| C: B + lexicon | 5.3 % |
+| **D: Scribe v2 batch on the segment + lexicon** | **1.3 %** |
+
+On clean synthetic audio all realtime variants are within noise (errors are «Ett/Et», «åttini» spelling). The codec was not the cause of «rektor». In the replay, batch fixed «110 kroner» → «hundre og åttini kroner». Real-voice WER needs a dev call with `SAVE_CALL_AUDIO=1` (callee audio to `.cache/calls/`, gitignored; delete after).
+
+## Latency work (replay, `bun scripts/replay.ts`)
+
+| | callee audio ends → agent audio (median) |
+|---|---|
+| Before (0.5 s VAD, sentence TTS, no backchannel) | 1787 ms |
+| After (0.3 s VAD + unfinished hold, first-clause TTS, cached «Ja,»/«Mm,» at 450 ms, speculative LLM, warm LLM) | ~1030 ms first audio; ~1280–1450 ms first content |
+
 ## Debug log
 
 Every call writes `server/logs/<callId>.jsonl` (gitignored): all live events, each agent turn (`turn_start`/`turn_end` with what was said), fillers, escalations, skipped duplicates, barge-in, Telnyx webhooks, media format, TTS first byte and commit→audio latency. `CALL_LOG=0` turns it off; **turn it off for the public demo** (CONTRACT: no transcript stored server-side).

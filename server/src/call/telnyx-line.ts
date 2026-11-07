@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { ScribeStream } from "../voice/scribe.ts";
 import { transcribeSegment } from "../voice/scribe-batch.ts";
 import { tts } from "../voice/tts.ts";
-import { alawToUlaw, g711ToPcm16, levelOf, pcmRms, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
+import { alawToUlaw, g711ToPcm16, holdMusic, levelOf, pcmRms, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
 import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
 
 const FRAME = 160; // 20 ms of µ-law at 8 kHz
@@ -27,6 +27,7 @@ if (SAVE_AUDIO) { try { mkdirSync(AUDIO_DIR, { recursive: true }); } catch { /* 
 const lines = new Map<string, TelnyxLine>(); // by callId
 const byControlId = new Map<string, TelnyxLine>();
 const TYPING = typingSound(4);
+const MUSIC = holdMusic(8);
 
 export function lineForCall(callId: string) { return lines.get(callId); }
 
@@ -79,6 +80,7 @@ export class TelnyxLine implements CallLine {
   private speakChain: Promise<unknown> = Promise.resolve();
   private waiting = false;
   private typingOff = 0;
+  private waitKind: "typing" | "music" = "typing";
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
   private inboundAlaw = false;
@@ -386,8 +388,9 @@ export class TelnyxLine implements CallLine {
         this.ev.metric?.({ kind: "first_audio", at: now });
       }
       if (!f && this.waiting && !this.speakResolve) {
-        f = TYPING.subarray(this.typingOff, this.typingOff + FRAME);
-        this.typingOff = (this.typingOff + FRAME) % (TYPING.length - FRAME);
+        const loop = this.waitKind === "music" ? MUSIC : TYPING;
+        f = loop.subarray(this.typingOff, this.typingOff + FRAME);
+        this.typingOff = (this.typingOff + FRAME) % (loop.length - FRAME);
       }
       if (!f) break;
       if (this.speakResolve) this.emitLevel("agent", ulawRms(f));
@@ -449,7 +452,11 @@ export class TelnyxLine implements CallLine {
     r?.({ interrupted: true });
   }
 
-  startWaitingSound() { this.waiting = true; }
+  startWaitingSound(kind: "typing" | "music" = "typing") {
+    if (this.waitKind !== kind) this.typingOff = 0;
+    this.waitKind = kind;
+    this.waiting = true;
+  }
   stopWaitingSound() {
     if (!this.waiting) return;
     this.waiting = false;
