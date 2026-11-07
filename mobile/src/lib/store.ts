@@ -63,6 +63,10 @@ export interface State {
   transcript: Line[];
   elapsed: string;
   callEnded: boolean;
+  /** Epoch ms when the shop put us on hold; null when not on hold. */
+  holdSince: number | null;
+  /** Suggested next instructions from the server (empty = show Repeat/Thanks). */
+  chips: string[];
   sheet: Sheet | null;
   sheetOpen: boolean;
   /** Bumped to flash the device frame when Spoken needs you. */
@@ -101,6 +105,8 @@ const INITIAL: State = {
   transcript: [],
   elapsed: "0:00",
   callEnded: false,
+  holdSince: null,
+  chips: [],
   sheet: null,
   sheetOpen: false,
   flashTick: 0,
@@ -593,7 +599,7 @@ export class SpokenStore {
     this.stopTimer();
 
     this.set({
-      transcript: [], sheetOpen: false, elapsed: "0:00", callEnded: false,
+      transcript: [], sheetOpen: false, elapsed: "0:00", callEnded: false, holdSince: null, chips: [],
       pill: "ringing", speaker: null, speakerNote: "ringing", screen: "call",
     });
     this.sys(`${this.t.calling} ${L.contact} · ${sc.number}`);
@@ -710,6 +716,8 @@ export class SpokenStore {
         sayMore,
         ask,
         note: (text) => id === this.callId && this.sys(text),
+        hold: (since) => id === this.callId && this.set({ holdSince: since }),
+        chips: (items) => id === this.callId && this.set({ chips: items }),
         connected: () => id === this.callId && connected(),
         attach: (sink) => { this.realSink = sink; },
       };
@@ -739,7 +747,7 @@ export class SpokenStore {
     clearNeedsYou();
     this.stopTimer();
     const dur = this.state.elapsed;
-    this.set({ pill: "ended", speaker: null, speakerNote: "ended", callEnded: true });
+    this.set({ pill: "ended", speaker: null, speakerNote: "ended", callEnded: true, holdSince: null, chips: [] });
     this.sys(`${this.t.ended} · ${dur}`);
     await sleep(700);
     if (id !== this.callId) return;
@@ -782,6 +790,7 @@ export class SpokenStore {
     const text = raw.trim();
     if (!text) return;
     this.noteYou(text);
+    this.set({ chips: [] });
     if (this.realSink) return this.realSink.instruction(text);
     this.pending.push({ type: "text", text });
   }

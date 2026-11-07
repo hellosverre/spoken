@@ -8,8 +8,9 @@ import type { Sheet as SheetContent } from "../lib/store";
 import { ease, em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Composer } from "./Composer";
-import { Chip } from "./Home";
 import { Glow, PulseRings } from "./Art";
+import { HoldBanner } from "./HoldBanner";
+import { ReplyChips } from "./ReplyChips";
 import { DoneArt, NothingAgreedArt } from "./drawings/ResultArt";
 import { CallFeedback } from "./Feedback";
 import { Icon, Mark } from "./Icon";
@@ -28,6 +29,7 @@ export function Call() {
         <CallHead />
         <View style={styles.pad}>
           <Speaker />
+          <HoldBanner />
         </View>
         <Transcript />
         <CallFooter />
@@ -249,8 +251,7 @@ function CallFooter() {
       ) : (
         <>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
-            <Chip icon="replay" label={t.chipRepeat} onPress={() => store.chip("repeat")} />
-            <Chip icon="heart" label={t.chipThanks} onPress={() => store.chip("thanks")} />
+            <ReplyChips repeat={t.chipRepeat} thanks={t.chipThanks} />
           </ScrollView>
           <Composer
             value={value}

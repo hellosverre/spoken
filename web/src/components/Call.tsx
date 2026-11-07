@@ -8,7 +8,9 @@ import type { Sheet as SheetContent } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { DoneArt, NothingAgreedArt } from "./Art";
 import { Composer } from "./Composer";
+import { HoldBanner } from "./HoldBanner";
 import { Icon } from "./Icon";
+import { ReplyChips } from "./ReplyChips";
 
 export function Call({ on }: { on: boolean }) {
   return (
@@ -16,6 +18,7 @@ export function Call({ on }: { on: boolean }) {
       <CallHead />
       <div className="pad">
         <Speaker />
+        <HoldBanner />
       </div>
       <Transcript />
       <CallComposer />
@@ -168,14 +171,7 @@ function CallComposer() {
 
   return (
     <div className="composer pad">
-      <div className="chips" role="group" aria-label={t.instrAria}>
-        <button className="chip" onClick={() => store.chip("repeat")}>
-          {t.chipRepeat}
-        </button>
-        <button className="chip" onClick={() => store.chip("thanks")}>
-          {t.chipThanks}
-        </button>
-      </div>
+      <ReplyChips aria={t.instrAria} repeat={t.chipRepeat} thanks={t.chipThanks} />
       <Composer
         value={value}
         onChange={setValue}
