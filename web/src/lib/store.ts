@@ -1,3 +1,4 @@
+import { APP_COPY } from "./copy-app";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
 import { isLive, planRealCall, realEnabled, type LiveIO } from "./real-call";
@@ -95,7 +96,8 @@ const INITIAL: State = {
   flashTick: 0,
   authed: false,
   themePref: "system",
-  profile: { name: "Ingrid", phone: "" },
+  // No default name: real calls say this name out loud, so it must never be a made-up one.
+  profile: { name: "", phone: "" },
   presets: DEFAULT_PRESETS,
 };
 
@@ -559,6 +561,8 @@ export class SpokenStore {
       this.sys(this.t.connected);
     };
     if (!live) {
+      // A script must never pass for a real call.
+      this.sys(APP_COPY[lang].scriptedNote);
       await sleep(2300);
       if (id !== this.callId) return;
       if (this.hangup) return this.finish(id, { hung: true });

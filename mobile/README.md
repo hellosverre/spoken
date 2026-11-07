@@ -89,6 +89,8 @@ Every request carries `X-Spoken-Device` (a random id made once and kept on the p
 | Demo passcode | Asked in the chat before a call if it's empty, or Profile → Calls (kept on the phone; cleared if the server says it's wrong) | Empty, and `skip` = practice calls with a scripted callee, no phone rings, and the call screen says so |
 | Your name on calls | Profile → Your name | Empty: the call says «en bruker» |
 
+When Spoken is waiting for you (an approval, or a question in the chat) and the app isn't in front, you get a system notification with the question, cleared once you answer (`src/lib/notify.ts`). These are local notifications, so the OS has to keep the app running to send them: there's no server push yet, and iOS can suspend a backgrounded app within seconds.
+
 With the right passcode the server places a real Telnyx call, only to numbers on its `CALL_ALLOWLIST`. Built-in presets have no number and use the server's demo directory, whose numbers aren't real, so save a real number in a preset to call it.
 
 ## On your own iPhone (no paid Apple account)

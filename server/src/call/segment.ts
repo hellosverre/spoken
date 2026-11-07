@@ -5,16 +5,21 @@ export type Segment =
   | { kind: "speech"; text: string }
   | { kind: "ask"; question: string; options: string[] }
   | { kind: "end"; outcome: string; summary: string }
-  | { kind: "note"; text: string };
+  | { kind: "note"; text: string }
+  | { kind: "dtmf"; digits: string };
 
 export function parseTag(body: string): Segment | null {
-  const m = body.match(/^\s*(ASK|END|NOTE)\s*:\s*([\s\S]*)$/i);
+  const m = body.match(/^\s*(ASK|END|NOTE|DTMF)\s*:\s*([\s\S]*)$/i);
   if (!m) return null;
   const parts = m[2]!.split("|").map((s) => s.trim()).filter(Boolean);
   const tag = m[1]!.toUpperCase();
   if (tag === "ASK") {
     const options = parts.slice(1);
     return { kind: "ask", question: parts[0] ?? "", options: options.length ? options : ["JA", "NEI"] };
+  }
+  if (tag === "DTMF") {
+    const digits = (m[2] ?? "").replace(/[\s,.-]/g, "");
+    return /^[0-9*#]{1,4}$/.test(digits) ? { kind: "dtmf", digits } : null;
   }
   if (tag === "END") return { kind: "end", outcome: parts[0] ?? "partial", summary: parts.slice(1).join(" | ") };
   return { kind: "note", text: parts.join(" | ") };

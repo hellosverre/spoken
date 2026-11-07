@@ -12,6 +12,9 @@ const SCRIPT = {
   bye: "Supert, den er klar klokka 18:00. Ha det bra!",
   declined: "Den er grei. Ha det!",
   repeat: "Hæ? Unnskyld, hva sa du?",
+  menu: "Velkommen til Domino's. For kundeservice, trykk 2. For bestilling, trykk 1.",
+  human: "Kan jeg få snakke med personen selv, ikke en robot?",
+  voicemail: "Du har kommet til telefonsvareren til Domino's Storo. Legg igjen en beskjed etter pipetonen.",
 };
 
 const SCRIPT_EN: typeof SCRIPT = {
@@ -22,19 +25,25 @@ const SCRIPT_EN: typeof SCRIPT = {
   bye: "Lovely, it'll be ready at 6 pm. Goodbye!",
   declined: "No problem. Bye!",
   repeat: "Sorry, what did you say?",
+  menu: "Welcome to Domino's. For customer service, press 2. For orders, press 1.",
+  human: "Can I talk to the person themselves, not a robot?",
+  voicemail: "You've reached the voicemail of Domino's Storo. Please leave a message after the tone.",
 };
 
 // What the agent said → the callee's next line, per language.
 const NEXT: Record<Lang, Record<string, RegExp>> = {
   no: {
     declined: /nei takk|lar vi det være|avslutte/, bye: /ha det/, greet: /ki-assistent/, price: /jeg vil gjerne|bestille/,
-    card: /bekrefter|ja takk/, name: /kortnummer|betale ved henting|betalingslenke/, done: /står på|navnet er/, repeat: /si det en gang til|gjenta/,
+    card: /bekrefter|ja takk/, name: /kortnummer|betale ved henting|betalingslenke/, done: /står på|navnet er/, repeat: /si det en gang til|gjenta/, deaf: /døv|tekst/,
   },
   en: {
     declined: /no thanks|leave it|end the call/, bye: /goodbye|\bbye\b/, greet: /ai assistant/, price: /i'd like|order/,
-    card: /confirm|yes please/, name: /card number|pay at pickup|payment link/, done: /under|name is/, repeat: /say that again|repeat/,
+    card: /confirm|yes please/, name: /card number|pay at pickup|payment link/, done: /under|name is/, repeat: /say that again|repeat/, deaf: /deaf|text|typ/,
   },
 };
+
+/** What the fake callee does: the normal pizza shop, a phone menu, a human demanding the person, or a machine. */
+export type MockScenario = "pizza" | "ivr" | "human" | "voicemail";
 
 // Words the fake STT is "unsure" about, so the UI can grey them out.
 const UNSURE = new Set(["Storo.", "Storo", "pepperoni", "189"]);
@@ -47,13 +56,24 @@ export class MockLine implements CallLine {
   private seg = 0;
   private closed = false;
   waitingSound: false | "typing" | "music" = false;
+  /** Keys the agent pressed, for tests. */
+  readonly dtmf: string[] = [];
 
   /** speed 1 ≈ real time; tests use ~0.02. */
   private script: typeof SCRIPT;
   private re: Record<string, RegExp>;
-  constructor(private speed = 1, lang: Lang = "no") {
+  constructor(private speed = 1, private scenario: MockScenario = "pizza", lang: Lang = "no") {
     this.script = lang === "en" ? SCRIPT_EN : SCRIPT;
     this.re = NEXT[lang];
+  }
+
+  async sendDtmf(digits: string) {
+    this.dtmf.push(digits);
+    // Key 1 = ordering: the menu hands over to the shop; anything else loops the menu once.
+    if (this.scenario === "ivr" && !this.closed) {
+      this.scenario = "pizza";
+      void (async () => { await this.wait(700); if (!this.closed) { this.stage = "greet"; await this.talk(digits === "1" ? this.script.greet : this.script === SCRIPT ? "Det valget finnes ikke." : "That option doesn't exist."); } })();
+    }
   }
 
   private wait(ms: number) {
@@ -72,6 +92,11 @@ export class MockLine implements CallLine {
       await this.wait(1800);
       if (this.closed) return;
       events.status("connected");
+      if (this.scenario === "voicemail") {
+        await this.wait(400);
+        await this.talk(this.script.voicemail);
+        events.voicemail?.();
+      }
     })();
   }
 
@@ -118,7 +143,9 @@ export class MockLine implements CallLine {
     const r = this.re;
     if (r.declined!.test(a)) return "declined";
     if (r.bye!.test(a)) return null;
-    if (r.greet!.test(a) && this.stage === "start") return "greet";
+    if (r.greet!.test(a) && this.stage === "start") return this.scenario === "ivr" ? "menu" : this.scenario === "voicemail" ? null : "greet";
+    if (this.scenario === "human" && r.price!.test(a) && this.stage === "greet") { this.scenario = "pizza"; return "human"; }
+    if (this.stage === "human" && r.deaf!.test(a)) return null;
     if (r.price!.test(a) && (this.stage === "greet" || this.stage === "repeat")) return "price";
     if (r.card!.test(a) && this.stage === "price") return "card";
     if (r.name!.test(a) && this.stage === "card") return "name";

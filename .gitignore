@@ -6,3 +6,4 @@ dist/
 .DS_Store
 web/e2e/shots/
 web/e2e/report.txt
+server/.env.bak*

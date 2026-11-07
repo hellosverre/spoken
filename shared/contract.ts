@@ -124,3 +124,12 @@ export interface CallSummary {
   durationSec: number;
   at: string; // ISO time
 }
+
+// POST /api/feedback (X-Spoken-Device required) → { ok: true }. A thumbs rating after a call and/or a
+// free note from Profile. At least one of rating/comment. Never a transcript.
+export interface FeedbackInput {
+  callId?: string;
+  rating?: "up" | "down";
+  comment?: string; // max 1000
+  source: "call" | "profile";
+}

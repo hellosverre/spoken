@@ -129,7 +129,7 @@ export function Presets() {
               first={i === 0}
               title={r.title}
               sub={r.sub}
-              icon={r.key}
+              art={<PresetArt icon={r.key} size={24} />}
               go={<Icon name="play" color={C.dim} size={12} filled />}
               onPress={() => store.playDemo(r.key)}
             />

@@ -38,3 +38,18 @@ alter table public.call_results enable row level security;
 -- Newer Supabase projects don't grant table rights to service_role by default (PostgREST gave
 -- 42501 "permission denied"). The server's role only; anon/authenticated get nothing. Applied Sat 7 Nov.
 grant select, insert, update, delete on public.profiles, public.contacts, public.call_results to service_role;
+
+-- User feedback: a rating after a call, or a free note from Profile. Server-only, like the rest.
+create table if not exists public.feedback (
+  id uuid primary key default gen_random_uuid(),
+  device_id text not null,
+  call_id text,
+  rating text check (rating in ('up', 'down')),
+  comment text check (char_length(comment) <= 1000),
+  source text not null check (source in ('call', 'profile')),
+  created_at timestamptz not null default now()
+);
+create index if not exists feedback_created_idx on public.feedback (created_at desc);
+alter table public.feedback enable row level security;
+revoke all on public.feedback from anon, authenticated;
+grant select, insert on public.feedback to service_role;
