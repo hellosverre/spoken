@@ -45,17 +45,23 @@ interface TurnTiming {
 const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (deg )?ikke|linja er (litt )?dårlig|unnskyld,? hva sa du)/i;
 // Short fillers for when a reply is slow (> FILLER_AFTER_MS). Rotated, never the same twice in a row.
 const FILLERS = ["Mm, et øyeblikk.", "Ja, la meg se.", "Et lite øyeblikk."];
-const FILLER_AFTER_MS = 1500;
+const FILLER_AFTER_MS = 2500;
 // Instant cached backchannel when content is not ready this long after the callee's commit.
-const BACKCHANNELS = ["Ja,", "Mm,", "Okei,"];
-const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 450);
+// Backchannel only when the reply is clearly slow, at most once every 3 turns, never after a
+// question (Sverre, call #5: «mm» after everything sounded robotic).
+const BACKCHANNELS = ["Ja.", "Okei.", "Skjønner."];
+const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 1200);
+const BACKCHANNEL_EVERY = 3;
+const GOODBYE = /\b(ha det( bra| godt)?|ha en (fin|god|strålende) (dag|kveld|helg))\b/i;
+// Unsure words worth waiting ~0.7 s for a batch re-transcription: numbers and real content words.
+const FILLER_WORDS = new Set(["det", "den", "jeg", "du", "vi", "de", "ha", "har", "er", "var", "ja", "nei", "og", "en", "et", "så", "bare", "da", "eh", "ehm", "øh", "mm", "hm", "ikke", "kan", "vil", "må", "med", "på", "til", "som", "nå", "jo", "okei", "ok"]);
 // Start the LLM on a partial that has been stable this long (speculative turn).
 const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
 // Callee text that sounds cut off mid-sentence: wait this long for more before answering.
 const HOLD_MS = 450;
 // Word confidences arrive ~20 ms after the commit; batch revisions ~0.7 s.
 const WORDS_WAIT_MS = 120;
-const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 1000);
+const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
 const UNFINISHED = /(,|\b(og|eller|men|så|at|som|blir|er|det|den|en|et|ei|til|på|for|med|om|hvis|fordi|altså|eh|ehm|øh|liksom))[.…]?$/i;
 
 interface Spec {
@@ -139,6 +145,9 @@ export class CallSession {
   private specTimer?: ReturnType<typeof setTimeout>;
   private holdTimer?: ReturnType<typeof setTimeout>;
   private lastBackchannel = "";
+  private turnNo = 0;
+  private rephrased = false;
+  private lastBackchannelTurn = -99;
   private answeredAtHistory = -1; // history length when the user last answered an approval
   private reasked = 0;
   private usage = { promptTokens: 0, completionTokens: 0, costUsd: 0, requests: 0 };
@@ -345,8 +354,13 @@ export class CallSession {
     if (item && !item.text.includes("⟨")) item.text = `${item.text} ⟨usikre ord: ${unsure.join(", ")}⟩`;
     this.debug("unsure_words", { id, unsure });
     if (this.spec) this.dropSpec("unsure words");
-    // Unsure words: give the batch second opinion up to 1 s before answering.
-    if (gate) { clearTimeout(gate.timer); gate.timer = setTimeout(gate.go, REVISION_WAIT_MS); }
+    // Wait for the batch second opinion only if an unsure word matters (a number, a name, a noun);
+    // on a real line nearly every segment has some unsure filler word (call #4).
+    const matters = unsure.some((w) => /\d/.test(w) || (w.length >= 5 && !FILLER_WORDS.has(w.toLowerCase())));
+    if (!gate) return;
+    if (!matters) { gate.go(); return; }
+    clearTimeout(gate.timer);
+    gate.timer = setTimeout(gate.go, REVISION_WAIT_MS);
   }
 
   /** Batch STT disagreed with realtime: fix the transcript, the result card and what the LLM sees. */
@@ -487,15 +501,22 @@ export class CallSession {
     const said: string[] = [];
     let stop = false;
     let turnConfused = false;
+    let saidBye = false;
     let spokeAnything = false;
     this.debug("turn_start", { history: this.history.at(-1) });
     let backchannel = "";
-    const answeringCallee = this.history.at(-1)?.role === "callee";
-    // Instant cached "Ja," / "Mm," if real content is not ready yet (never the same twice in a row).
-    const backTimer = answeringCallee ? setTimeout(() => {
+    const turnNo = ++this.turnNo;
+    const lastCallee = this.history.at(-1);
+    const answeringCallee = lastCallee?.role === "callee";
+    const askedQuestion = !!lastCallee && /\?\s*(⟨.*⟩)?$/.test(lastCallee.text);
+    const mayBackchannel = answeringCallee && !askedQuestion && turnNo - this.lastBackchannelTurn >= BACKCHANNEL_EVERY;
+    // A short cached «Ja.» / «Okei.» / «Skjønner.» only if real content still isn't ready at 1.2 s.
+    const backTimer = mayBackchannel ? setTimeout(() => {
       if (spokeAnything || stop || abort.signal.aborted || this.ended || this.pending) return;
-      backchannel = BACKCHANNELS.find((b) => b !== this.lastBackchannel) ?? BACKCHANNELS[0]!;
+      const options = BACKCHANNELS.filter((b) => b !== this.lastBackchannel);
+      backchannel = options[turnNo % options.length]!;
       this.lastBackchannel = backchannel;
+      this.lastBackchannelTurn = turnNo;
       this.debug("backchannel", { text: backchannel });
       void this.say(backchannel, "filler");
     }, Math.max(0, BACKCHANNEL_MS - (Date.now() - t0))) : undefined;
@@ -513,7 +534,7 @@ export class CallSession {
       if (s.kind === "speech") {
         if (backchannel && !spokeAnything) {
           // "Ja," was already said: don't start the real reply with "Ja, …" again.
-          const w = backchannel.replace(/,$/, "");
+          const w = backchannel.replace(/[.,]$/, "");
           const stripped = s.text.replace(new RegExp(`^${w}[,!.]?\\s+`, "i"), "");
           if (stripped !== s.text && stripped.trim()) s = { ...s, text: stripped.charAt(0).toUpperCase() + stripped.slice(1) };
         }
@@ -548,6 +569,7 @@ export class CallSession {
         if (firstAudio && this.timing && !this.timing.awaitAudio) { this.timing.awaitTts = true; this.timing.awaitAudio = true; }
         if (firstAudio) { firstAudio = false; this.latencies.push(Date.now() - t0); }
         said.push(s.text);
+        if (GOODBYE.test(s.text)) saidBye = true;
         const r = await this.say(s.text, "say", false, abort.signal);
         if (r.interrupted) stop = true;
       } else if (s.kind === "ask") {
@@ -601,7 +623,11 @@ export class CallSession {
         this.confusedRun = this.recentConfused.filter(Boolean).length;
       }
       this.debug("turn_end", { said, confusedRun: this.confusedRun, aborted: abort.signal.aborted });
-      if (this.endTag && !abort.signal.aborted) {
+      // The model said goodbye but forgot [[END]]: hang up anyway (call #5 kept talking after «Ha det!»).
+      if (saidBye && !this.endTag && !abort.signal.aborted && !this.pending) {
+        this.debug("goodbye_without_end", { said });
+        await this.finish("agent said goodbye");
+      } else if (this.endTag && !abort.signal.aborted) {
         await this.finish("agent ended");
       } else if (this.wantTurn && !this.pending) {
         void this.runTurn();
@@ -618,12 +644,14 @@ export class CallSession {
     if (this.confusedRun >= 3) {
       return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
     }
-    const rephrase = `Jeg ringer på vegne av ${name} for å ${this.init.plan.goal}. Kan du svare ja eller nei?`;
+    // Don't re-introduce ourselves (the callee complained on call #5); once per call.
+    const rephrase = `Kort sagt: jeg vil gjerne ${this.init.plan.goal}. Går det, ja eller nei?`;
     if (this.confusedRun === 2 || dup) {
-      if (this.recentTurns.some((t) => t.has(norm(rephrase)))) {
+      if (this.rephrased || this.recentTurns.some((t) => t.has(norm(rephrase)))) {
         return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
       }
       if (this.confusedRun === 2) this.note("Mottakeren er vanskelig å forstå; jeg prøver å spørre enklere.", "warn");
+      this.rephrased = true;
       return { text: rephrase };
     }
     return null;

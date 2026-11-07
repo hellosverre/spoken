@@ -106,6 +106,12 @@ STT heard: «Der går det bra», «Okay», «Med røret ett», «Så har vi grup
 | meta-llama/llama-4-maverick | 464 ms | 674 ms | 3 issues | dropped the time |
 | openai/gpt-4.1-mini | 724 ms | 880 ms | all ok | asks [[ASK]] too early |
 
+## Call #5 (Sat 7 Nov, Sverre stress-testing as the shop)
+
+5.5 min, `failed` («Ikke bestilt: ingen stor pepperoni igjen, tilbudt henting var ikke 18:00»). He said the pizza was sold out, offered «klokka 25:00» and «1. januar», trolled. The agent refused to book an impossible time, asked for clarification, and only offered alternatives through the approval card (fired once). Realtime heard «Sjefen min» right this time. Problems: «Ja,/Mm,» before almost every reply (36×), re-introduced itself 3× («Jeg ringer på vegne av Sverre…»), kept talking after its own «Ha det!». Median total 2.26 s. Cost: Telnyx $0.2442 (360 s billed), LLM $0.00596 (23 req), TTS 2693 chars, STT 318 s. ElevenLabs free tier now at 5894/10000 chars.
+
+Fixes: backchannel only if content isn't ready at 1.2 s, max once per 3 turns, never after a callee question, varied «Ja./Okei./Skjønner.»; filler at 2.5 s; rephrase once per call without re-introducing; «ha det» without [[END]] ends the call; batch wait (≤ 0.8 s) only when an unsure word is a number or a content word. Tests: `test/backchannel.test.ts`.
+
 ## Call #4 (Sat 7 Nov, merged main, Haiku 5.5, Sverre as the shop)
 
 88 s, outcome `done` («Bestilt: 1 stor pepperoni, hentes 18:00 på navnet Sverre»). Approval card fired at 37 s (auto-JA by the test script). Cost: Telnyx $0.0814 (120 s billed), LLM $0.00134 (9 req), TTS 597 chars, STT 87 s realtime + 11 batch segments.
