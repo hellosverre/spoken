@@ -32,6 +32,7 @@ const LOCAL_COMMIT_MS = Number(process.env.LOCAL_COMMIT_MS ?? 450);
 const STT_BATCH = process.env.STT_BATCH !== "0";
 
 const lines = new Map<string, VonageLine>(); // by our callId
+const inboundByUuid = new Map<string, VonageLine>(); // inbound legs: events carry only Vonage's uuid
 const TYPING = typingSound(4);
 const MUSIC = holdMusic(8);
 
@@ -44,6 +45,8 @@ export interface VonageLineOpts {
   keyterms: string[];
   lang?: Lang;
   maxSec?: number;
+  /** Inbound call (the shop calls us back): Vonage already has the leg, we only wait for the media socket. */
+  inbound?: { uuid: string };
 }
 
 const b64url = (b: Buffer | string) => Buffer.from(b).toString("base64url");
@@ -99,7 +102,8 @@ export function ulawToPcm16k(mu: Uint8Array, prev: { v: number }): Uint8Array {
 
 export class VonageLine implements CallLine {
   readonly revises = STT_BATCH;
-  readonly answersFirst = true;
+  /** Outbound: the person answering speaks first. Inbound: they called us, so we greet first. */
+  get answersFirst() { return !this.o.inbound; }
   private ev!: LineEvents;
   private readonly token = crypto.randomUUID().replace(/-/g, "");
   private uuid = ""; // Vonage call uuid (POST /v1/calls → uuid)
@@ -152,6 +156,22 @@ export class VonageLine implements CallLine {
   constructor(private o: VonageLineOpts) {
     this.lang = o.lang ?? "no";
     lines.set(o.callId, this);
+    if (o.inbound) {
+      this.uuid = o.inbound.uuid;
+      this.answered = true;
+      inboundByUuid.set(o.inbound.uuid, this);
+    }
+  }
+
+  /** Token for the media socket URI in the answer NCCO. */
+  get mediaToken() { return this.token; }
+
+  /** Event webhook on the inbound leg (no call/t params): matched by Vonage's uuid. */
+  static handleInboundEvent(uuid: string, body: any): boolean {
+    const line = inboundByUuid.get(uuid);
+    if (!line || !line.ev) return false;
+    line.onEvent(body ?? {});
+    return true;
   }
 
   silenceMs() { return this.lastVoicedAt ? Date.now() - this.lastVoicedAt : Infinity; }
@@ -160,6 +180,18 @@ export class VonageLine implements CallLine {
 
   async start(events: LineEvents) {
     this.ev = events;
+    if (this.o.inbound) {
+      console.log(`[vonage] inbound call ${this.o.callId} (${this.uuid})`);
+      this.ev.status("ringing");
+      // No media socket = no audio: don't leave the shop on a silent line.
+      this.ringTimer = setTimeout(() => {
+        if (!this.streaming && !this.hungUp) {
+          this.ev.status("failed", "Lydstrømmen kom aldri fram.");
+          void this.hangup();
+        }
+      }, 10_000);
+      return;
+    }
     const { applicationId, privateKey, number } = config.vonage;
     if (!applicationId || !privateKey || !number) throw new Error("VONAGE_APPLICATION_ID / VONAGE_PRIVATE_KEY / VONAGE_NUMBER missing");
     const wsBase = config.publicUrl.replace(/^http/, "ws");
@@ -253,6 +285,7 @@ export class VonageLine implements CallLine {
   private maybeConnected() {
     if (this.answered && this.streaming && !this.connectedSent) {
       this.connectedSent = true;
+      clearTimeout(this.ringTimer);
       this.ev.status("connected");
     }
   }
@@ -549,7 +582,10 @@ export class VonageLine implements CallLine {
     this.scribe = undefined;
     try { this.ws?.close(); } catch { /* closed */ }
     this.ws = undefined;
-    setTimeout(() => lines.delete(this.o.callId), 60_000);
+    setTimeout(() => {
+      lines.delete(this.o.callId);
+      if (this.o.inbound) inboundByUuid.delete(this.o.inbound.uuid);
+    }, 60_000);
   }
 
   onSocketClosed() {

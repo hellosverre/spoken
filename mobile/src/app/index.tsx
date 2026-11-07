@@ -3,6 +3,7 @@ import { BackHandler, StyleSheet, View } from "react-native";
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from "react-native-reanimated";
 import { Call } from "../components/Call";
 import { Home } from "../components/Home";
+import { IncomingCall } from "../components/IncomingCall";
 import { Intro } from "../components/Intro";
 import { Login } from "../components/Login";
 import type { Screen } from "../lib/store";
@@ -51,6 +52,7 @@ export default function Device() {
       <Layer name="call" screen={screen}>
         <Call />
       </Layer>
+      <IncomingCall />
       {flashTick > 0 ? <FlashRing key={flashTick} /> : null}
     </View>
   );
