@@ -27,6 +27,20 @@ All items below need validation. P0 means a proposed priority for completing a u
 | P1 | Personalisation | Evaluate text size, contrast/theme, optional sound, voice/rate and notification preferences with users. These are proposed options, not promises of current support. Haptics must remain optional and cannot be the only signal. |
 | P1 | Additional input/support needs | Test OS switch control, voice control and eye tracking where relevant to recruited users/devices. Consider optional setup assistance without giving a helper automatic authority to approve calls or access private history. |
 
+## What follows the phone's own settings
+
+Spoken has no in-app text-size, bold, contrast or motion toggle. iOS is the single source, so nothing is enlarged twice. Only the light/dark/system theme pick remains (it was already a theme choice, default “system”). Built and checked in headless Chromium with emulation only; **not yet tested on a real iPhone or with VoiceOver**.
+
+| iOS setting | Web (Safari) | Expo app |
+|---|---|---|
+| Larger Text | Root is `font: -apple-system-body` (fallback 100% elsewhere). Text and text-driven spacing are rem, so everything scales; buttons, inputs, tabs use `min-height`, cards and tab labels wrap, no ellipsis on names. Checked at 390 px with root at 200%: no clipping or horizontal overflow. | `allowFontScaling` stays on, no `maxFontSizeMultiplier`. Text buttons, chips, tabs and inputs use `minHeight`; `numberOfLines` removed from names and labels. Not type-checked or run. |
+| Bold Text | `-apple-system-body` carries the system weight; Inter weights set explicitly in CSS are unchanged (to verify on device). | `useBoldText()` steps Inter up one cut inside `T`. |
+| Reduce Motion | `prefers-reduced-motion` stops animations and pulse rings. | `reduceMotionChanged` (store) and reanimated `useReducedMotion`. |
+| Increase Contrast | `prefers-contrast: more`: ink borders, brighter muted text, glows off, 3 px focus ring. | Not implemented. |
+| Reduce Transparency | `prefers-reduced-transparency`: glows off, opaque scrim. No blur is used anywhere. | No blur is used; nothing to change. |
+| Dark / light | `prefers-color-scheme` via the “system” theme. | `useColorScheme` via the “system” theme. |
+| VoiceOver | Icon-only buttons labelled; decorative art and the speaker pods `aria-hidden`; transcript is `role="log"` with `aria-live="polite"`; approval sheet is a modal dialog named by its title and described by its price/time rows; focus moves to the first choice (YES) and NO is the next control; one `h1` per screen. | Labels and roles on touchables; transcript lines are announced with `announceForAccessibility` after the transcript is still for 1.2 s (so a line is not read word by word); approval title is announced and focus moved to the first choice. |
+
 ## WCAG reference and units
 
 For this web app, use **CSS pixels**, not native-platform points:

@@ -113,9 +113,9 @@ const useStyles = makeStyles((C) => ({
   danger: { color: C.danger },
   dim: { color: C.dim },
   seg: { flexDirection: "row", borderWidth: 1, borderColor: C.line2, borderRadius: 12, padding: 3 },
-  segBtn: { height: 30, paddingHorizontal: 11, borderRadius: 9, justifyContent: "center", alignItems: "center" },
+  segBtn: { minHeight: 30, paddingVertical: 4, paddingHorizontal: 11, borderRadius: 9, justifyContent: "center", alignItems: "center" },
   // With an icon: the glyph over a small label, so three choices fit beside a row title.
-  segIconBtn: { height: 50, minWidth: 52, paddingHorizontal: 8, gap: 3 },
+  segIconBtn: { minHeight: 50, minWidth: 52, paddingHorizontal: 8, gap: 3 },
   segWide: { alignSelf: "stretch" },
   segOn: { backgroundColor: C.accentSoft },
   segText: { fontFamily: F.medium, fontSize: 12, color: C.dim },

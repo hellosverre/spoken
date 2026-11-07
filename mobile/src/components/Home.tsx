@@ -169,7 +169,7 @@ function Example({ icon, text, onPress }: { icon: IconName; text: string; onPres
       <View style={styles.exampleIc}>
         <Icon name={icon} color={C.accent} size={18} />
       </View>
-      <Text style={styles.exampleText} numberOfLines={2}>
+      <Text style={styles.exampleText}>
         {text}
       </Text>
       <Icon name="chevron" color={C.dim} size={16} />
@@ -310,7 +310,7 @@ function TabBar({ tab }: { tab: Tab }) {
               style={[styles.tab, on && styles.tabOn]}
             >
               <Icon name={x.icon} color={color} size={22} />
-              <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+              <Text style={[styles.tabLabel, { color }]}>
                 {x.label}
               </Text>
             </Pressable>
@@ -345,7 +345,7 @@ const useStyles = makeStyles((C) => ({
   exampleText: { flex: 1, fontFamily: F.regular, fontSize: 14.5, lineHeight: 20, color: C.ink },
   thread: { gap: 10, paddingTop: 16, paddingBottom: 24 },
   composer: { paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 6, backgroundColor: C.app },
-  chip: { height: 30, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, flexDirection: "row", alignItems: "center", gap: 7 },
+  chip: { minHeight: 30, paddingVertical: 4, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.line2, flexDirection: "row", alignItems: "center", gap: 7 },
   chipText: { fontFamily: F.regular, fontSize: 13, color: C.muted },
   bubble: { maxWidth: "84%", paddingVertical: 10, paddingHorizontal: 14, borderRadius: 18 },
   me: { alignSelf: "flex-end", backgroundColor: C.ink, borderBottomRightRadius: 6 },
@@ -366,7 +366,7 @@ const useStyles = makeStyles((C) => ({
   // Bigger than the web's compact pill: full width, 56 pt tabs, every label visible.
   tabbar: { paddingTop: 8, paddingHorizontal: 12, backgroundColor: C.app },
   tabs: { flexDirection: "row", gap: 4, padding: 5, borderWidth: 1, borderColor: C.line, borderRadius: 999, backgroundColor: C.surface },
-  tab: { flex: 1, height: 56, borderRadius: 999, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 8 },
+  tab: { flex: 1, minHeight: 56, paddingVertical: 6, flexWrap: "wrap", borderRadius: 999, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 8 },
   tabOn: { backgroundColor: C.surface2 },
   tabLabel: { fontFamily: F.medium, fontSize: 15, letterSpacing: em(-0.006, 15) },
 }));

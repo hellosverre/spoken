@@ -67,7 +67,7 @@ export function Profile() {
           </T>
         </View>
         <Text style={styles.hello}>{first ? `${greet}, ${first}` : greet}</Text>
-        <T size={22} weight="semibold" numberOfLines={1}>
+        <T size={22} weight="semibold">
           {name.trim() || "—"}
         </T>
         <Text style={styles.handle}>@demo</Text>

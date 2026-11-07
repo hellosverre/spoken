@@ -98,6 +98,6 @@ const useStyles = makeStyles((C) => ({
   lede: { fontFamily: F.regular, fontSize: 15, lineHeight: 22, color: C.muted, maxWidth: 300 },
   form: { gap: 14, marginTop: 28 },
   bad: { fontFamily: F.regular, fontSize: 13.5, color: C.danger },
-  btn: { marginTop: 4, height: 48 },
+  btn: { marginTop: 4, minHeight: 48 },
   hint: { ...small(13), color: C.dim, textAlign: "center", marginTop: 4 },
 }));
