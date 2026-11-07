@@ -37,7 +37,7 @@ function session(replies: string[]) {
 }
 
 test("a short «Okay?» waits for the rest of the sentence: one reply, not two", async () => {
-  const { s, line } = session(["Skjønner, takk for at du sier det.", "Andre svar."]);
+  const { s, line } = session(["Takk for at du sier det.", "Andre svar."]);
   await s.start();
   await Bun.sleep(30);
   const before = line.spoken.length;
@@ -47,7 +47,7 @@ test("a short «Okay?» waits for the rest of the sentence: one reply, not two",
   line.voicedAt = Date.now();
   line.ev.calleeFinal("c2", "Jeg er et lite barn.");
   await Bun.sleep(2000);
-  expect(line.spoken.slice(before)).toEqual(["Skjønner, takk for at du sier det."]);
+  expect(line.spoken.slice(before)).toEqual(["Takk for at du sier det."]);
   await s.finish("test");
 });
 
