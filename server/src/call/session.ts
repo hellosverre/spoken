@@ -87,6 +87,10 @@ const HOLD_SHORT_MS = Number(process.env.HOLD_SHORT_MS ?? 700);
 const OPENING_ECHO_CONF = Number(process.env.OPENING_ECHO_CONF ?? 0.6);
 const GREETING_WAIT_MS = Number(process.env.GREETING_WAIT_MS ?? 3000);
 const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
+// A recorded welcome message or phone menu answers first at many restaurants: wait it out.
+const ANNOUNCEMENT = /velkommen til|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
+const MENU = /trykk|tast(er)? \d|press \d|for (bestilling|reservasjon|å (snakke|prate))/i;
+const ANNOUNCEMENT_GAP_MS = 3500;
 const GREETING_MAX_MS = Number(process.env.GREETING_MAX_MS ?? 8000);
 // After the disclosure: give them a moment to answer («ja?», «nei takk») before stating the errand.
 const AFTER_OPENING_MS = Number(process.env.AFTER_OPENING_MS ?? 2000);
@@ -236,6 +240,8 @@ export class CallSession {
   private overOpening = new Set<string>();
   private refusalChecked = false;
   private lastGreeting = "";
+  private greetAll = ""; // everything said before our opening (welcome message, menu)
+  private menuTries = 0;
   private ended = false;
   private endTag?: { outcome: Outcome; summary: string };
   private voicemail = false;
@@ -471,6 +477,20 @@ export class CallSession {
     this.openingPending = true;
     const greeted = await this.waitForGreeting();
     if (this.ended) return;
+    // A phone menu played: press the right key first, then wait for a person and introduce ourselves.
+    if (MENU.test(this.greetAll) && line.sendDtmf && this.menuTries < 2) {
+      this.menuTries++;
+      const menu = this.greetAll.trim();
+      this.greetAll = "";
+      this.debug("phone_menu", { menu });
+      this.openingPending = false;
+      this.history.push({ role: "user", text: `[instruks] Det som ble sagt var en automatisk telefonmeny: «${menu}». Ikke snakk. Svar bare med [[DTMF: n]] for valget som passer målet (snakke med en person, bestilling eller reservasjon).` });
+      this.requestTurn();
+      for (let i = 0; i < 40 && !this.ended && (this.turnRunning || this.speaking); i++) await new Promise((r) => setTimeout(r, 200));
+      await new Promise((r) => setTimeout(r, 400));
+      if (this.ended) return;
+      return this.sayOpening();
+    }
     this.debug("opening_start", { greeted, waitedMs: Date.now() - this.connectedAt });
     this.openingSpeaking = true;
     try { await this.say(opening); } finally { this.openingSpeaking = false; this.openingPending = false; }
@@ -496,7 +516,8 @@ export class CallSession {
         const quiet = this.init.line.silenceMs?.() ?? Infinity;
         const greeted = this.lastCalleeAt >= start;
         // «Hei, dette er …» stops mid-sentence: give them twice the gap to finish it.
-        const gap = greeted && soundsUnfinished(this.lastGreeting) ? 2 * GREETING_GAP_MS : GREETING_GAP_MS;
+        const gap = ANNOUNCEMENT.test(this.greetAll) ? ANNOUNCEMENT_GAP_MS
+          : greeted && soundsUnfinished(this.lastGreeting) ? 2 * GREETING_GAP_MS : GREETING_GAP_MS;
         const done = this.ended
           || (greeted && quiet >= gap)
           || (!greeted && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
@@ -547,7 +568,7 @@ export class CallSession {
     // Greeting, or talk over the disclosure: it's in the history; sayOpening decides what's next.
     if (this.openingPending) {
       if (this.openingSpeaking) this.overOpening.add(id);
-      else this.lastGreeting = clean;
+      else { this.lastGreeting = clean; this.greetAll += ` ${clean}`; }
       this.debug("held_for_opening", { text: clean, speaking: this.openingSpeaking });
       return;
     }
