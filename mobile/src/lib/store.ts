@@ -5,7 +5,7 @@ import { MOBILE_COPY } from "./copy-mobile";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { askNotificationPermission, clearNeedsYou, notifyNeedsYou, setupNotifications } from "./notify";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
-import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
+import { configureRealCalls, isLive, newDeviceId, planRealCall, planTargets, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
 
 export type Screen = "intro" | "login" | "home" | "call";
@@ -46,6 +46,11 @@ export interface IntroState {
   word: boolean;
 }
 
+export interface MultiRequest {
+  request: string;
+  targets: { name: string; phone: string }[];
+}
+
 export interface State {
   lang: Lang;
   screen: Screen;
@@ -77,6 +82,8 @@ export interface State {
   themePref: ThemePref;
   profile: Profile;
   presets: StoredPreset[];
+  /** Set while the multi-call view (2–3 parallel info calls) is on screen. */
+  multi: MultiRequest | null;
   /** Call through the Spoken server (real-call.ts); off = the on-phone scripted demos. */
   serverCalls: boolean;
   /** Demo passcode for real calls; empty = the server runs calls in mock mode. */
@@ -115,6 +122,7 @@ const INITIAL: State = {
   // No default name: real calls say this name out loud, so it must never be a made-up one.
   profile: { name: "", phone: "" },
   presets: DEFAULT_PRESETS,
+  multi: null,
   serverCalls: true,
   passcode: "",
 };
@@ -405,7 +413,7 @@ export class SpokenStore {
     this.callId++;
     this.askResolve = null;
     this.stopTimer();
-    this.set({ sheetOpen: false, threaded: false, thread: [], tab, screen: "home" });
+    this.set({ sheetOpen: false, threaded: false, thread: [], tab, screen: "home", multi: null });
   }
 
   newChat() {
@@ -585,7 +593,18 @@ export class SpokenStore {
     this.timer = undefined;
   }
 
+  /** The plan asked 2–3 places: open the multi-call view, which starts them through /api/compare. */
+  private startMulti(targets: { name: string; phone: string }[]) {
+    this.callId++;
+    this.homeId++;
+    this.stopTimer();
+    const request = SCENARIOS[this.state.scenario][this.state.lang].request;
+    this.set({ multi: { request, targets }, sheetOpen: false, screen: "call" });
+  }
+
   async startCall() {
+    const targets = planTargets(this.state.scenario);
+    if (targets) return this.startMulti(targets);
     const id = ++this.callId;
     this.homeId++;
     const lang = this.state.lang;

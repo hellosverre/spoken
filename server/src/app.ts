@@ -106,7 +106,7 @@ function planTargets(fromLlm: { name: string; phone?: string }[] | undefined, te
   for (const t of raw) {
     const n = checkNumber(t.phone.replace(/[ \-]/g, ""));
     if (!n.ok || out.some((o) => o.phone === n.e164)) continue;
-    out.push({ name: t.name.trim().slice(0, 80) || n.e164.replace(/^\+47(\d{2})(\d{2})(\d{2})(\d{2})$/, "+47 $1 $2 $3 $4"), phone: n.e164 });
+    out.push({ name: t.name.trim().slice(0, 80) || n.e164.replace(/^\+47(\d{2})(\d{2})(\d{2})(\d{2})$/, "$1 $2 $3 $4"), phone: n.e164 });
   }
   return out.length >= 2 ? out.slice(0, 3) : undefined;
 }

@@ -5,7 +5,6 @@ import { BUILT_IN_KEYS, resolvePreset, toRequest, type Preset } from "../lib/pre
 import { em, F, makeStyles, PAD, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow, useTint } from "./Art";
-import { CompareEntry } from "./Compare";
 import { HeroDuet } from "./drawings/Hero";
 import { hasPresetArt, PresetArt } from "./drawings/PresetArt";
 import { Icon } from "./Icon";
@@ -83,7 +82,6 @@ export function Presets() {
           </View>
         ) : null}
 
-        <CompareEntry />
         <View style={styles.grid}>
           {shown.map((p) => (
             <Animated.View key={p.id} layout={LinearTransition.duration(250)} exiting={FadeOut.duration(180)} style={styles.cell}>
