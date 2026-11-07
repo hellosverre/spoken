@@ -13,6 +13,7 @@ import { MockLine } from "./call/mock-line.ts";
 import { MockLlm } from "./llm/mock.ts";
 import { CallSession } from "./call/session.ts";
 import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
+import { ElksLine, elksSecretOk } from "./call/elks-line.ts";
 import { config } from "./config.ts";
 import { lookup } from "./directory.ts";
 import { createLlm } from "./llm/index.ts";
@@ -37,7 +38,7 @@ const CALL_LEXICON_EN = [
   "appointment", "cancel", "reserve", "table", "available", "closed", "open", "allergy", "gluten-free", "lactose-free",
 ];
 
-type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine };
+type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine } | { kind: "elks"; line?: ElksLine };
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -227,12 +228,13 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (!num.ok) return err(403, num.reason);
     // No (or a wrong) demo passcode → this call runs in mock mode: scripted callee, mock agent.
     const pass = passcodeCheck(req.headers.get("x-spoken-passcode"));
-    const real = config.callProvider === "telnyx" && pass === "ok";
-    if (config.callProvider === "telnyx" && !real) console.log(`[call] passcode ${pass}: mock mode`);
+    const realProvider = config.callProvider === "telnyx" || config.callProvider === "46elks";
+    const real = realProvider && pass === "ok";
+    if (realProvider && !real) console.log(`[call] passcode ${pass}: mock mode`);
     if (real && !config.callAllowlist.includes(num.e164)) {
       return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
     }
-    if (real) {
+    if (real && config.callProvider === "telnyx") {
       // Prepaid Telnyx balance: log it before every real call, refuse when it can't cover one.
       const bal = await telnyxBalance();
       console.log(`[telnyx] balance before call: ${bal === null ? "unknown" : `$${bal.toFixed(2)}`}`);
@@ -246,11 +248,14 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (b.callLang === "no" || b.callLang === "en") t.plan.callLang = b.callLang;
     const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
-    const line = real
+    const keyt = keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang);
+    const line = real && config.callProvider === "46elks"
+      ? new ElksLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
+      : real
       ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang), maxSec })
-      : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed, "pizza", t.plan.callLang ?? "no");
+      : new MockLine(realProvider ? 1 : config.mockSpeed, "pizza", t.plan.callLang ?? "no");
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
-    const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
+    const callLlm = realProvider && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
     const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile, lang: t.input.lang ?? t.profile.lang }, line, llm: callLlm, secrets: { fnr }, maxSec, taskText: t.input.text });
     // History: the call's summary (never the transcript) is saved for the device when it ends.
     if (t.device) {
@@ -263,7 +268,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     }
     calls.set(callId, session);
     void session.start();
-    const mode = config.callProvider === "telnyx" && real ? "real" : "mock";
+    const mode = real ? "real" : "mock";
     return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
 
@@ -296,6 +301,21 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       if (!line) return new Response("forbidden", { status: 403 });
       if (server.upgrade(req, { data: { kind: "media", callId: url.searchParams.get("call")!, line } satisfies WsData })) return undefined;
       return new Response("upgrade required", { status: 426 });
+    }
+
+    // 46elks Realtime Voice: the websocket number's websocket_url is wss://…/elks/media?t=<ELKS_WS_SECRET>.
+    // The call is matched to a pending ElksLine by the `hello` message.
+    if (path === "/elks/media") {
+      if (config.callProvider !== "46elks" || !elksSecretOk(url.searchParams.get("t"))) return new Response("forbidden", { status: 403 });
+      if (server.upgrade(req, { data: { kind: "elks" } satisfies WsData })) return undefined;
+      return new Response("upgrade required", { status: 426 });
+    }
+
+    // whenhangup: form-encoded call result (state, cost, duration). Token is per call.
+    if (path === "/elks/whenhangup" && m === "POST") {
+      const form = Object.fromEntries(new URLSearchParams(await req.text())) as Record<string, string>;
+      const ok = ElksLine.handleHangup(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "", form);
+      return ok ? new Response("ok") : new Response("forbidden", { status: 403 });
     }
 
     if (path === "/telnyx/webhook" && m === "POST") {
@@ -365,7 +385,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
     // The built web app (web/dist) is served from here, so the phone uses one origin for
     // the page, REST and the live socket.
-    if (m === "GET" && !path.startsWith("/api/") && !path.startsWith("/telnyx/")) {
+    if (m === "GET" && !path.startsWith("/api/") && !path.startsWith("/telnyx/") && !path.startsWith("/elks/")) {
       const page = await webFile(path);
       if (page) return page;
     }
@@ -409,6 +429,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       open(ws: ServerWebSocket<WsData>) {
         const d = ws.data;
         if (d.kind === "media") { d.line.attach(ws); return; }
+        if (d.kind === "elks") { setTimeout(() => { if (!d.line) ws.close(1008, "no hello"); }, 5000); return; }
         const s = calls.get(d.callId);
         if (!s) { ws.close(1008, "unknown call"); return; }
         for (const ev of s.events) ws.send(JSON.stringify(ev)); // replay for late joiners
@@ -417,6 +438,11 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       message(ws: ServerWebSocket<WsData>, msg: string | Buffer) {
         const d = ws.data;
         if (d.kind === "media") { d.line.onMedia(String(msg)); return; }
+        if (d.kind === "elks") {
+          if (d.line) d.line.onMedia(String(msg));
+          else if (!(d.line = ElksLine.accept(ws, String(msg)))) ws.close(1008, "no matching call");
+          return;
+        }
         const s = calls.get(d.callId);
         const cmd = parseCommand(String(msg));
         if (!s || !cmd) { ws.send(JSON.stringify({ type: "note", text: "Ukjent kommando.", level: "warn", at: Date.now() })); return; }
@@ -425,6 +451,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       close(ws: ServerWebSocket<WsData>) {
         const d = ws.data;
         if (d.kind === "media") d.line.onSocketClosed();
+        else if (d.kind === "elks") d.line?.onSocketClosed();
         else d.unsub?.();
       },
     },

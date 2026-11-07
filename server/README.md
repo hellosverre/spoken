@@ -37,6 +37,27 @@ Offline TTS → Scribe check, no phone call (about 200 TTS chars the first time,
 BAS_SECRET_TOKEN=… /home/sverre/Projects/bas/ops/bas-secret run -- bun scripts/loopback.ts
 ```
 
+## 46elks call line (`CALL_PROVIDER=46elks`)
+
+Same agent, different phone leg: `src/call/elks-line.ts`. Outbound `POST https://api.46elks.com/a1/calls` (Basic auth) with `from=ELKS_NUMBER`, `to=<callee>`, `voice_start={"connect":"<ELKS_WS_NUMBER>"}`, `timeout=40`, `whenhangup=<PUBLIC_URL>/elks/whenhangup?call=…&t=<per-call token>`. When the callee answers, 46elks bridges to the WebSocket number and opens `wss://…/elks/media` to us (Realtime Voice: JSON, field `t`, `ulaw` 8 kHz both ways, same as Telnyx PCMU).
+
+Setup (one time, 46elks dashboard → Numbers):
+
+| Step | What | Env |
+|---|---|---|
+| 1 | Allocate a **voice-enabled virtual number** (Swedish +46 is fine; caller id of the outbound call) | `ELKS_NUMBER=+46…` |
+| 2 | Allocate a free **WebSocket number**; set its `websocket_url` to `wss://spoken-api.hellosverre.com/elks/media?t=<ELKS_WS_SECRET>` (API: `POST /a1/numbers/{id}` with `websocket_url`) | `ELKS_WS_NUMBER=+46…`, `ELKS_WS_SECRET=<random>` |
+| 3 | API username + password from the dashboard | `ELKS_API_USER`, `ELKS_API_PASSWORD` |
+| 4 | Add credit; check the account may call +47 (Norway) | |
+| 5 | `CALL_PROVIDER=46elks CALL_ALLOWLIST=+47… PUBLIC_URL=https://spoken-api.hellosverre.com` | |
+
+Notes:
+- A WebSocket number has one static `websocket_url`, so the media socket cannot carry a per-call token. It carries `ELKS_WS_SECRET` (compared in constant time; refused with 403 otherwise) and the `hello` is matched to the call by `hello.callid` (= the `id` from `POST /calls`), else the single call still waiting for its hello, else by the callee number. Unmatched hellos are closed. The per-call token protects `/elks/whenhangup`.
+- Barge-in: `{"t":"interrupt"}` then `{"t":"sending","format":"ulaw"}` again. Hangup: we send `{"t":"bye"}`, 46elks plays what is buffered and answers `bye`; the socket closes then (6 s cap).
+- `whenhangup` gives `state`/`cost`/`duration` (cost is 1/10000 of the account currency); it is the only signal for a call nobody answered. Logged as `[cost] 46elks call …`.
+- Not covered: DTMF (Realtime Voice has no such message), 46elks balance check (`MIN_BALANCE_USD` applies to Telnyx only), per-call hard time limit at 46elks (the server's `MAX_CALL_SEC` timer hangs up).
+- Passcode, `CALL_ALLOWLIST`, rate limits and mock fallback behave as for Telnyx. Unverified against the live API (no account yet): the exact `hello.from/to` of the bridged leg and `whenhangup` on unanswered calls; the fallbacks above cover both.
+
 ## Persistence (Supabase)
 
 Profile, contacts and call **summaries** per device, never transcripts or audio (`db/schema.sql`,
