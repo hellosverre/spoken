@@ -15,10 +15,13 @@ const fmt = (ms: number) => {
 };
 
 /** "On hold · 0:42" while the shop has us waiting; buzzes and announces when a person is back. */
-export function HoldBanner() {
+/** since/ended override the store (the multi-call view tracks them per call). */
+export function HoldBanner(o: { since?: number | null; ended?: boolean } = {}) {
   const { C } = useTheme();
-  const since = useSpoken((s) => s.holdSince);
-  const ended = useSpoken((s) => s.callEnded);
+  const sSince = useSpoken((s) => s.holdSince);
+  const sEnded = useSpoken((s) => s.callEnded);
+  const since = o.since !== undefined ? o.since : sSince;
+  const ended = o.ended ?? sEnded;
   const lang = useSpoken((s) => s.lang);
   const t = T[lang === "no" ? "no" : "en"];
   const [now, setNow] = useState(() => Date.now());

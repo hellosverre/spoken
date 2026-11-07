@@ -77,7 +77,8 @@ export function planPrompt(task: TaskForLlm, answers: Record<string, string>): s
   return `Oppgave: «${task.text}»${task.phone ? ` (nummer: ${task.phone})` : ""}
 Svar fra brukeren: ${JSON.stringify(answers)}
 Lag planen for telefonsamtalen. Svar som JSON:
-{"calleeName": "hvem vi ringer", "phone": "E.164 hvis kjent, ellers utelat", "goal": "${goal}", "willShare": ["name", ...], "needsApprovalFor": ["..."]}
+{"calleeName": "hvem vi ringer", "phone": "E.164 hvis kjent, ellers utelat", "goal": "${goal}", "willShare": ["name", ...], "needsApprovalFor": ["..."], "targets": [{"name": "...", "phone": "E.164"}]}
+targets: ta KUN med når brukeren nevner 2–3 ulike steder eller telefonnumre, eller ber om å finne billigste/første ledige (da ringer vi alle samtidig og spør om pris og tid, uten å bestille). Ellers utelat targets helt. Maks 3. Hvert mål trenger et nummer fra oppgaven. Da skal goal beskrive spørsmålet som stilles til alle (pris og tidligste tid), ikke en bestilling.
 willShare kan bare inneholde: name, phone, address, email, birthdate, fnr, allergies. Ta bare med det som trengs.`;
 }
 

@@ -33,6 +33,8 @@ export interface Plan {
   needsApprovalFor: string[]; // e.g. ["price over 0 kr", "booking a time"]
   voiceId: string;
   callLang?: Lang; // language spoken on the call (missing = "no"); the user can switch it mid-call
+  /** 2–3 places to ask in parallel (info-only). Present only when the request names several places/numbers; the app then POSTs /api/compare instead of a single call. callee = targets[0]. */
+  targets?: { name: string; phone: string }[];
   blocked?: { reason: string; alternative?: string }; // e.g. emergency number
 }
 

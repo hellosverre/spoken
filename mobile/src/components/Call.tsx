@@ -17,6 +17,7 @@ import { FactStrip } from "./FactStrip";
 import { Receipt } from "./Receipt";
 import { Icon, Mark } from "./Icon";
 import { Btn, Press, T } from "./ui";
+import { MultiCall } from "./Compare";
 
 // The live call, as web/src/components/Call.tsx: who you're calling, who is
 // talking right now, every word as chat bubbles, a way to tell Spoken
@@ -25,6 +26,14 @@ import { Btn, Press, T } from "./ui";
 export function Call() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
+  const multi = useSpoken((s) => s.multi);
+  if (multi) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <MultiCall />
+      </View>
+    );
+  }
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <KeyboardAvoidingView behavior="padding" style={styles.grow}>
@@ -402,7 +411,8 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
   );
 }
 
-const useStyles = makeStyles((C) => ({
+/** Shared with the multi-call view so its transcript looks exactly like this one. */
+export const useStyles = makeStyles((C) => ({
   root: { flex: 1, backgroundColor: C.app },
   grow: { flex: 1 },
   pad: { paddingHorizontal: PAD },

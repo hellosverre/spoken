@@ -25,9 +25,11 @@ const COPY = {
 
 const TONE: Record<FactItem["kind"], string> = { price: "amber", time: "sky", address: "violet", ref: "teal" };
 
-export function FactStrip() {
+/** `items` overrides the global list (the multi-call view keeps one list per call). */
+export function FactStrip({ items: own }: { items?: FactItem[] } = {}) {
   const lang = useSpoken((s) => s.lang);
-  const list = useSyncExternalStore(subscribe, snapshot, () => empty);
+  const shared = useSyncExternalStore(subscribe, snapshot, () => empty);
+  const list = own ?? shared;
   const t = COPY[lang] ?? COPY.no;
   if (!list.length) return null;
   return (

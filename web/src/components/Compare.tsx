@@ -1,186 +1,149 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useSpoken, useStore } from "@/lib/use-spoken";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { passcode } from "@/lib/real-call";
+import { useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { Composer } from "./Composer";
+import { FactStrip, type FactItem } from "./FactStrip";
+import { HoldBanner } from "./HoldBanner";
+import { Icon } from "./Icon";
+import { ReplyChips } from "./ReplyChips";
 
-/* Compare: ask 2–3 places the same question at once (server: POST /api/compare), then book one.
-   Self-contained: own fetch, polling GET /api/compare/:id every 1.2 s. Wire types: shared/contract.ts. */
+/* Multi-call view: the chat plan named 2–3 places, so POST /api/compare starts one info-only call per place
+   and this screen shows them as tabs. The selected tab is a normal call view (transcript, fact strip, hold
+   banner, chips) fed by that call's own live socket. Wire types: shared/contract.ts. */
 
 const API = process.env.NEXT_PUBLIC_SPOKEN_API ?? "";
 const base = () => (API === "/" ? window.location.origin : API.replace(/\/$/, ""));
 
-interface Leg { name: string; phone: string; callId: string; status: string; answer?: string; outcome?: string; lastLine?: string }
-interface State { compareId: string; mode: "real" | "mock"; done: boolean; legs: Leg[] }
+type Row = { id: string; kind: "ai" | "them" | "sys" | "you"; text: string };
+interface Ask { id: string; question: string; options: string[] }
+interface Leg {
+  name: string; phone: string; callId: string; status: string; answer?: string; outcome?: string;
+  rows: Row[]; facts: FactItem[]; holdSince: number | null; chips: string[]; ask?: Ask;
+}
+interface PollLeg { callId: string; status: string; answer?: string; outcome?: string }
 
 const L = {
   no: {
-    entry: "Sammenlign 3 steder", entrySub: "Spoken ringer alle samtidig og spør om pris og tid",
-    title: "Sammenlign", req: "Hva vil du ha?", reqDef: "Billigste store pepperoni, hentes i kveld",
-    name: "Navn", phone: "Telefon", go: "Ring alle", close: "Lukk", again: "Ny sammenligning",
-    book: "Bestill hos", result: "Resultat", place: "Sted", answer: "Svar", wait: "Venter …", mock: "Demo: ingen telefon ringer",
-    noAnswer: "Ingen svar", err: "Kunne ikke starte.",
+    title: "Ringer samtidig", answerWait: "Venter på svar", mock: "Demo: ingen telefon ringer", err: "Kunne ikke starte samtalene.",
+    results: "Resultat", book: "Bestill hos", cheapest: "Billigst", noAnswer: "Ingen svar", tabs: "Samtaler", home: "Til forsiden",
+    bookText: "Bestill", ended: "Samtalen er ferdig",
     st: { queued: "Venter", dialing: "Ringer opp", ringing: "Ringer", connected: "I samtale", on_hold: "På vent", ended: "Ferdig", failed: "Feilet" } as Record<string, string>,
   },
   en: {
-    entry: "Compare 3 places", entrySub: "Spoken calls them all at once and asks price and time",
-    title: "Compare", req: "What do you want?", reqDef: "Cheapest large pepperoni, pickup tonight",
-    name: "Name", phone: "Phone", go: "Call all", close: "Close", again: "New comparison",
-    book: "Book with", result: "Result", place: "Place", answer: "Answer", wait: "Waiting …", mock: "Demo: no phone rings",
-    noAnswer: "No answer", err: "Could not start.",
+    title: "Calling at once", answerWait: "Waiting for an answer", mock: "Demo: no phone rings", err: "Could not start the calls.",
+    results: "Result", book: "Book with", cheapest: "Cheapest", noAnswer: "No answer", tabs: "Calls", home: "Back home",
+    bookText: "Book", ended: "The call has ended",
     st: { queued: "Waiting", dialing: "Dialing", ringing: "Ringing", connected: "On the call", on_hold: "On hold", ended: "Done", failed: "Failed" } as Record<string, string>,
   },
 };
-
-const DEFAULTS = [
-  { name: "Pizzabakeren", phone: "+4722000001" },
-  { name: "Dolce Vita", phone: "+4722000002" },
-  { name: "Peppes Pizza", phone: "+4722000003" },
-];
 
 function headers(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   try {
     const d = localStorage.getItem("spoken-device");
     if (d) h["X-Spoken-Device"] = d;
-    const p = localStorage.getItem("spoken-passcode");
+    const p = passcode();
     if (p) h["X-Spoken-Passcode"] = p;
   } catch { /* private mode: the server falls back to mock */ }
   return h;
 }
 
-/** The Home entry card; opens the Compare screen over the app. */
-export function CompareEntry() {
-  const lang = useSpoken((s) => s.lang);
-  const t = L[lang];
-  const [open, setOpen] = useState(false);
-  if (!API) return null; // scripted-only build: no server to call
-  return (
-    <>
-      <button className="pcard" style={{ width: "100%", textAlign: "left", marginTop: "0.75rem", padding: "0.875rem 1rem" }} onClick={() => setOpen(true)}>
-        <b style={{ display: "block" }}>{t.entry}</b>
-        <span style={{ color: "var(--muted)", fontSize: "0.8125rem" }}>{t.entrySub}</span>
-      </button>
-      {open && <Compare onClose={() => setOpen(false)} />}
-    </>
-  );
-}
+const isEnded = (l: Leg) => l.status === "ended" || l.status === "failed";
 
-export function Compare({ onClose }: { onClose: () => void }) {
-  const store = useStore();
-  const lang = useSpoken((s) => s.lang);
-  const t = L[lang];
-  const [text, setText] = useState(t.reqDef);
-  const [targets, setTargets] = useState(DEFAULTS);
-  const [state, setState] = useState<State | null>(null);
+/** Starts the calls, then keeps one live socket per call plus a light poll for status and answers. */
+function useLegs(request: string, targets: { name: string; phone: string }[], lang: "no" | "en") {
+  const [legs, setLegs] = useState<Leg[]>([]);
+  const [mock, setMock] = useState(false);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sockets = useRef<Map<string, WebSocket>>(new Map());
+  const rowId = useRef(0);
 
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
+  const patch = useCallback((callId: string, f: (l: Leg) => Partial<Leg>) => {
+    setLegs((ls) => ls.map((l) => (l.callId === callId ? { ...l, ...f(l) } : l)));
+  }, []);
 
-  async function start() {
-    setBusy(true); setError("");
-    try {
-      const res = await fetch(base() + "/api/compare", { method: "POST", headers: headers(), body: JSON.stringify({ text, lang, targets }) });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      const id: string = data.compareId;
-      const poll = async () => {
-        const r = await fetch(`${base()}/api/compare/${id}`);
-        if (!r.ok) return;
-        const s = (await r.json()) as State;
-        setState(s);
-        if (s.done && timer.current) { clearInterval(timer.current); timer.current = null; }
+  useEffect(() => {
+    let dead = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+
+    const upsert = (rows: Row[], row: Row) => {
+      const i = rows.findIndex((r) => r.id === row.id);
+      return i === -1 ? [...rows, row] : rows.map((r, j) => (j === i ? row : r));
+    };
+
+    const watch = (callId: string) => {
+      const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
+      sockets.current.set(callId, ws);
+      ws.onmessage = (m) => {
+        let e: any;
+        try { e = JSON.parse(String(m.data)); } catch { return; }
+        switch (e.type) {
+          case "transcript":
+            // Callee lines count once final (the batch correction reuses the id); agent lines grow clause by clause.
+            if (!String(e.text).trim() || (e.who === "callee" && !e.final)) break;
+            patch(callId, (l) => ({ rows: upsert(l.rows, { id: e.id, kind: e.who === "agent" ? "ai" : "them", text: String(e.text).trim() }) }));
+            break;
+          case "note":
+            patch(callId, (l) => ({ rows: [...l.rows, { id: `n${rowId.current++}`, kind: "sys", text: e.text }] }));
+            break;
+          case "facts": patch(callId, () => ({ facts: e.items })); break;
+          case "on_hold": patch(callId, () => ({ holdSince: e.since })); break;
+          case "hold_over": patch(callId, () => ({ holdSince: null })); break;
+          case "chips": patch(callId, () => ({ chips: e.items })); break;
+          case "approval_request": patch(callId, () => ({ ask: { id: e.id, question: e.question, options: e.options } })); break;
+          case "result": patch(callId, () => ({ ask: undefined, holdSince: null, chips: [] })); break;
+        }
       };
-      await poll();
-      timer.current = setInterval(() => void poll(), 1200);
-    } catch (e) {
-      setError((e as Error).message || t.err);
-    } finally { setBusy(false); }
-  }
+    };
 
-  function book(l: Leg) {
-    // A normal task for that business: the existing chat flow with the request prefilled.
-    store.setDraft(`${text} — ${l.name}, ${l.phone}`);
-    store.setTab("chat");
-    store.submitDraft();
-    onClose();
-  }
+    (async () => {
+      try {
+        const res = await fetch(base() + "/api/compare", { method: "POST", headers: headers(), body: JSON.stringify({ text: request, lang, targets }) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (dead) return;
+        setMock(data.mode === "mock");
+        const started: { name: string; callId: string }[] = data.legs;
+        setLegs(started.map((s, i) => ({
+          name: s.name, phone: targets[i]?.phone ?? "", callId: s.callId, status: "queued",
+          rows: [], facts: [], holdSince: null, chips: [],
+        })));
+        started.forEach((s) => watch(s.callId));
+        const poll = async () => {
+          const r = await fetch(`${base()}/api/compare/${encodeURIComponent(data.compareId)}`).catch(() => null);
+          if (!r?.ok || dead) return;
+          const st = (await r.json()) as { done: boolean; legs: PollLeg[] };
+          setLegs((ls) => ls.map((l) => {
+            const p = st.legs.find((x) => x.callId === l.callId);
+            return p ? { ...l, status: p.status, answer: p.answer, outcome: p.outcome } : l;
+          }));
+          if (st.done && timer) { clearInterval(timer); timer = undefined; }
+        };
+        await poll();
+        timer = setInterval(() => void poll(), 1200);
+      } catch (e) {
+        if (!dead) setError((e as Error).message || L[lang].err);
+      }
+    })();
 
-  const ended = (l: Leg) => l.status === "ended" || l.status === "failed";
-  const cheapest = state?.done ? cheapestOf(state.legs) : -1;
+    const open = sockets.current;
+    return () => {
+      dead = true;
+      if (timer) clearInterval(timer);
+      open.forEach((ws) => { try { ws.close(); } catch { /* already closed */ } });
+      open.clear();
+    };
+  }, [request, targets, lang, patch]);
 
-  return (
-    <div role="dialog" aria-modal="true" aria-label={t.title}
-      style={{ position: "absolute", inset: 0, zIndex: 40, background: "var(--app)", display: "flex", flexDirection: "column" }}>
-      <header className="topbar pad" style={{ justifyContent: "space-between" }}>
-        <b>{t.title}</b>
-        <button className="btn ghost" onClick={onClose}>{t.close}</button>
-      </header>
-      <div className="scroll pad" style={{ display: "flex", flexDirection: "column", gap: "0.75rem", paddingBottom: "1.5rem" }}>
-        {!state && (
-          <>
-            <label className="field-l" htmlFor="cmp-text">{t.req}</label>
-            <textarea id="cmp-text" value={text} onChange={(e) => setText(e.target.value)} rows={2}
-              style={{ background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: "0.625rem", padding: "0.625rem", color: "var(--ink)", font: "inherit" }} />
-            {targets.map((x, i) => (
-              <div key={i} style={{ display: "flex", gap: "0.5rem" }}>
-                <input aria-label={`${t.name} ${i + 1}`} value={x.name} onChange={(e) => setTargets(targets.map((y, j) => (j === i ? { ...y, name: e.target.value } : y)))}
-                  style={inputStyle} />
-                <input aria-label={`${t.phone} ${i + 1}`} value={x.phone} inputMode="tel" onChange={(e) => setTargets(targets.map((y, j) => (j === i ? { ...y, phone: e.target.value } : y)))}
-                  style={inputStyle} />
-              </div>
-            ))}
-            {error && <p role="alert" style={{ color: "var(--danger, #e5484d)" }}>{error}</p>}
-            <button className="btn primary block tall" disabled={busy || !text.trim()} onClick={() => void start()}>{t.go}</button>
-          </>
-        )}
-        {state && (
-          <>
-            {state.mode === "mock" && <p style={{ color: "var(--muted)", fontSize: "0.8125rem" }}>{t.mock}</p>}
-            <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.5rem" }} aria-live="polite">
-              {state.legs.map((l) => (
-                <li key={l.callId} style={{ border: "1px solid var(--line-2)", background: "var(--surface)", borderRadius: "0.75rem", padding: "0.75rem 0.875rem" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
-                    <b>{l.name}</b>
-                    <span style={{ color: ended(l) ? "var(--accent)" : "var(--muted)", fontSize: "0.8125rem" }}>{t.st[l.status] ?? l.status}</span>
-                  </div>
-                  <p style={{ margin: "0.25rem 0 0", color: "var(--muted)", fontSize: "0.8125rem", minHeight: "1.2em" }}>{l.lastLine ? `“${l.lastLine}”` : ""}</p>
-                  {l.answer && <p style={{ margin: "0.25rem 0 0" }}><b>{l.answer}</b></p>}
-                </li>
-              ))}
-            </ul>
-            {state.done && (
-              <>
-                <h3 className="field-l" style={{ marginTop: "0.5rem" }}>{t.result}</h3>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ textAlign: "left", color: "var(--muted)", fontSize: "0.8125rem" }}><th scope="col">{t.place}</th><th scope="col">{t.answer}</th><th scope="col"><span className="sr-only" style={srOnly}>{t.book}</span></th></tr>
-                  </thead>
-                  <tbody>
-                    {state.legs.map((l, i) => (
-                      <tr key={l.callId} style={{ borderTop: "1px solid var(--line)" }}>
-                        <td style={{ padding: "0.5rem 0.25rem 0.5rem 0" }}><b>{l.name}</b></td>
-                        <td style={{ padding: "0.5rem 0.25rem", color: i === cheapest ? "var(--accent)" : undefined }}>{l.answer ?? t.noAnswer}</td>
-                        <td style={{ padding: "0.5rem 0", textAlign: "right" }}>
-                          {l.outcome === "done" && <button className="btn primary" onClick={() => book(l)}>{t.book} {l.name}</button>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <button className="btn ghost" onClick={() => setState(null)}>{t.again}</button>
-              </>
-            )}
-          </>
-        )}
-      </div>
-    </div>
-  );
+  const send = useCallback((callId: string, cmd: object) => {
+    const ws = sockets.current.get(callId);
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd));
+  }, []);
+
+  return { legs, patch, send, mock, error };
 }
-
-const inputStyle = { flex: 1, minWidth: 0, background: "var(--surface)", border: "1px solid var(--line-2)", borderRadius: "0.625rem", padding: "0.5rem 0.625rem", color: "var(--ink)", font: "inherit" } as const;
-const srOnly = { position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" } as const;
 
 /** Index of the leg with the lowest price in its answer (first number), or -1. */
 function cheapestOf(legs: Leg[]): number {
@@ -190,4 +153,166 @@ function cheapestOf(legs: Leg[]): number {
     if (l.outcome === "done" && p < bestP) { bestP = p; best = i; }
   });
   return best;
+}
+
+export function MultiCall() {
+  const store = useStore();
+  const multi = useSpoken((s) => s.multi);
+  const lang = useSpoken((s) => s.lang);
+  if (!multi) return null;
+  return <Multi key={multi.request + multi.targets.map((x) => x.phone).join()} request={multi.request} targets={multi.targets} lang={lang} onHome={() => store.goHome()}
+    onBook={(text) => { store.goHome("chat"); store.setDraft(text); store.submitDraft(); }} />;
+}
+
+function Multi({ request, targets, lang, onHome, onBook }: {
+  request: string; targets: { name: string; phone: string }[]; lang: "no" | "en"; onHome: () => void; onBook: (text: string) => void;
+}) {
+  const t = L[lang];
+  const ct = useCopy();
+  const am = useAppCopy();
+  const { legs, patch, send, mock, error } = useLegs(request, targets, lang);
+  const [sel, setSel] = useState(0);
+  const [value, setValue] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const leg = legs[Math.min(sel, legs.length - 1)];
+  const done = legs.length > 0 && legs.every(isEnded);
+  const cheapest = done ? cheapestOf(legs) : -1;
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [leg?.rows, sel]);
+
+  const instruct = (text: string) => {
+    if (!leg || !text.trim()) return;
+    patch(leg.callId, (l) => ({ chips: [], rows: [...l.rows, { id: `y${Date.now()}`, kind: "you", text: text.trim() }] }));
+    send(leg.callId, { type: "instruction", text: text.trim() });
+  };
+
+  /** "Book with X": a normal task for that business. Other numbers are removed so it stays a single call. */
+  const book = (l: Leg) => {
+    const rest = request.replace(/\+?\d[\d \-]{6,16}\d/g, "").replace(/\s*[,;]\s*(og|and)?\s*(?=[,;.]|$)/gi, "").replace(/\s{2,}/g, " ").trim();
+    onBook(`${t.bookText} ${l.name}, ${l.phone}: ${rest}${l.answer ? ` (${l.answer})` : ""}`);
+  };
+
+  if (error) {
+    return (
+      <>
+        <header className="callhead pad"><div className="tx"><h1 className="callname">{t.title}</h1></div></header>
+        <div className="pad" style={{ flex: 1 }}><p role="alert">{error}</p></div>
+        <div className="composer pad"><button className="btn primary block tall" onClick={onHome}><Icon name="home" />{am.backHome}</button></div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <header className="callhead pad">
+        <div className="tx">
+          <h1 className="callname">{t.title}</h1>
+          <span className="num">{mock ? t.mock : request}</span>
+        </div>
+        {leg && (
+          <button className="endbtn" aria-label={`${ct.endCall}: ${leg.name}`} disabled={isEnded(leg)} onClick={() => send(leg.callId, { type: "hangup" })}>
+            <Icon name="hang" />
+          </button>
+        )}
+      </header>
+
+      <div role="tablist" aria-label={t.tabs} className="pad" style={{ display: "flex", gap: "0.5rem", overflowX: "auto", paddingBlock: "0.25rem 0.625rem", scrollbarWidth: "none" }}>
+        {legs.map((l, i) => {
+          const on = i === sel;
+          const sub = l.answer ?? t.st[l.status] ?? l.status;
+          return (
+            <button
+              key={l.callId} role="tab" id={`mc-tab-${i}`} aria-selected={on} aria-controls="mc-panel"
+              aria-label={`${l.name}: ${t.st[l.status] ?? l.status}${l.answer ? `, ${l.answer}` : ""}`}
+              onClick={() => setSel(i)}
+              style={{
+                flex: "1 0 8.5rem", minHeight: "3.5rem", minWidth: 0, textAlign: "left", padding: "0.5rem 0.75rem", borderRadius: "0.875rem",
+                border: `1px solid ${on ? "var(--accent)" : "var(--line-2)"}`, background: on ? "var(--surface-2)" : "var(--surface)", color: "var(--ink)",
+              }}
+            >
+              <span style={{ display: "flex", alignItems: "center", gap: "0.375rem", fontWeight: 510, fontSize: "0.875rem" }}>
+                <span aria-hidden="true" style={{ width: "0.5rem", height: "0.5rem", borderRadius: "50%", flex: "none", background: dotColor(l) }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
+              </span>
+              <span style={{ display: "block", fontSize: "0.75rem", color: l.answer ? "var(--ink)" : "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{sub}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {leg && (
+        <div role="tabpanel" id="mc-panel" aria-labelledby={`mc-tab-${sel}`} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <div className="pad" style={{ paddingBottom: 0 }}>
+            <span className="num" style={{ fontSize: "0.8125rem", color: "var(--dim)" }}>{leg.phone} · {t.st[leg.status] ?? leg.status}</span>
+            <HoldBanner since={leg.holdSince} ended={isEnded(leg)} />
+          </div>
+          <FactStrip items={leg.facts} />
+          <div className="scroll pad" ref={scrollRef}>
+            <div className="transcript" role="log" aria-label={leg.name} aria-live="polite" aria-relevant="additions">
+              {leg.rows.map((r) =>
+                r.kind === "sys" ? <div key={r.id} className="sys">{r.text}</div> : (
+                  <div key={r.id} className={`msg ${r.kind}`}>
+                    <span className="who">{r.kind === "ai" ? am.aiLabel : r.kind === "you" ? am.youLabel : leg.name}</span>
+                    <span className="txt">{r.text}</span>
+                  </div>
+                ),
+              )}
+              {leg.ask && (
+                <div className="plan" role="group" aria-label={leg.ask.question} style={{ marginTop: "0.5rem" }}>
+                  <p>{leg.ask.question}</p>
+                  <div className="acts">
+                    {leg.ask.options.map((o) => (
+                      <button key={o} className="btn primary block" onClick={() => { send(leg.callId, { type: "approval_response", id: leg.ask!.id, choice: o }); patch(leg.callId, () => ({ ask: undefined })); }}>{o}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {done ? (
+        <div className="composer pad" aria-label={t.results} role="group" style={{ display: "grid", gap: "0.5rem" }}>
+          {legs.map((l, i) => (
+            <div key={l.callId} style={{ display: "flex", alignItems: "center", gap: "0.5rem", justifyContent: "space-between" }}>
+              <span style={{ minWidth: 0, fontSize: "0.875rem" }}>
+                <b style={{ fontWeight: 510 }}>{l.name}</b>
+                <span style={{ display: "block", color: i === cheapest ? "var(--accent)" : "var(--muted)", fontSize: "0.8125rem" }}>
+                  {l.answer ?? t.noAnswer}{i === cheapest ? ` · ${t.cheapest}` : ""}
+                </span>
+              </span>
+              {l.outcome === "done" && (
+                <button className={i === cheapest ? "btn primary" : "btn ghost"} style={{ flex: "none", minHeight: "2.75rem" }} onClick={() => book(l)}>
+                  {t.book} {l.name}
+                </button>
+              )}
+            </div>
+          ))}
+          <button className="btn ghost block" onClick={onHome}><Icon name="home" />{t.home}</button>
+        </div>
+      ) : (
+        <div className="composer pad">
+          {leg && !isEnded(leg) ? (
+            <>
+              <ReplyChips aria={ct.instrAria} repeat={ct.chipRepeat} thanks={ct.chipThanks} own={leg.chips} onSend={instruct} />
+              <Composer value={value} onChange={setValue} onSubmit={() => { instruct(value); setValue(""); }} placeholder={ct.instrPh} label={ct.instrAria} sendLabel={ct.sendInstr} />
+            </>
+          ) : (
+            <p style={{ margin: 0, color: "var(--muted)", fontSize: "0.875rem" }}>{leg ? t.ended : t.answerWait}</p>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+function dotColor(l: Leg): string {
+  if (l.status === "failed" || l.outcome === "no_answer" || l.outcome === "failed" || l.outcome === "refused") return "var(--danger, #e5484d)";
+  if (isEnded(l)) return "var(--accent)";
+  if (l.status === "connected" || l.status === "on_hold") return "var(--accent)";
+  return "var(--dim)";
 }

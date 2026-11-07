@@ -58,3 +58,27 @@ describe("compare", () => {
     expect((await s.get("/api/compare/nope")).status).toBe(404);
   });
 });
+
+describe("chat planner → compare", () => {
+  test("three numbers in one request → plan.targets, then /api/compare from the same text", async () => {
+    const text = "Hva koster en stor pepperoni? Ring 22000001, 22000002 og 22000003";
+    const t = await s.post("/api/tasks", { text, lang: "no" });
+    expect(t.status).toBe(200);
+    const plan = await s.post(`/api/tasks/${t.data.taskId}/answers`, { answers: {} });
+    expect(plan.data.blocked).toBeUndefined();
+    expect(plan.data.targets).toHaveLength(3);
+    expect(plan.data.targets.map((x: any) => x.phone)).toEqual(["+4722000001", "+4722000002", "+4722000003"]);
+    expect(plan.data.callee.phone).toBe("+4722000001");
+    expect(plan.data.goal).toMatch(/3 steder/);
+    const start = await s.post("/api/compare", { text, lang: "no", targets: plan.data.targets });
+    expect(start.status).toBe(200);
+    expect(start.data.legs).toHaveLength(3);
+  });
+
+  test("one number stays a single call (no targets, no parallel claim)", async () => {
+    const t = await s.post("/api/tasks", { text: "Bestill en stor pepperoni hos 22000001", lang: "no", phone: "22000001" });
+    const plan = await s.post(`/api/tasks/${t.data.taskId}/answers`, { answers: {} });
+    expect(plan.data.targets).toBeUndefined();
+    expect(plan.data.goal).not.toMatch(/steder/);
+  });
+});

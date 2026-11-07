@@ -12,7 +12,7 @@ import { callLangFor } from "./call/lines.ts";
 import { MockLine } from "./call/mock-line.ts";
 import { MockLlm } from "./llm/mock.ts";
 import { CallSession } from "./call/session.ts";
-import { CompareMockLine, CompareMockLlm, compares, createCompare, stateOf } from "./call/compare.ts";
+import { CompareMockLine, CompareMockLlm, INFO_APPROVALS, compares, createCompare, stateOf } from "./call/compare.ts";
 import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
 import { ElksLine, elksSecretOk } from "./call/elks-line.ts";
 import { VonageLine } from "./call/vonage-line.ts";
@@ -95,6 +95,22 @@ function taskForLlm(input: TaskInput, profile: Profile): TaskForLlm {
 }
 
 /** The app's device id (header, or ?device= for GET /api/calls). */
+/** Valid 2–3 distinct places for a parallel info call: the planner's targets, else numbers typed in the request. */
+function planTargets(fromLlm: { name: string; phone?: string }[] | undefined, text: string): { name: string; phone: string }[] | undefined {
+  const raw = (fromLlm ?? []).map((t) => ({ name: t.name, phone: t.phone ?? "" }));
+  if (raw.filter((t) => t.phone).length < 2) {
+    raw.length = 0;
+    for (const m of text.match(/\+?\d[\d \-]{6,16}\d/g) ?? []) raw.push({ name: "", phone: m });
+  }
+  const out: { name: string; phone: string }[] = [];
+  for (const t of raw) {
+    const n = checkNumber(t.phone.replace(/[ \-]/g, ""));
+    if (!n.ok || out.some((o) => o.phone === n.e164)) continue;
+    out.push({ name: t.name.trim().slice(0, 80) || n.e164.replace(/^\+47(\d{2})(\d{2})(\d{2})(\d{2})$/, "$1 $2 $3 $4"), phone: n.e164 });
+  }
+  return out.length >= 2 ? out.slice(0, 3) : undefined;
+}
+
 function deviceOf(req: Request): string | undefined {
   const d = req.headers.get("x-spoken-device") ?? new URL(req.url).searchParams.get("device");
   return isDeviceId(d) ? d.toLowerCase() : undefined;
@@ -197,23 +213,34 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (contact) p.calleeName = contact.name;
     const rawPhone = contact?.phone || t.input.phone || answers.phone || p.phone || lookup(t.input.text)?.phone;
     const source: Plan["callee"]["source"] = contact ? "contact" : t.input.phone || answers.phone ? "user" : lookup(t.input.text) ? "lookup" : "user";
+    // 2–3 named places/numbers (or "cheapest"): the plan lists all of them and the app POSTs /api/compare.
+    const targets = planTargets(p.targets, t.input.text);
+    if (targets) {
+      p.calleeName = targets[0]!.name;
+      p.goal = callLang === "en"
+        ? `ask ${targets.length} places for the price and the earliest time: ${t.input.text}`
+        : `spørre ${targets.length} steder om pris og tidligste tid: ${t.input.text}`;
+      p.needsApprovalFor = [...INFO_APPROVALS[callLang]];
+    }
     let blocked: Plan["blocked"];
     let phone = "";
-    if (!rawPhone) blocked = { reason: uiText(t.input.lang).noNumber };
+    if (targets) phone = targets[0]!.phone;
+    else if (!rawPhone) blocked = { reason: uiText(t.input.lang).noNumber };
     else {
       const n = checkNumber(rawPhone);
       if (n.ok) phone = n.e164;
       else blocked = { reason: n.reason, alternative: n.alternative };
     }
-    const goalCheck = checkGoal(p.goal);
+    const goalCheck = checkGoal(targets ? t.input.text : p.goal);
     if (!goalCheck.ok) blocked = { reason: goalCheck.reason };
     t.plan = {
       taskId,
       callee: { name: p.calleeName, phone, source },
+      ...(targets && !blocked ? { targets } : {}),
       goal: p.goal,
       opening,
       willShare: p.willShare.includes("name") ? p.willShare : ["name", ...p.willShare],
-      needsApprovalFor: p.needsApprovalFor.some(isPriceRule) ? p.needsApprovalFor : [uiText(t.input.lang).anyPrice, ...p.needsApprovalFor],
+      needsApprovalFor: (targets || p.needsApprovalFor.some(isPriceRule)) ? p.needsApprovalFor : [uiText(t.input.lang).anyPrice, ...p.needsApprovalFor],
       voiceId,
       callLang,
       ...(blocked ? { blocked } : {}),

@@ -89,6 +89,7 @@ interface Plan {
   opening: string;
   willShare: string[];
   needsApprovalFor: string[];
+  targets?: { name: string; phone: string }[];
   blocked?: { reason: string; alternative?: string };
 }
 interface CallResult { outcome: string; summary: string; details: Record<string, string>; receipt?: ReceiptData }
@@ -193,15 +194,21 @@ function registerReal(plan: Plan, request: string, contactName?: string) {
     checks: plan.needsApprovalFor.slice(0, 3),
     opening: plan.opening,
   };
-  const sc: Scenario & { live: true } = {
+  const sc: Scenario & { live: true; targets?: { name: string; phone: string }[] } = {
     live: true,
     init: initials(name),
     number: prettyPhone(plan.callee.phone),
     en: lines,
     no: lines,
+    ...(plan.targets && plan.targets.length > 1 ? { targets: plan.targets } : {}),
     run: (lang, io) => runRealCall(plan.taskId, lang, io as LiveIO),
   };
   (SCENARIOS as Record<string, Scenario>).real = sc;
+}
+
+/** 2–3 places when the plan asks them in parallel (info only); undefined for a normal single call. */
+export function planTargets(key: ScenarioKey): { name: string; phone: string }[] | undefined {
+  return (SCENARIOS as Record<string, { targets?: { name: string; phone: string }[] }>)[key]?.targets;
 }
 
 export function isLive(key: ScenarioKey): boolean {

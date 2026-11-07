@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { KeyboardAvoidingView, Pressable, ScrollView, Text, useWindowDimensions, View, type ScrollViewInstance } from "react-native";
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { planTargets } from "../lib/real-call";
 import { SCENARIOS } from "../lib/scenarios";
 import type { Tab, ThreadItem } from "../lib/store";
 import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
@@ -218,20 +219,42 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
   const lang = useSpoken((s) => s.lang);
   const sc = SCENARIOS[item.scenario];
   const L = sc[lang];
+  const targets = planTargets(item.scenario);
 
   return (
     <Animated.View entering={FadeIn.duration(350)} style={styles.plan}>
-      <View style={styles.who}>
-        <Avatar init={sc.init} />
-        <View style={styles.grow}>
+      {targets ? (
+        <View style={[styles.who, { flexDirection: "column", alignItems: "stretch", gap: 10 }]}>
           <T size={16} weight="medium">
-            {L.contact}
+            {lang === "no" ? `Ringer ${targets.length} steder samtidig` : `Calling ${targets.length} places at once`}
           </T>
-          <T size={13} color={C.muted}>
-            {sc.number}
-          </T>
+          {targets.map((x) => (
+            <View key={x.phone} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <Avatar init={x.name.replace(/[^\p{L}]/gu, "").slice(0, 2).toUpperCase() || "#"} />
+              <View style={styles.grow}>
+                <T size={16} weight="medium">
+                  {x.name}
+                </T>
+                <T size={13} color={C.muted}>
+                  {x.phone}
+                </T>
+              </View>
+            </View>
+          ))}
         </View>
-      </View>
+      ) : (
+        <View style={styles.who}>
+          <Avatar init={sc.init} />
+          <View style={styles.grow}>
+            <T size={16} weight="medium">
+              {L.contact}
+            </T>
+            <T size={13} color={C.muted}>
+              {sc.number}
+            </T>
+          </View>
+        </View>
+      )}
       <View>
         <Text style={styles.fieldL}>{t.planGoal}</Text>
         <T>{L.goal}</T>
@@ -257,7 +280,7 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
         </View>
       </View>
       <View style={styles.actsCol}>
-        <Btn block label={t.start} pressed={item.pressed} icon={<Icon name="phone" color={C.inv} />} onPress={() => store.startCall()} />
+        <Btn block label={targets ? (lang === "no" ? `Ring ${targets.length} steder` : `Call ${targets.length} places`) : t.start} pressed={item.pressed} icon={<Icon name="phone" color={C.inv} />} onPress={() => store.startCall()} />
         <View style={styles.acts}>
           <Btn kind="ghost" label={t.edit} icon={<Icon name="pencil" color={C.ink} size={17} />} onPress={() => store.editPlan(item.request)} style={styles.grow} />
           {/* Mobile: drop the plan without calling, back to an empty chat. */}

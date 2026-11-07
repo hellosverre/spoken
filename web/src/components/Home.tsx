@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import { planTargets } from "@/lib/real-call";
 import { SCENARIOS } from "@/lib/scenarios";
 import type { Tab, ThreadItem } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
@@ -141,16 +142,34 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
   const lang = useSpoken((s) => s.lang);
   const sc = SCENARIOS[item.scenario];
   const L = sc[lang];
+  const targets = planTargets(item.scenario);
 
   return (
     <div className="plan">
-      <div className="who">
-        <span className="av">{sc.init}</span>
-        <div>
-          <b>{L.contact}</b>
-          <span>{sc.number}</span>
+      {targets ? (
+        <div className="who" style={{ alignItems: "flex-start", flexDirection: "column", gap: "0.5rem" }}>
+          <b>{lang === "no" ? `Ringer ${targets.length} steder samtidig` : `Calling ${targets.length} places at once`}</b>
+          <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: "0.5rem", width: "100%" }}>
+            {targets.map((x) => (
+              <li key={x.phone} style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                <span className="av">{x.name.replace(/[^\p{L}]/gu, "").slice(0, 2).toUpperCase() || "#"}</span>
+                <div>
+                  <b style={{ display: "block", fontWeight: 510 }}>{x.name}</b>
+                  <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>{x.phone}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
-      </div>
+      ) : (
+        <div className="who">
+          <span className="av">{sc.init}</span>
+          <div>
+            <b>{L.contact}</b>
+            <span>{sc.number}</span>
+          </div>
+        </div>
+      )}
       <div>
         <p className="field-l">{t.planGoal}</p>
         <p>{L.goal}</p>
@@ -170,7 +189,7 @@ function PlanCard({ item }: { item: Extract<ThreadItem, { kind: "plan" }> }) {
       <div className="acts">
         <button className={cx("btn primary block tall", item.pressed && "pressed")} onClick={() => store.startCall()}>
           <Icon name="phone" />
-          {t.start}
+          {targets ? (lang === "no" ? `Ring ${targets.length} steder` : `Call ${targets.length} places`) : t.start}
         </button>
         <div className="acts-row">
           <button className="btn ghost" onClick={() => store.editPlan(item.request)}>
