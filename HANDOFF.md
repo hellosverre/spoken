@@ -10,7 +10,7 @@ For the next agent picking this up. Read AGENTS.md → CONTRACT.md → SPEC.md f
 
 ## Deploy
 - **Server:** on hugin, `git status` first. Another agent session also works in that checkout, so never overwrite its uncommitted work. Then `git merge origin/main`. Check no call is live: a fresh `server/logs/c_*.jsonl` with telnyx events. Then `kill $(pgrep -f "^bun src/index.ts$")`, and the loop restarts it.
-- **Web:** `cd web && npm run build`, then `rsync -a --delete out/ hugin:/home/sverre/Projects/spoken/web/out/`. No restart needed.
+- **Web:** `cd web && rm -rf .next && SPOKEN_EXPORT=1 NEXT_PUBLIC_SPOKEN_API=/ npx next build` (plain `npm run build` makes no `out/`), then `rsync -a --delete out/ hugin:/home/sverre/Projects/spoken/web/out/`. No restart needed.
 
 ## Debug data from real calls
 - `server/logs/<callId>.jsonl`: every event (transcripts, `stt_batch` with `rtConf`/`batchConf`, latency, turns).
