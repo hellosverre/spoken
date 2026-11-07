@@ -80,7 +80,9 @@ const ASKS_ADDRESS = /(adresse|hvor bor (du|han|hun)|leveringsadresse)/i;
 
 export const CARD_REFUSAL = "Beklager, jeg kan ikke oppgi kortnummer, sikkerhetskode eller PIN over telefon. Kan vi betale ved henting, eller med en betalingslenke?";
 export const FNR_REFUSAL = "Beklager, jeg har ikke lov til å oppgi fødselsnummer i denne samtalen.";
-export const ADDRESS_REFUSAL = "Et øyeblikk, jeg må sjekke om jeg kan oppgi adressen.";
+export const ADDRESS_REFUSAL = "Et lite øyeblikk.";
+/** Pickup orders don't need an address (call #9 said «jeg må sjekke om jeg kan oppgi adressen»). */
+export const PICKUP_NO_ADDRESS = "Det er til henting, så vi trenger ingen adresse.";
 
 export type SecretAsk = "card" | "fnr" | "address" | null;
 
@@ -140,6 +142,8 @@ const COMMIT = /\b(bekrefter jeg|jeg (bekrefter|bestiller|booker|tar (den|det|ti
 // Norwegian inverted order after an adverb: «da bestiller jeg», «så bekrefter jeg» (call #8
 // said «Flott, da bestiller jeg …» before any approval).
 const COMMIT_INVERTED = /\b(bestiller|booker|bekrefter|tar|godtar|aksepterer|avbestiller|kansellerer|betaler|reserverer|legger inn) jeg\b/i;
+// Any tense (call #9: «Jeg bestiller en stor pepperoni …»): past, perfect and «har jeg …» too.
+const COMMIT_PAST = /\b(jeg (har )?|har jeg |da er det |det er )(bestilt|bestilte|bekreftet|bekreftede|booket|godtok|godtatt|avbestilt|avbestilte|kansellert|betalt|reservert|lagt inn)\b/i;
 // Conditions and questions are not commitments: «Før jeg bekrefter …», «Skal jeg bestille?».
 const CONDITIONAL = /\b(før|hvis|når|dersom|om|etter at|så snart) jeg\b/i;
 
@@ -147,7 +151,7 @@ export function isCommitment(text: string): boolean {
   const t = text.trim();
   if (/\?$/.test(t)) return false;
   if (CONDITIONAL.test(t) && !/[.!]\s+\S/.test(t)) return false;
-  return COMMIT.test(t) || COMMIT_INVERTED.test(t);
+  return COMMIT.test(t) || COMMIT_INVERTED.test(t) || COMMIT_PAST.test(t);
 }
 
 /** Claims that the deal is done; only allowed once the callee clearly confirmed. */

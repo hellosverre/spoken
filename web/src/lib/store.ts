@@ -523,8 +523,24 @@ export class SpokenStore {
 
     let outcome: Outcome;
     try {
+      const sayMore = async (who: Who, text: string) => {
+        guard();
+        const last = [...this.state.transcript].reverse().find((l) => l.kind === who);
+        if (!last || last.kind === "you" || last.kind === "sys") return say(who, text);
+        const words = text.split(" ");
+        this.set({ speaker: who });
+        for (let i = 0; i < words.length; i++) {
+          guard();
+          this.set((s) => ({
+            transcript: s.transcript.map((l) => (l.id === last.id && l.kind === who ? { ...l, words: [...l.words, words[i]] } : l)),
+          }));
+          await sleep(90 + (/[.,!?]$/.test(words[i]) ? 140 : 0));
+        }
+        this.set({ speaker: null, speakerNote: "listening" });
+      };
       const io: LiveIO = {
         say,
+        sayMore,
         ask,
         note: (text) => id === this.callId && this.sys(text),
         connected: () => id === this.callId && connected(),

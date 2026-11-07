@@ -71,6 +71,8 @@ export interface ChatPort {
 
 /** Extra hooks the store gives a real call on top of CallIO. */
 export interface LiveIO extends CallIO {
+  /** Appends words to the speaker's last line (one agent turn arrives clause by clause). */
+  sayMore(who: "ai" | "them", text: string): Promise<void>;
   note(text: string): void;
   connected(): void;
   /** Where the store sends the user's mid-call messages, chips and hang-up. */
@@ -176,7 +178,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   // Lines are shown one after another (say animates word by word); the approval sheet runs beside them.
   let chain: Promise<void> = Promise.resolve();
   const queue = (fn: () => Promise<void>) => { chain = chain.then(fn).catch(() => {}); };
-  const shown = new Set<string>();
+  const shown = new Map<string, string>(); // transcript id → text shown so far
   let connected = false;
 
   let finished = false;
@@ -194,10 +196,21 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           const t = e as Extract<LiveEvent, { type: "transcript" }>;
           // Agent: show when it starts speaking. Callee: the first final version (later STT
           // corrections reuse the id; this UI appends lines, so they are skipped).
-          const ready = t.who === "agent" ? !t.final : t.final;
-          if (!ready || shown.has(t.id) || !t.text.trim()) break;
-          shown.add(t.id);
-          queue(() => io.say(t.who === "agent" ? "ai" : "them", t.text));
+          if (!t.text.trim()) break;
+          if (t.who === "agent") {
+            // One id per agent turn: the first clause opens the bubble, later clauses extend it.
+            const before = shown.get(t.id);
+            if (before === undefined) { shown.set(t.id, t.text); queue(() => io.say("ai", t.text)); }
+            else if (t.text.length > before.length && t.text.startsWith(before)) {
+              const more = t.text.slice(before.length).trim();
+              shown.set(t.id, t.text);
+              if (more) queue(() => io.sayMore("ai", more));
+            }
+            break;
+          }
+          if (!t.final || shown.has(t.id)) break;
+          shown.set(t.id, t.text);
+          queue(() => io.say("them", t.text));
           break;
         }
         case "approval_request": {

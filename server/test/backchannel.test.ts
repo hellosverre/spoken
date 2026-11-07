@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { config } from "../src/config.ts";
 import type { LiveEvent, Plan } from "../../shared/contract.ts";
 import type { CallLine, LineEvents } from "../src/call/line.ts";
 import { CallSession } from "../src/call/session.ts";
@@ -40,7 +41,19 @@ async function session(l: LlmProvider) {
   return { line, s, evs };
 }
 
-describe("backchannel", () => {
+describe("backchannel off by default", () => {
+  test("slow replies get no backchannel unless BACKCHANNEL_MS is set", async () => {
+    const { line, s } = await session(llm(1500));
+    line.ev.calleeFinal("c0", "Greit, notert nummer null.");
+    await Bun.sleep(1800);
+    expect(line.spoken.filter((t) => BACK.includes(t))).toEqual([]);
+    await s.finish("test");
+  });
+});
+
+describe("backchannel (BACKCHANNEL_MS=1200)", () => {
+  beforeAll(() => { config.backchannelMs = 1200; });
+  afterAll(() => { config.backchannelMs = 0; });
   test("never when the reply is ready fast", async () => {
     const { line, s } = await session(llm(50));
     for (let i = 0; i < 3; i++) { line.ev.calleeFinal(`c${i}`, `Greit, notert nummer ${i}.`); await Bun.sleep(200); }
