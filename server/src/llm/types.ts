@@ -12,6 +12,8 @@ export interface AgentContext {
   goal: string;
   calleeName: string;
   userName: string;
+  /** Why the user uses Spoken, when set and not «never»: clause without leading comma («som er døv» / «who is Deaf»). */
+  reason?: { mode: "always" | "when_helpful"; no: string; en: string };
   willShare: Shareable[];
   needsApprovalFor: string[];
   profileFacts: Record<string, string>; // only facts the user allowed for this call

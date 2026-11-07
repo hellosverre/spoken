@@ -8,7 +8,7 @@ import { config } from "../config.ts";
 import { mockSummary } from "../llm/mock.ts";
 import type { AgentContext, HistoryItem, LlmProvider, Tone, Usage } from "../llm/types.ts";
 import {
-  detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim,
+  detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim, reasonForPrompt,
 } from "../safety.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -457,7 +457,7 @@ export class CallSession {
     // The plan's opening is kept only if it is in the call's language; the disclosure is rebuilt.
     const other = this.lang === "en" ? /KI-assistent/i : /AI assistant/i;
     const op = this.init.plan.opening;
-    return ensureDisclosure(other.test(op) ? "" : op, this.init.profile.name, this.lang);
+    return ensureDisclosure(other.test(op) ? "" : op, this.init.profile, this.lang);
   }
 
   /** Telnyx (or the model) says a machine answered: hang up without leaving a message. */
@@ -571,9 +571,9 @@ export class CallSession {
     // Times are parsed in code and handed to the LLM as facts («⟨tid: 19:00⟩»).
     const hint = timeHint(clean);
     if (faint) this.faintIds.add(id);
-    // A bare «Nei» right after «Du kan gjerne si nei til å snakke med meg» is the answer to that.
+    // A bare «Nei» right after the opening («Jeg er Spoken, en KI-assistent …») is the answer to that.
     const prevAgent = [...this.history].reverse().find((h) => h.role === "agent")?.text ?? "";
-    const refusal = /\b(si nei til å snakke med meg|say no to talking to me)\b/i.test(prevAgent) && PLAIN_NO.test(clean) ? REFUSAL_HINT : "";
+    const refusal = /\b(Spoken, en KI-assistent|Spoken, an AI assistant|si nei til å snakke med meg|say no to talking to me)\b/i.test(prevAgent) && PLAIN_NO.test(clean) ? REFUSAL_HINT : "";
     const item: HistoryItem = { role: "callee", text: [clean, hint, refusal, faint ? FAINT_HINT : ""].filter(Boolean).join(" ") };
     this.history.push(item);
     this.segItems.set(id, item);
@@ -951,6 +951,7 @@ export class CallSession {
       goal: this.init.plan.goal,
       calleeName: this.init.plan.callee.name,
       userName: p.name,
+      reason: reasonForPrompt(p),
       // Only what this call may share AND the profile actually has (fnr comes from the call request).
       willShare: share.filter((k) => k === "fnr" ? !!this.init.secrets?.fnr : k === "birthdate" ? false : k === "name" ? !!p.name : !!p[k as "phone" | "address" | "email" | "allergies"]),
       needsApprovalFor: this.init.plan.needsApprovalFor,

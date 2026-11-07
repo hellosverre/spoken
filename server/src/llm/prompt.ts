@@ -16,6 +16,23 @@ function placeholders(ctx: AgentContext): string {
   return lines.join("\n") + "\n";
 }
 
+/** What to say when the callee asks for the person, or asks why an AI calls. Health data: never volunteered. */
+function reasonRuleNo(ctx: AgentContext): string {
+  const u = ctx.userName || "brukeren";
+  const r = ctx.reason;
+  if (r?.mode === "when_helpful") return `Spør de hvorfor ${u} ikke ringer selv, ber om å snakke med ${u}, eller lurer på hvorfor en KI ringer, kan du kort si at ${u} ${r.no.replace(/^som /, "")}, og at du formidler alt i tekst. Nevn det aldri ellers. Ikke gjenta det senere.`;
+  if (r?.mode === "always") return `Den er allerede sagt i åpningen. Forklar bare kort at ${u} ikke kan ta samtaler, så du formidler alt i tekst.`;
+  return `Si kort og vennlig at ${u} ikke kan ta samtalen akkurat nå, så du formidler alt. Nevn aldri noen grunn eller helsetilstand.`;
+}
+
+function reasonRuleEn(ctx: AgentContext): string {
+  const u = ctx.userName || "the user";
+  const r = ctx.reason;
+  if (r?.mode === "when_helpful") return `Only if they ask why ${u} doesn't call themselves, ask to speak to ${u}, or wonder why an AI is calling, you may briefly say that ${u} ${r.en.replace(/^who /, "")}, and that you pass everything on in text. Never mention it otherwise. Don't repeat it later.`;
+  if (r?.mode === "always") return `It was already said in the opening. Just explain briefly that ${u} can't take calls, so you pass everything on in text.`;
+  return `Say briefly and kindly that ${u} can't take the call right now, so you pass everything on. Never mention any reason or health condition.`;
+}
+
 export function agentSystemPrompt(ctx: AgentContext): string {
   if (ctx.lang && ctx.lang !== "no") return agentSystemPromptEn(ctx);
   const facts = Object.entries(ctx.profileFacts).map(([k, v]) => `- ${k}: ${v}`).join("\n") || "- (ingen)";
@@ -61,7 +78,7 @@ ${placeholders(ctx)}- Aldri kortnummer, CVV eller PIN. Foreslå betaling ved hen
 - ⟨uklart tall: 15 eller 50⟩: talegjenkjenningen blander -ten og -ti (femten/femti, sytten/sytti). Velg aldri selv; spør kort «Sa du femten eller femti?» med tallene i ord.
 - Telefonmeny («trykk 1 for …», «for bestilling, trykk 2»): ikke snakk. Lytt til hele menyen, velg valget som passer målet og skriv bare [[DTMF: 1]] (tallet du velger; kun 0-9, * eller #). Passer ingen valg, trykk valget for kundeservice eller operatør. Spør de om du vil «bli satt over» og det ikke finnes tast, vent.
 - Telefonsvarer («legg igjen en beskjed», «etter pipetonen», «ikke tilgjengelig akkurat nå»): ikke legg igjen beskjed og ikke si noe. Skriv bare [[END: no_answer | Telefonsvarer]].
-- Ber mottakeren om å snakke med en person, et menneske, «selve personen» eller «han/hun selv»: ikke avslutt og ikke legg på. Forklar kort og vennlig at ${ctx.userName || "brukeren"} er døv og ikke kan ta samtaler, så du formidler alt i tekst. Skriv så [[ASK: Mottakeren vil snakke med deg: «det de sa». Hva skal jeg si? | Legg på]] og vent på svaret. Ikke gjenta forklaringen senere.
+- Ber mottakeren om å snakke med en person, et menneske, «selve personen» eller «han/hun selv»: ikke avslutt og ikke legg på. ${reasonRuleNo(ctx)} Skriv så [[ASK: Mottakeren vil snakke med deg: «det de sa». Hva skal jeg si? | Legg på]] og vent på svaret. Ikke gjenta forklaringen senere.
 - Hvis du ikke hørte hva de sa: be dem gjenta.
 Tone: ${TONES[ctx.tone]}${ctx.simpler ? "\nSnakk ekstra enkelt og sakte: korte ord, én ting om gangen." : ""}`;
 }
@@ -149,7 +166,7 @@ ${placeholdersEn(ctx)}- Never card numbers, CVV or PIN. Suggest paying at pickup
 - When the call is done: say "Thank you, goodbye." and write [[END: done|partial|failed | one line with the result]].
 - Phone menu ("press 1 for …", "for orders, press 2"): don't speak. Listen to the whole menu, pick the option that fits the goal and write only [[DTMF: 1]] (the key you pick; only 0-9, * or #). If no option fits, press the one for customer service or an operator. If they ask whether you want to "be transferred" and there is no key, wait.
 - Voicemail ("leave a message", "after the tone", "not available right now"): don't leave a message and don't say anything. Write only [[END: no_answer | Telefonsvarer]].
-- If the callee asks to talk to a person, a human, or "them directly": don't end the call or hang up. Explain briefly and kindly that ${ctx.userName || "the user"} is deaf and can't take calls, so you pass everything on in text. Then write [[ASK: Mottakeren vil snakke med deg: «what they said». Hva skal jeg si? | Legg på]] and wait for the answer. Don't repeat the explanation later.
+- If the callee asks to talk to a person, a human, or "them directly": don't end the call or hang up. ${reasonRuleEn(ctx)} Then write [[ASK: Mottakeren vil snakke med deg: «what they said». Hva skal jeg si? | Legg på]] and wait for the answer. Don't repeat the explanation later.
 - Lines that start with [godkjent] (approved), [avslått] (declined), [svar] (answer), [instruks] (instruction), [enklere] (say it simpler), [avslutt] (end the call) come from the user in the app, not from the callee. They may be in Norwegian; you still speak ${spoken} to the callee.
 - An [instruks] from the user overrides your goal and comes first: do it in your very next reply. If it says to thank them, hang up, stop or end the call: say one short thank-you and goodbye in the same sentence and write [[END: partial | ended by the user]]. Never ask the callee anything after such an instruction.
 - The callee's words come from speech recognition over the phone. Words marked ⟨usikre ord: …⟩ may be misheard: read them from context. If the meaning is still unclear and it matters (price, time, yes/no), ask one short clarifying question instead of acting on it.

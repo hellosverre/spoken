@@ -11,6 +11,10 @@ create table if not exists public.profiles (
   lang text not null default 'no' check (lang in ('no','en')),
   updated_at timestamptz not null default now()
 );
+-- Optional "why I use Spoken" (health data: user-entered, nullable, deletable).
+alter table public.profiles add column if not exists reason text check (reason in ('deaf','hard_of_hearing','speech','anxiety','other'));
+alter table public.profiles add column if not exists reason_text text check (char_length(reason_text) <= 60);
+alter table public.profiles add column if not exists reason_mode text check (reason_mode in ('always','when_helpful','never'));
 create table if not exists public.contacts (
   id uuid primary key default gen_random_uuid(),
   device_id uuid not null,

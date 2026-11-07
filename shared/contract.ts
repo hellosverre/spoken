@@ -107,7 +107,14 @@ export interface Profile {
   voiceId?: string;
   personality: "warm" | "neutral" | "short";
   lang: Lang;
+  // Optional "why I use Spoken". Health data (GDPR Art. 9): only stored when the user sets it,
+  // deletable (send reason: null). PUT without the key keeps the saved value.
+  reason?: ProfileReason;
+  reasonText?: string; // ≤ 60 chars, only for reason "other"
+  reasonMode?: ReasonMode; // default "when_helpful" if a reason is set, else "never"
 }
+export type ProfileReason = "deaf" | "hard_of_hearing" | "speech" | "anxiety" | "other";
+export type ReasonMode = "always" | "when_helpful" | "never";
 
 export interface Contact {
   id: string;
