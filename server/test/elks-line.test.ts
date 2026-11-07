@@ -138,7 +138,7 @@ test("full call: hello → listening/sending → audio both ways → interrupt �
   expect(scribeSent[0]!.length).toBe(640);
 
   // us → callee: speech arrives as ulaw audio messages of 160 bytes
-  const spoke = line.speak("Hei, dette er en test.", "say");
+  const spoke = line.speak(`Hei, test ${crypto.randomUUID()}.`, "say");
   await until(() => s.got.some((m) => m.t === "audio"));
   const firstAudio = s.got.find((m) => m.t === "audio");
   expect(Buffer.from(firstAudio.data, "base64").length).toBe(160);

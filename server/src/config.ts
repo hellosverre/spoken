@@ -1,6 +1,6 @@
 // Runtime config from env. Secrets are read here and nowhere else; never log them.
 
-export type CallProvider = "mock" | "telnyx" | "46elks";
+export type CallProvider = "mock" | "telnyx" | "46elks" | "vonage";
 export type LlmProviderName = "mock" | "mistral" | "openai" | "openrouter";
 
 function env(name: string, fallback = ""): string {
@@ -38,6 +38,12 @@ export const config = {
     wsNumber: env("ELKS_WS_NUMBER"),
     /** Shared secret in that websocket_url (?t=…): 46elks can't carry a per-call token. */
     wsSecret: env("ELKS_WS_SECRET"),
+  },
+  vonage: {
+    applicationId: env("VONAGE_APPLICATION_ID"),
+    /** PEM private key of the Vonage application (literal «\n» sequences are accepted). */
+    privateKey: env("VONAGE_PRIVATE_KEY"),
+    number: env("VONAGE_NUMBER"),
   },
   elevenlabs: {
     apiKey: env("ELEVENLABS_API_KEY"),
