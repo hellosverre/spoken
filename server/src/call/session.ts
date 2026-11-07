@@ -18,6 +18,7 @@ import { numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
 import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
 import { Segmenter, type Segment } from "./segment.ts";
+import { asksUserWhereCallee, fixCardOptions, priceWarning } from "./approval.ts";
 
 export const WAIT_PHRASE = "Et øyeblikk…";
 
@@ -110,6 +111,11 @@ const HOLD_MS = 450;
 // Word confidences arrive ~20 ms after the commit; batch revisions ~0.7 s.
 const WORDS_WAIT_MS = 250; // call #6: confidences came 130 ms after the commit
 const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
+// Think while the batch second opinion runs; only the speaking waits for it (c_cc7521a0c46d:
+// median reply 2.4 s, of which 0.8 s was this wait before the LLM even started). OVERLAP_BATCH=0 = old way.
+const OVERLAP_BATCH = process.env.OVERLAP_BATCH !== "0";
+// The callee «talked over» us but said nothing real (noise, «mm»): say the cut sentence again.
+const BARGE_RESUME_MS = Number(process.env.BARGE_RESUME_MS ?? 1500);
 // Questions and normal sentences are finished even if they end in «det»/«den» («vi har ikke det.»).
 const CONNECTOR_END = /\b(og|eller|men|fordi|at|som|hvis|altså|eh|ehm|øh|liksom|til|med|for|om)[.…]?$/i;
 function soundsUnfinished(text: string): boolean {
@@ -258,6 +264,11 @@ export class CallSession {
     this.usage.requests++;
   };
   private nudged = 0;
+  /** Speech waits for the batch second opinion on this callee segment (the LLM already runs). */
+  private speakHold?: { id: string; done: Promise<void>; release: () => void };
+  /** The reply the callee cut off, if they turn out to have said nothing. */
+  private cutLine?: { text: string; at: number; resumed?: boolean };
+  private cutTimer?: ReturnType<typeof setTimeout>;
 
   private hold: HoldFlow;
 
@@ -351,6 +362,7 @@ export class CallSession {
         },
         calleeRevised: (id, text, words) => this.onRevised(id, text, words),
         calleeNoise: (id) => this.onNoise(id),
+        calleeBatchDone: (id) => this.releaseSpeech(id),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
       });
@@ -463,6 +475,14 @@ export class CallSession {
       this.debug("callee_backchannel_ignored", { text: clean });
       return;
     }
+    // «Mm.» right after it cut us off: not a new turn, finish the sentence.
+    if (this.cutLine && !this.cutLine.resumed && Date.now() - this.cutLine.at < 5000 && CALLEE_BACKCHANNEL.test(clean)) {
+      this.debug("callee_backchannel_after_cut", { text: clean });
+      this.history.pop(); // not part of the conversation
+      this.scheduleResume(200);
+      return;
+    }
+    if (this.speakHold && this.speakHold.id !== id) this.speakHold.release();
     if (this.speaking) this.onCalleeSpeech();
 
     if (this.pending) {
@@ -569,6 +589,11 @@ export class CallSession {
     if (!gate) return;
     if (!matters) { gate.go(); return; }
     clearTimeout(gate.timer);
+    if (OVERLAP_BATCH) {
+      this.holdSpeech(id);
+      gate.go();
+      return;
+    }
     gate.timer = setTimeout(gate.go, REVISION_WAIT_MS);
   }
 
@@ -594,6 +619,7 @@ export class CallSession {
     }
     if (this.messages.has(id)) this.checkMessage(id, clean);
     if (this.gate?.id === id) this.gate.go();
+    this.releaseSpeech(id);
   }
 
   /** Batch STT heard only noise: the line never happened. Take it back out and don't answer it. */
@@ -613,6 +639,49 @@ export class CallSession {
     if (this.gate?.id === id) { clearTimeout(this.gate.timer); this.gate = undefined; }
     if (this.spec) this.dropSpec("noise");
     if (answering) { this.turnAbort?.abort(); this.wantTurn = false; }
+    this.releaseSpeech(id);
+    // The «barge-in» was this noise: finish what we were saying.
+    if (this.cutLine && Date.now() - this.cutLine.at < 5000) this.scheduleResume(300);
+  }
+
+  /** The agent may think now, but must not speak until batch STT has checked segment `id`. */
+  private holdSpeech(id: string) {
+    this.speakHold?.release();
+    let release!: () => void;
+    const done = new Promise<void>((r) => { release = r; });
+    const hold = { id, done, release: () => { clearTimeout(timer); if (this.speakHold === hold) this.speakHold = undefined; release(); } };
+    const timer = setTimeout(hold.release, REVISION_WAIT_MS);
+    this.speakHold = hold;
+  }
+
+  private releaseSpeech(id: string) {
+    if (this.speakHold?.id === id) this.speakHold.release();
+  }
+
+  /** Waits for a pending batch check (max REVISION_WAIT_MS), or the turn's abort. */
+  private async waitSpeakHold(signal: AbortSignal) {
+    const h = this.speakHold;
+    if (!h) return;
+    const t0 = Date.now();
+    await Promise.race([h.done, new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true }))]);
+    this.debug("speak_hold", { id: h.id, waitedMs: Date.now() - t0 });
+  }
+
+  /** Re-say the cut-off reply if the callee stays quiet (their «barge-in» was noise or «mm»). */
+  private scheduleResume(ms: number) {
+    clearTimeout(this.cutTimer);
+    const cut = this.cutLine;
+    if (!cut || cut.resumed) return;
+    this.cutTimer = setTimeout(() => {
+      if (this.cutLine !== cut || cut.resumed || this.ended || this.pending || this.turnRunning || this.speaking) return;
+      const last = this.history.at(-1);
+      // They said something real since: that gets its own answer.
+      if (this.lastCalleeAt > cut.at && last?.role === "callee" && !CALLEE_BACKCHANNEL.test(last.text.replace(/\s*⟨.*?⟩/g, "").trim())) return;
+      if ((this.init.line.silenceMs?.() ?? Infinity) < 500) { this.scheduleResume(400); return; }
+      cut.resumed = true;
+      this.debug("barge_in_resumed", { text: cut.text });
+      void this.say(cut.text, "say");
+    }, ms);
   }
 
   /** Wait briefly for word confidences (and, if unsure, the batch revision) before answering. */
@@ -742,6 +811,7 @@ export class CallSession {
     let turnConfused = false;
     let saidBye = false;
     let spokeAnything = false;
+    let interrupted = false;
     this.debug("turn_start", { history: this.history.at(-1) });
     if (this.lastProgressAt && !this.pending && Date.now() - this.lastProgressAt > config.unproductiveSec * 1000) {
       this.turnRunning = false;
@@ -790,6 +860,8 @@ export class CallSession {
         waited = true;
         await this.waitForSilence(abort.signal);
         if (stop || abort.signal.aborted) return;
+        await this.waitSpeakHold(abort.signal);
+        if (stop || abort.signal.aborted) return;
       }
       if (s.kind === "speech") {
         if (backchannel && !spokeAnything) {
@@ -805,7 +877,10 @@ export class CallSession {
         // Interjection-only lines go (unless it is the goodbye); «Skjønner, da …» → «Da …».
         if (isFillerOnly(s.text) && !GOODBYE.test(s.text)) { this.debug("filler_dropped", { text: s.text }); return; }
         if (stripFillerPrefix(s.text) !== s.text) s = { ...s, text: stripFillerPrefix(s.text) };
-        if (this.errandStated && restatesErrand(s.text, this.errand, lastCalleeText)) { this.debug("errand_restatement_dropped", { text: s.text }); return; }
+        // Never drop the second half of a sentence already started («Jeg ringer for Petter,» was
+        // left hanging in c_cc7521a0c46d): finish it.
+        const midSentence = /,\s*$/.test(turnLine.parts.at(-1) ?? "");
+        if (this.errandStated && !midSentence && restatesErrand(s.text, this.errand, lastCalleeText)) { this.debug("errand_restatement_dropped", { text: s.text }); return; }
         if (isDoneClaim(s.text) && !this.confirmedByCallee) { this.debug("done_claim_dropped", { text: s.text }); return; }
         // Capped turns may still ask one question (call c_ba0df20d dropped «Hva koster den?»).
         const isQuestion = /\?\s*$/.test(s.text);
@@ -896,7 +971,7 @@ export class CallSession {
         if (isQuestion) { askedInTurn = true; speechCapped = true; }
         if (GOODBYE.test(s.text)) saidBye = true;
         const r = await this.say(s.text, "say", false, abort.signal, turnLine);
-        if (r.interrupted) stop = true;
+        if (r.interrupted) { stop = true; interrupted = true; }
         // After a goodbye nothing more is said: the rest of the reply is dropped and we hang up.
         if (saidBye) stop = true;
       } else if (s.kind === "ask") {
@@ -921,7 +996,20 @@ export class CallSession {
           if (this.reasked++ < 1) { this.wantTurn = true; this.history.push({ role: "user", text: "[instruks] Du har allerede fått svar på dette. Gi beskjed til mottakeren nå." }); }
           return;
         }
-        await this.requestApproval(this.withContext(s.question), s.options, /^(ja|nei)$/i.test(s.options[0] ?? "") ? "commit" : "choice");
+        // We know who we called: never ask the user which restaurant or address it is.
+        if (asksUserWhereCallee(s.question)) {
+          this.debug("ask_where_callee_dropped", { question: s.question });
+          if (this.reasked++ < 1) {
+            this.wantTurn = true;
+            this.history.push({ role: "user", text: `[instruks] Du har ringt ${this.init.plan.callee.name}. Hentingen er hos dem, der du ringer nå. Ikke spør brukeren om det; si det kort til mottakeren.` });
+          }
+          return;
+        }
+        const options = fixCardOptions(s.question, s.options);
+        if (options.join("|") !== s.options.join("|")) this.debug("card_options_fixed", { question: s.question, from: s.options, to: options });
+        const agentLines = this.history.filter((h) => h.role === "agent").map((h) => h.text);
+        const question = priceWarning(s.question, agentLines) + this.withContext(s.question);
+        await this.requestApproval(question, options, /^(ja|nei)$/i.test(options[0] ?? "") ? "commit" : "choice");
       } else if (s.kind === "note") {
         this.note(s.text);
       } else if (s.kind === "end") {
@@ -979,6 +1067,14 @@ export class CallSession {
         this.confusedRun = this.recentConfused.filter(Boolean).length;
       }
       this.debug("turn_end", { said, confusedRun: this.confusedRun, aborted: abort.signal.aborted });
+      // Cut off mid-reply: keep the whole reply in case the callee said nothing real.
+      // Only what the filters let through: the reply must start with what was actually said.
+      const reply = rawText.replace(/\s+/g, " ").trim();
+      const spoken = norm(said.join(" "));
+      if (interrupted && reply && spoken && !/\[\[/.test(rawText) && norm(reply).startsWith(spoken) && endsSentence(reply) && !saidBye) {
+        this.cutLine = { text: reply, at: Date.now() };
+        this.scheduleResume(BARGE_RESUME_MS);
+      } else if (said.length) this.cutLine = undefined;
       // The model said goodbye but forgot [[END]]: hang up anyway (call #5 kept talking after «Ha det!»).
       if (saidBye && !this.endTag && !this.pending) {
         this.debug("goodbye_without_end", { said });
