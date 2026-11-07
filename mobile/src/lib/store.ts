@@ -3,7 +3,8 @@ import * as Haptics from "expo-haptics";
 import { AccessibilityInfo, Platform, Vibration } from "react-native";
 import { MOBILE_COPY } from "./copy-mobile";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
-import { askNotificationPermission, clearNeedsYou, notifyNeedsYou, setupNotifications } from "./notify";
+import { askNotificationPermission, clearNeedsYou, notifyNeedsYou, notifyOnce, onNotificationAction, setupNotifications } from "./notify";
+import { HISTORY_MAX, historyRepo, type CallRecord } from "./history";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
@@ -73,6 +74,8 @@ export interface State {
   themePref: ThemePref;
   profile: Profile;
   presets: StoredPreset[];
+  /** Finished calls with their transcripts, newest first. Kept on this phone only (history.ts). */
+  history: CallRecord[];
   /** Call through the Spoken server (real-call.ts); off = the on-phone scripted demos. */
   serverCalls: boolean;
   /** Demo passcode for real calls; empty = the server runs calls in mock mode. */
@@ -109,6 +112,7 @@ const INITIAL: State = {
   // No default name: real calls say this name out loud, so it must never be a made-up one.
   profile: { name: "", phone: "" },
   presets: DEFAULT_PRESETS,
+  history: [],
   serverCalls: true,
   passcode: "",
 };
@@ -217,6 +221,7 @@ export class SpokenStore {
       .load()
       .then((presets) => presets && this.set({ presets }))
       .catch(() => {});
+    historyRepo.load().then((history) => this.set({ history }));
     try {
       const p = JSON.parse(prefs ?? "null") as Partial<Pick<State, "themePref" | "profile" | "serverCalls" | "passcode">> | null;
       if (p)
@@ -229,6 +234,8 @@ export class SpokenStore {
     } catch {}
     this.syncRealCalls();
     setupNotifications();
+    // An Approve / Decline button on the notification answers the open approval.
+    onNotificationAction((v) => this.choose(v));
     this.intro();
   }
 
@@ -352,6 +359,40 @@ export class SpokenStore {
   private setPresets(presets: StoredPreset[]) {
     this.set({ presets });
     localPresetRepo.save(presets).catch(() => {});
+  }
+
+  /* call history (history.ts): saved when a call ends, kept on this phone */
+
+  private saveCall(sheet: Extract<Sheet, { kind: "result" }>) {
+    const sc = SCENARIOS[this.state.scenario];
+    const lines = this.state.transcript.map((l) =>
+      l.kind === "you" || l.kind === "sys" ? { who: l.kind, text: l.text } : { who: l.kind, text: l.words.join(" ") },
+    );
+    const record: CallRecord = {
+      id: `call-${Date.now().toString(36)}`,
+      at: new Date().toISOString(),
+      contact: sc[this.state.lang].contact,
+      number: sc.number,
+      ok: sheet.ok,
+      title: sheet.title,
+      rows: sheet.rows,
+      scripted: !isLive(this.state.scenario),
+      lines,
+    };
+    this.setHistory([record, ...this.state.history].slice(0, HISTORY_MAX));
+  }
+
+  deleteCall(id: string) {
+    this.setHistory(this.state.history.filter((c) => c.id !== id));
+  }
+
+  clearHistory() {
+    this.setHistory([]);
+  }
+
+  private setHistory(history: CallRecord[]) {
+    this.set({ history });
+    historyRepo.save(history).catch(() => {});
   }
 
   /** Profile: call through the server, or play the scripted demos on the phone. */
@@ -666,7 +707,12 @@ export class SpokenStore {
           pill: "hold", flashTick: s.flashTick + 1, sheet: { kind: "ask", cfg, pressed: null }, sheetOpen: true,
         }));
         buzz();
-        if (!this.demo) notifyNeedsYou(MOBILE_COPY[lang].notifyApproval, cfg.title);
+        if (!this.demo) {
+          void notifyNeedsYou(MOBILE_COPY[lang].notifyApproval, cfg.title, [
+            ...cfg.options.map((o) => ({ id: o.v, label: o.label })),
+            { id: "no", label: cfg.decline, destructive: true },
+          ]);
+        }
         const done = (v: string) => {
           this.askResolve = null;
           clearNeedsYou();
@@ -749,6 +795,9 @@ export class SpokenStore {
         ? { kind: "result", ok: false, title: t.hungTitle, rows: [...t.hungRows, [t.dur, dur]] }
         : { kind: "result", ok: o.ok, title: o.title, rows: [...o.rows, [t.dur, dur]] };
     this.set({ sheet, sheetOpen: true });
+    this.saveCall(sheet);
+    // Ended while you were in another app: say so, with the outcome.
+    if (!this.demo) notifyOnce(MOBILE_COPY[this.state.lang].notifyDone, sheet.title);
     this.demo = false;
   }
 

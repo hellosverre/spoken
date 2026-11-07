@@ -93,6 +93,20 @@ When Spoken is waiting for you (an approval, or a question in the chat) and the 
 
 With the right passcode the server places a real Telnyx call, only to numbers on its `CALL_ALLOWLIST`. Built-in presets have no number and use the server's demo directory, whose numbers aren't real, so save a real number in a preset to call it.
 
+## Call history
+
+Every finished call is saved on the phone (`src/lib/history.ts`, AsyncStorage, newest 100): who, number, date, outcome, the result details and the whole transcript, including your messages and the system notes. Nothing is sent to the server, which keeps no transcripts. Profile → **Call history** opens a sheet with each call's title, date and outcome; **View transcript** shows the conversation in the call screen's bubble style. Single calls or all of them can be deleted there.
+
+## Leaving the app during a call
+
+The call runs on the server whatever the app does, and the server replays every event to a new connection. On the phone:
+
+- **Keep-alive** (`src/lib/keep-alive.ts`): during a call the app plays a silent loop with iOS background audio on (the `expo-audio` plugin adds `UIBackgroundModes: audio`), so iOS doesn't suspend it. It mixes with other audio. Fine for a personal build; App Store review rejects silent audio as a keep-alive, and the lasting fix is server push, which needs a paid Apple account. Android shows a lock-screen media control for it.
+- **Reconnect** (`src/lib/real-call.ts`): a dropped live socket reconnects with backoff, and at once when you come back to the app. Replayed lines, notes and approvals are skipped.
+- **Notifications** (`src/lib/notify.ts`): when Spoken needs your OK and the app isn't in front, a notification shows the question with its choices as buttons (Approve / Decline, or the offered times), so you can answer without opening the app. A notice also says when the call ended, with the outcome.
+
+Needs a native build (`expo-audio` and `expo-notifications`); Expo Go can't add background audio to its own settings.
+
 ## On your own iPhone (no paid Apple account)
 
 A free Apple ID can sign a build for your own phone; it expires after 7 days. With the phone plugged in, Developer Mode on, and your Apple ID in Xcode:

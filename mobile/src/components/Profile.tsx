@@ -4,6 +4,7 @@ import type { ThemePref } from "../lib/store";
 import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
+import { historyCount, HistorySheet } from "./History";
 import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
 import { List, Row, Seg } from "./List";
@@ -24,6 +25,8 @@ export function Profile() {
   const profile = useSpoken((s) => s.profile);
   const serverCalls = useSpoken((s) => s.serverCalls);
   const savedCode = useSpoken((s) => s.passcode);
+  const calls = useSpoken((s) => s.history.length);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [code, setCode] = useState(savedCode);
   useEffect(() => setCode(savedCode), [savedCode]);
 
@@ -70,6 +73,21 @@ export function Profile() {
         </T>
         <Text style={styles.handle}>@demo</Text>
       </View>
+
+      {/* Past calls and their transcripts, saved on this phone. */}
+      <View style={styles.historyRow}>
+        <List>
+          <Row
+            first
+            icon="history"
+            title={m.historyL}
+            sub={historyCount(calls, m)}
+            go={<Icon name="chevron" color={C.dim} size={16} />}
+            onPress={() => setHistoryOpen(true)}
+          />
+        </List>
+      </View>
+      <HistorySheet open={historyOpen} onClose={() => setHistoryOpen(false)} />
 
       <SectionTitle icon="person" title={m.you} />
       <View style={styles.group}>
@@ -275,4 +293,5 @@ const useStyles = makeStyles((C) => ({
   state: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: -4 },
   stateText: { flex: 1, fontFamily: F.medium, fontSize: 13, lineHeight: 18 },
   about: { marginTop: 22, marginHorizontal: 2, fontFamily: F.regular, fontSize: 13, lineHeight: 19, color: C.dim, maxWidth: 320 },
+  historyRow: { marginTop: 14 },
 }));

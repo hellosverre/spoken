@@ -91,6 +91,14 @@ const PATHS = {
   ),
   // Mobile only: the Profile and Home tabs, log out, presets.
   home: <Path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5H15v-5.5H9v5.5H5.5A1.5 1.5 0 0 1 4 19z" />,
+  // A clock turning back: call history.
+  history: (
+    <>
+      <Path d="M4.6 12a7.5 7.5 0 1 0 2.2-5.3" />
+      <Path d="M4.2 4.4v3.3h3.3" />
+      <Path d="M12 8.2v4l2.8 1.8" />
+    </>
+  ),
   heart: <Path d="M12 19.5s-7.5-4.4-7.5-10A4.3 4.3 0 0 1 12 6.8a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10-7.5 10z" />,
   trash: <Path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7M10.5 10.5v6M13.5 10.5v6" />,
   pencil: <Path d="M15.5 5.5l3 3L9 18l-4 1 1-4zM13.5 7.5l3 3" />,

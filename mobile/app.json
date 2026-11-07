@@ -30,6 +30,12 @@
           "imageWidth": 120,
           "backgroundColor": "#0A0C11"
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": true
+        }
       ]
     ],
     "scheme": "spoken",

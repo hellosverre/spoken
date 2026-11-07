@@ -19,7 +19,7 @@ import { Icon } from "./Icon";
 import { Btn, Field, Press, T } from "./ui";
 
 /** A native page sheet (swipe down on iOS) with a header: left action, title, right action. */
-function SheetModal({
+export function SheetModal({
   visible,
   onClose,
   title,
@@ -58,7 +58,7 @@ function SheetModal({
   );
 }
 
-function HeadButton({ label, onPress, strong }: { label: string; onPress(): void; strong?: boolean }) {
+export function HeadButton({ label, onPress, strong }: { label: string; onPress(): void; strong?: boolean }) {
   const styles = useStyles();
   return (
     <Pressable accessibilityRole="button" onPress={onPress} hitSlop={10}>
