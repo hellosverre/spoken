@@ -47,7 +47,7 @@ export const LINES: Record<Lang, Lines> = {
     hello: "Hallo, hører du meg?",
     cantHear: "Jeg hører deg dessverre ikke. Jeg prøver igjen senere. Ha det!",
     mustEnd: "Jeg må dessverre avslutte nå. Takk, ha det bra!",
-    checking: (name) => [`Et lite øyeblikk, jeg sjekker med ${name}.`, `Jeg sjekker det med ${name}.`],
+    checking: (name) => [`Et lite øyeblikk, jeg sjekker med ${name}.`],
     hold: {
       ask: (name) => `Beklager ventetiden. Jeg får ikke helt kontakt med ${name} akkurat nå. Har du mulighet til å vente litt?`,
       thanks: "Tusen takk!",
@@ -75,7 +75,7 @@ export const LINES: Record<Lang, Lines> = {
     hello: "Hello, can you hear me?",
     cantHear: "I'm afraid I can't hear you. I'll try again later. Goodbye!",
     mustEnd: "I'm afraid I have to end the call now. Thank you, goodbye!",
-    checking: (name) => [`Just a moment, I'll check with ${name}.`, `Let me check that with ${name}.`],
+    checking: (name) => [`Just a moment, I'll check with ${name}.`],
     hold: {
       ask: (name) => `Sorry for the wait. I can't quite reach ${name} right now. Could you hold for a moment?`,
       thanks: "Thank you so much!",
