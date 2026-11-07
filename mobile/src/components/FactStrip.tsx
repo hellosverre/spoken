@@ -14,6 +14,7 @@ let items: FactItem[] = [];
 const subs = new Set<() => void>();
 /** Called by the live-call socket with the full list each time it changes. */
 export function setFacts(next: FactItem[]) { items = next; subs.forEach((f) => f()); }
+export function getFacts() { return items; }
 export function resetFacts() { if (items.length) setFacts([]); }
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 

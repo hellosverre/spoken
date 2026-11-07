@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, findNodeHandle, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, type HostInstance, type ScrollViewInstance } from "react-native";
+import { AccessibilityInfo, findNodeHandle, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, type HostInstance, type ScrollViewInstance } from "react-native";
 import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fill, type Row } from "../lib/i18n";
@@ -200,6 +200,7 @@ function Transcript() {
       contentContainerStyle={styles.transcript}
       onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: false })}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
     >
       {lines.map((line) => {
         if (line.kind === "sys")
@@ -253,6 +254,10 @@ function CallFooter() {
   const insets = useSafeAreaInsets();
   const ended = useSpoken((s) => s.callEnded);
   const [value, setValue] = useState("");
+  // The call is over: nothing to type into, so the keyboard goes with the field.
+  useEffect(() => {
+    if (ended) Keyboard.dismiss();
+  }, [ended]);
 
   return (
     <View style={[styles.composer, { paddingBottom: 12 + insets.bottom }]}>
