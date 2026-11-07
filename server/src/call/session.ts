@@ -1358,9 +1358,9 @@ export class CallSession {
         ttsMs: t.ttsMs,
         totalMs: m.at - from,
         models: {
-          stt: config.callProvider === "telnyx" ? "scribe_v2_realtime" : "mock",
+          stt: config.callProvider !== "mock" ? "scribe_v2_realtime" : "mock",
           llm: this.init.llm.model ? `${this.init.llm.name}:${this.init.llm.model}` : this.init.llm.name,
-          tts: config.callProvider === "telnyx" ? config.elevenlabs.ttsModel : "mock",
+          tts: config.callProvider !== "mock" ? config.elevenlabs.ttsModel : "mock",
         },
         at: Date.now(),
       };
