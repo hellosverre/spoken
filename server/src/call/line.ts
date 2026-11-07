@@ -42,6 +42,8 @@ export interface CallLine {
   hangup(): Promise<void>;
   /** Optional: warm the TTS cache for lines we know we will say (while it rings). */
   prefetch?(texts: string[]): void;
+  /** ms since the callee's audio last had voice energy (Infinity if unknown). */
+  silenceMs?(): number;
   /** True if this line sends calleeRevised for segments. */
   readonly revises?: boolean;
 }

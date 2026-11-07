@@ -13,6 +13,7 @@ import {
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLine, LineMetric } from "./line.ts";
+import { timeHint, timesIn } from "../time.ts";
 import { HoldFlow } from "./hold.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 
@@ -52,6 +53,13 @@ const FILLER_AFTER_MS = 2500;
 const BACKCHANNELS = ["Ja.", "Okei.", "Skjønner."];
 const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 1200);
 const BACKCHANNEL_EVERY = 3;
+// Don't start talking until the callee has been quiet this long (call #5: half-sentences from
+// turns that were cancelled because the callee was still talking).
+const SPEAK_AFTER_SILENCE_MS = Number(process.env.SPEAK_AFTER_SILENCE_MS ?? 600);
+// Speculative LLM on partials: 0 of 62 matched on call #5, so off unless SPECULATE=1.
+const SPECULATE = process.env.SPECULATE === "1";
+// Callee says only «ja»/«mm» while we're mid-turn: listening noise, not a new turn.
+const CALLEE_BACKCHANNEL = /^(ja|jo|mm+|mhm|hm+|okei|ok|ja ja|aha|å|åh|eh|ehm)[.!,]?$/i;
 const GOODBYE = /\b(ha det( bra| godt)?|ha en (fin|god|strålende) (dag|kveld|helg))\b/i;
 // Unsure words worth waiting ~0.7 s for a batch re-transcription: numbers and real content words.
 const FILLER_WORDS = new Set(["det", "den", "jeg", "du", "vi", "de", "ha", "har", "er", "var", "ja", "nei", "og", "en", "et", "så", "bare", "da", "eh", "ehm", "øh", "mm", "hm", "ikke", "kan", "vil", "må", "med", "på", "til", "som", "nå", "jo", "okei", "ok"]);
@@ -62,7 +70,16 @@ const HOLD_MS = 450;
 // Word confidences arrive ~20 ms after the commit; batch revisions ~0.7 s.
 const WORDS_WAIT_MS = 120;
 const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
-const UNFINISHED = /(,|\b(og|eller|men|så|at|som|blir|er|det|den|en|et|ei|til|på|for|med|om|hvis|fordi|altså|eh|ehm|øh|liksom))[.…]?$/i;
+// Questions and normal sentences are finished even if they end in «det»/«den» («vi har ikke det.»).
+const CONNECTOR_END = /\b(og|eller|men|fordi|at|som|hvis|altså|eh|ehm|øh|liksom|til|med|for|om)[.…]?$/i;
+function soundsUnfinished(text: string): boolean {
+  const t = text.trim();
+  if (/\?$/.test(t)) return false;
+  if (/(,|…|\.\.\.|-)$/.test(t)) return true;
+  if (CONNECTOR_END.test(t)) return true;
+  // «Det blir.» / «Det koster.» : a cut-off before the number
+  return t.split(/\s+/).length <= 3 && /\b(blir|koster|er|var)[.]?$/i.test(t);
+}
 
 interface Spec {
   key: string;
@@ -87,7 +104,7 @@ interface PendingApproval {
   id: string;
   question: string;
   options: string[];
-  kind: "commit" | "address" | "choice";
+  kind: "commit" | "address" | "choice" | "stuck";
   timer?: ReturnType<typeof setTimeout>;
 }
 
@@ -147,6 +164,9 @@ export class CallSession {
   private lastBackchannel = "";
   private turnNo = 0;
   private rephrased = false;
+  private goalAsks = 0; // agent questions about the goal since the last progress
+  private lastProgressAt = 0;
+  private messages = new Map<string, string>(); // callee segment id → message for the user
   private lastBackchannelTurn = -99;
   private answeredAtHistory = -1; // history length when the user last answered an approval
   private reasked = 0;
@@ -260,6 +280,7 @@ export class CallSession {
     if (s === "connected" && this.status !== "connected") {
       this.setStatus("connected");
       this.connectedAt = Date.now();
+      this.lastProgressAt = this.connectedAt;
       void this.sayOpening();
       return;
     }
@@ -297,9 +318,16 @@ export class CallSession {
     clearTimeout(this.silenceTimer);
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: this.lastCalleeAt });
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
-    const item: HistoryItem = { role: "callee", text: clean };
+    // Times are parsed in code and handed to the LLM as facts («⟨tid: 19:00⟩»).
+    const hint = timeHint(clean);
+    const item: HistoryItem = { role: "callee", text: hint ? `${clean} ${hint}` : clean };
     this.history.push(item);
     this.segItems.set(id, item);
+    this.checkMessage(id, clean);
+    if ((this.turnRunning || this.speaking) && CALLEE_BACKCHANNEL.test(clean)) {
+      this.debug("callee_backchannel_ignored", { text: clean });
+      return;
+    }
     if (this.speaking) this.onCalleeSpeech();
 
     if (this.pending) {
@@ -331,7 +359,7 @@ export class CallSession {
     }
     // Short VAD window: a pause after "Det blir…" must not start our turn.
     clearTimeout(this.holdTimer);
-    if (UNFINISHED.test(clean)) {
+    if (soundsUnfinished(clean)) {
       this.debug("hold_unfinished", { text: clean });
       this.holdTimer = setTimeout(() => { this.holdTimer = undefined; this.requestTurn(); }, HOLD_MS);
       return;
@@ -373,9 +401,11 @@ export class CallSession {
       const line = this.transcript.find((t) => t.who === "callee" && t.text === item.text.replace(/ ⟨usikre ord:.*⟩$/, ""));
       if (line) line.text = clean;
       const unsure = words.filter((w) => w.confidence < 0.6).map((w) => w.text.replace(/[.,!?]$/, ""));
-      item.text = unsure.length ? `${clean} ⟨usikre ord: ${unsure.join(", ")}⟩` : clean;
+      const hint = timeHint(clean);
+      item.text = [clean, hint, unsure.length ? `⟨usikre ord: ${unsure.join(", ")}⟩` : ""].filter(Boolean).join(" ");
     }
     this.debug("stt_revised", { id, text: clean });
+    if (this.messages.has(id)) this.checkMessage(id, clean);
     if (this.gate?.id === id) this.gate.go();
   }
 
@@ -407,12 +437,15 @@ export class CallSession {
   }
 
   /** A partial that stops changing means the callee probably finished: start thinking now. */
+  private lastPartialAt = 0;
+
   private onPartial(text: string) {
+    this.lastPartialAt = Date.now();
     if (this.holdTimer) { clearTimeout(this.holdTimer); this.holdTimer = undefined; } // they kept talking
     const key = norm(text);
     if (this.spec && this.spec.key !== key) this.dropSpec("partial changed");
     clearTimeout(this.specTimer);
-    if (!this.canSpeculate() || key.length < 2) return;
+    if (!SPECULATE || !this.canSpeculate() || key.length < 2) return;
     this.specTimer = setTimeout(() => {
       if (this.spec || !this.canSpeculate()) return;
       const ctx = this.ctx();
@@ -504,6 +537,11 @@ export class CallSession {
     let saidBye = false;
     let spokeAnything = false;
     this.debug("turn_start", { history: this.history.at(-1) });
+    if (this.lastProgressAt && !this.pending && Date.now() - this.lastProgressAt > config.unproductiveSec * 1000) {
+      this.turnRunning = false;
+      await this.wrapUp(`Kom ikke videre på ${Math.round(config.unproductiveSec / 60)} min; avsluttet høflig.`);
+      return;
+    }
     let backchannel = "";
     const turnNo = ++this.turnNo;
     const lastCallee = this.history.at(-1);
@@ -529,14 +567,49 @@ export class CallSession {
       void this.say(f, "filler");
     }, FILLER_AFTER_MS);
 
+    let waited = false;
     const handle = async (s: Segment) => {
       if (stop || abort.signal.aborted) return;
+      // Nothing is said until the callee has really stopped (no half-sentences from cancelled turns).
+      if (!waited && answeringCallee && (s.kind === "speech" || s.kind === "ask")) {
+        waited = true;
+        await this.waitForSilence(abort.signal);
+        if (stop || abort.signal.aborted) return;
+      }
       if (s.kind === "speech") {
         if (backchannel && !spokeAnything) {
           // "Ja," was already said: don't start the real reply with "Ja, …" again.
           const w = backchannel.replace(/[.,]$/, "");
           const stripped = s.text.replace(new RegExp(`^${w}[,!.]?\\s+`, "i"), "");
           if (stripped !== s.text && stripped.trim()) s = { ...s, text: stripped.charAt(0).toUpperCase() + stripped.slice(1) };
+        }
+        const deintro = this.withoutReintro(s.text);
+        if (deintro !== s.text) {
+          this.debug("reintro_removed", { original: s.text, kept: deintro });
+          if (!deintro) return;
+          s = { ...s, text: deintro };
+        }
+        // Times the agent says must come from the plan, the callee or the user, never invented.
+        const bad = timesIn(s.text).filter((t) => !this.allowedTimes().has(t));
+        if (bad.length) {
+          this.debug("time_blocked", { text: s.text, bad });
+          stop = true;
+          spokeAnything = true;
+          const q = "Hvilket klokkeslett mener du?";
+          if (!this.recentTurns.some((r) => r.has(norm(q)))) { said.push(q); await this.say(q, "say", false, abort.signal); }
+          return;
+        }
+        // Asking the shop about the goal again after 2 tries: ask the user instead (call #5 looped 5.5 min).
+        if (this.isGoalAsk(s.text)) {
+          if (this.goalAsks >= 2) {
+            stop = true;
+            spokeAnything = true;
+            this.goalAsks = 0;
+            this.debug("stuck_ask_user", { text: s.text });
+            await this.requestApproval(this.stuckQuestion(), ["Godta det de tilbyr", "Prøv noe annet", "Legg på"], "stuck");
+            return;
+          }
+          this.goalAsks++;
         }
         const commitment = isCommitment(s.text);
         if (commitment && this.approvalCredit <= 0) {
@@ -572,6 +645,8 @@ export class CallSession {
         if (GOODBYE.test(s.text)) saidBye = true;
         const r = await this.say(s.text, "say", false, abort.signal);
         if (r.interrupted) stop = true;
+        // After a goodbye nothing more is said: the rest of the reply is dropped and we hang up.
+        if (saidBye) stop = true;
       } else if (s.kind === "ask") {
         stop = true;
         // The model asking again right after the user answered, with nothing new from the
@@ -624,7 +699,7 @@ export class CallSession {
       }
       this.debug("turn_end", { said, confusedRun: this.confusedRun, aborted: abort.signal.aborted });
       // The model said goodbye but forgot [[END]]: hang up anyway (call #5 kept talking after «Ha det!»).
-      if (saidBye && !this.endTag && !abort.signal.aborted && !this.pending) {
+      if (saidBye && !this.endTag && !this.pending) {
         this.debug("goodbye_without_end", { said });
         await this.finish("agent said goodbye");
       } else if (this.endTag && !abort.signal.aborted) {
@@ -701,6 +776,80 @@ export class CallSession {
     return `${question} (${this.init.plan.callee.name || "Mottakeren"}: «${lastCallee}»)`;
   }
 
+  /**
+   * The disclosure is said once, by code. After that the agent never re-introduces itself or
+   * repeats «på vegne av {name}» unless the callee asks who is calling (call #5: callee complained).
+   */
+  private progress() {
+    this.lastProgressAt = Date.now();
+    this.goalAsks = 0;
+  }
+
+  /** A question to the callee about the errand itself («Har dere en stor pepperoni …?»). */
+  private isGoalAsk(text: string): boolean {
+    if (!/\?\s*$/.test(text)) return false;
+    const keys = this.init.plan.goal.toLowerCase().match(/[\p{L}]{5,}/gu)?.filter((w) => !["bestille", "klokka", "gjerne"].includes(w)) ?? [];
+    const t = text.toLowerCase();
+    return keys.some((k) => t.includes(k));
+  }
+
+  /** Approval card text when the call is going in circles: what the callee has offered. */
+  private stuckQuestion(): string {
+    const said = this.history.filter((h) => h.role === "callee").slice(-2).map((h) => h.text.replace(/\s*⟨.*?⟩/g, ""));
+    const who = this.init.plan.callee.name || "Mottakeren";
+    const quote = said.join(" ").slice(-200);
+    return `Vi kommer ikke videre. ${who} sier: «${quote}» Hva vil du?`;
+  }
+
+  /** Polite end as partial (unproductive call or the user chose to hang up). */
+  private async wrapUp(summary: string) {
+    if (this.ended) return;
+    this.debug("wrap_up", { summary });
+    this.note(summary, "warn");
+    const name = this.init.profile.name || "brukeren";
+    await this.say(`Takk for hjelpen så langt. Jeg gir beskjed til ${name}, så tar vi kontakt igjen. Ha det bra!`, "filler");
+    await this.finish("wrap up", { outcome: "partial", summary });
+  }
+
+  /** «Si til Sverre at …» → a note for the user and a line in the result. */
+  private checkMessage(id: string, text: string) {
+    const name = this.init.profile.name;
+    const re = new RegExp(`(?:si (?:til|fra til) (?:${name || "han"}|han|henne|ham)|hils (?:til )?(?:${name || "han"}|han|henne)|gi (?:${name || "han"}|han|henne) beskjed|gi beskjed til (?:${name || "han"}|han|henne)|(?:legg igjen|ta imot) (?:en )?(?:beskjed|melding)|melding til (?:${name || "han"}|han|henne))\\s*(?:at|om|:)?\\s*(.*)$`, "i");
+    const m = text.match(re);
+    if (!m) return;
+    const msg = (m[1] || text).replace(/^["«»“”]+|["«»“”]+$/g, "").trim() || text;
+    const had = this.messages.has(id);
+    this.messages.set(id, msg);
+    this.note(`Beskjed til ${name || "deg"}${had ? " (rettet)" : ""}: «${msg}»`, "info");
+  }
+
+  private allowedTimes(): Set<string> {
+    const set = new Set(timesIn(this.init.plan.goal));
+    for (const h of this.history) if (h.role !== "agent") for (const t of timesIn(h.text.replace(/⟨.*?⟩/g, ""))) set.add(t);
+    return set;
+  }
+
+  withoutReintro(text: string): string {
+    const name = this.init.profile.name;
+    const lastCallee = [...this.history].reverse().find((h) => h.role === "callee")?.text ?? "";
+    if (/hvem (er (du|det)|ringer)|på vegne av hvem|er du (en )?(robot|maskin|ki|menneske)|hva heter du|hvem snakker jeg med/i.test(lastCallee)) return text;
+    let t = text;
+    // Greetings after the opening.
+    t = t.replace(/^(hei( igjen| der)?|hallo( igjen)?)[!,.]\s*/i, "");
+    // Self-introductions.
+    if (/KI-assistent|det er spoken|jeg heter spoken|jeg er (en )?(KI|AI|robot)/i.test(t)) {
+      t = t.replace(/[^.!?]*(KI-assistent|det er spoken|jeg heter spoken|jeg er (en )?(KI|AI|robot))[^.!?]*[.!?]?\s*/gi, "");
+    }
+    const errandSaid = this.history.some((h) => h.role === "agent" && h !== this.history[0] && /jeg ringer|vil gjerne/i.test(h.text));
+    if (name && errandSaid) {
+      // «Jeg ringer på vegne av Sverre og vil gjerne X» → «Jeg vil gjerne X»; drop stray «på vegne av Sverre».
+      t = t.replace(new RegExp(`jeg ringer (på vegne av ${name} )?(og|for å)\\s+(vil gjerne\\s+)?`, "i"), "Jeg vil gjerne ");
+      t = t.replace(new RegExp(`,?\\s*på vegne av ${name}`, "gi"), "");
+    }
+    t = t.replace(/\s{2,}/g, " ").trim();
+    return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
+  }
+
   private onMetric(m: LineMetric) {
     const t = this.timing;
     if (!t) return;
@@ -726,12 +875,25 @@ export class CallSession {
   }
 
   /** If the callee says nothing for 8 s after we spoke, check the line once. */
+  /** Resolves once the callee has been quiet SPEAK_AFTER_SILENCE_MS (max 3 s), or on abort. */
+  private async waitForSilence(signal: AbortSignal) {
+    const start = Date.now();
+    while (!signal.aborted && !this.ended && Date.now() - start < 3000) {
+      const quiet = this.init.line.silenceMs?.() ?? Infinity;
+      if (quiet >= SPEAK_AFTER_SILENCE_MS) return;
+      await Bun.sleep(Math.min(60, SPEAK_AFTER_SILENCE_MS - quiet));
+    }
+  }
+
   private armSilenceNudge() {
     clearTimeout(this.silenceTimer);
     if (this.ended || this.pending || this.nudged >= 2) return;
     const since = Date.now();
     this.silenceTimer = setTimeout(() => {
       if (this.ended || this.pending || this.speaking || this.turnRunning || this.lastCalleeAt > since) return;
+      // Only after real silence: no voice energy for 8 s (call #5 nudged while the callee talked).
+      const quiet = this.init.line.silenceMs?.() ?? Infinity;
+      if (quiet < 8000 || this.lastPartialAt > since) { this.armSilenceNudge(); return; }
       this.nudged++;
       void this.say(this.nudged === 1 ? "Hallo, hører du meg?" : "Jeg hører deg dessverre ikke. Jeg prøver igjen senere. Ha det!", "filler").then(() => {
         if (this.nudged >= 2 && !this.ended) void this.finish("silence", { outcome: "failed", summary: "Hørte ingenting fra mottakeren." });
@@ -743,6 +905,7 @@ export class CallSession {
     if (this.pending || this.ended) return;
     const id = nid("ap");
     this.pending = { id, question, options, kind };
+    this.progress();
     this.waitingNoticeSaid = false;
     this.emit({ type: "approval_request", id, question, options, at: Date.now() });
     this.hold.arm(); // 30 s: ask the callee to hold; 2 min: offer a callback
@@ -763,6 +926,11 @@ export class CallSession {
     if (p.kind === "address") {
       if (yes) this.init.plan.willShare.push("address");
       this.history.push({ role: "user", text: yes ? "[godkjent] Du kan oppgi adressen: {{ADDRESS}}" : "[avslått] Ikke oppgi adressen." });
+    } else if (p.kind === "stuck") {
+      if (/godta/i.test(choice)) this.approvalCredit = 1;
+      this.history.push({ role: "user", text: /godta/i.test(choice)
+        ? `[godkjent] Brukeren godtar det butikken tilbyr (${p.question}). Bekreft det kort.`
+        : `[svar] ${choice}. Ikke gjenta det samme spørsmålet; prøv en annen løsning eller avslutt høflig.` });
     } else if (yes) {
       this.approvalCredit = 1;
       this.history.push({ role: "user", text: `[godkjent] ${p.question}` });
@@ -772,6 +940,11 @@ export class CallSession {
       this.history.push({ role: "user", text: `[svar] ${choice}` });
     }
     this.answeredAtHistory = this.history.length;
+    this.progress();
+    if (p.kind === "stuck" && /legg på/i.test(choice)) {
+      void this.hold.resume().then(() => this.wrapUp("Brukeren valgte å legge på."));
+      return;
+    }
     // If the callee was asked to hold, thank them first («Takk for at du ventet!»), then go on.
     void this.hold.resume().then(() => this.requestTurn());
   }
@@ -788,6 +961,7 @@ export class CallSession {
         const text = cmd.text.trim().slice(0, 500);
         if (!text) return;
         this.history.push({ role: "user", text: `[instruks] ${text}` });
+        this.progress();
         this.note(`Instruks sendt: ${text}`);
         if (!this.pending && !this.speaking) this.requestTurn();
         else if (!this.pending) this.wantTurn = true;
@@ -858,7 +1032,7 @@ export class CallSession {
       taskId: this.taskId,
       outcome,
       summary,
-      details: s.details,
+      details: this.messages.size ? { ...s.details, beskjed: [...this.messages.values()].join(" / ") } : s.details,
       transcript: [...this.transcript],
       durationSec: this.connectedAt ? Math.round((Date.now() - this.connectedAt) / 1000) : 0,
     };
