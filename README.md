@@ -1,10 +1,5 @@
 # Spoken
 
-Spoken: type what you need, an AI makes the phone call for you. Oslo Sprint 2026.
-
-## Pitch
-
-See [pitch preparation](PITCH.md) for jury questions, evidence to prepare, and the rehearsal checklist.
 **Du skriver, vi snakker. You type, we talk.**
 
 Spoken makes phone calls for you. You type what you need ("order a large pepperoni for pickup at six"), and an AI calls the place, talks to the person who answers in Norwegian, and shows you every word live on screen. It says it's an AI in its first sentence, and it asks you before it agrees to any price, time or booking.
@@ -106,6 +101,10 @@ Sverre, Jakob
 ## Accessibility planning
 
 See [ACCESSIBILITY.md](ACCESSIBILITY.md) for proposed core-flow requirements, research caveats and a user-validation plan. These are targets to test, not claims of verified support.
+
+## Pitch preparation
+
+See [PITCH.md](PITCH.md) for jury questions, evidence to prepare and the rehearsal checklist.
 
 ## For AI agents
 
