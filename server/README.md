@@ -83,6 +83,20 @@ callee µ-law ─┬─ local energy VAD (100 ms) ─┐
 
 Connected in 8.5 s; disclosure played from cache instantly (TTS first byte 0 ms). Then silence: Telnyx delivered the callee track as **PCMA (A-law)**, Scribe got it labelled µ-law and returned nothing, so the agent never got a turn; the callee hung up after 35 s (`normal_clearing`). Fixed: A-law → µ-law transcode from `media_format`, plus a silence check ("Hallo, hører du meg?" after 8 s, hang up after a second miss).
 
+## Debug log
+
+Every call writes `server/logs/<callId>.jsonl` (gitignored): all live events, each agent turn (`turn_start`/`turn_end` with what was said), fillers, escalations, skipped duplicates, barge-in, Telnyx webhooks, media format, TTS first byte and commit→audio latency. `CALL_LOG=0` turns it off; **turn it off for the public demo** (CONTRACT: no transcript stored server-side).
+
+```bash
+jq -r 'select(.kind=="event" and .ev.type=="transcript") | "\(.ev.who): \(.ev.text)"' server/logs/<callId>.jsonl
+```
+
+## Anti-loop rules (session, any LLM)
+
+- Never say a sentence that was said in the last 3 agent turns.
+- "Didn't get that" lines count over the last 4 turns: 1st as is, 2nd → rephrase the errand as a yes/no question, 3rd → «Beklager, jeg hører deg dessverre ikke godt nok. {name} tar kontakt på en annen måte. Ha det bra!» and end (`failed`).
+- Filler («Mm, et øyeblikk.» etc., rotated) only when no sentence is ready after 1.5 s. The approval wait still says «Et øyeblikk…».
+
 ## Call #2 (Sat 7 Nov, pizza goal, mock LLM)
 
 | | Result |

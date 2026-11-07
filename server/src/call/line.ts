@@ -14,6 +14,8 @@ export interface LineEvents {
   /** Same segment again once word confidences arrive. */
   calleeWords?(segmentId: string, text: string, words: Word[]): void;
   ended(reason: string): void;
+  /** Line-level facts for the per-call debug log (latency, webhooks, media format). */
+  debug?(kind: string, data: Record<string, unknown>): void;
 }
 
 export interface CallLine {

@@ -154,3 +154,29 @@ describe("mock agent on a real human", () => {
     expect(mockReplyText({ ...base, history: h2 })).toContain("oppsummere");
   });
 });
+
+describe("call #2 replay: callee keeps saying the same thing", () => {
+  for (const [label, said, outcome] of [
+    ["yes-answers move the call on", "Det går bra.", "partial"],
+    ["unintelligible → ends politely", "Mm hm.", "failed"],
+  ] as const) test(label, async () => {
+    const { MockLlm } = await import("../src/llm/mock.ts");
+    const line = new FakeLine();
+    const s = new CallSession({ callId: "c_replay", taskId: "t", plan: { ...plan, goal: "bestille en stor pepperoni til henting klokka 18:00" }, profile, line, llm: new MockLlm(0) });
+    const evs: LiveEvent[] = [];
+    s.subscribe((e) => evs.push(e));
+    await s.start();
+    await tick();
+    for (const t of ["Det var det.", ...Array(6).fill(said)]) {
+      if (s.isEnded) break;
+      line.ev.calleeFinal(`c_${t}`, t);
+      await tick(60);
+    }
+    await tick(100);
+    const agentTurns = line.spoken.slice(1).map((x) => x.toLowerCase());
+    for (let i = 1; i < agentTurns.length; i++) expect(agentTurns[i]).not.toBe(agentTurns[i - 1]);
+    expect(agentTurns.filter((x) => x.startsWith("beklager, linja")).length).toBeLessThanOrEqual(1);
+    expect(s.isEnded).toBe(true);
+    expect((evs.at(-1) as any).result.outcome).toBe(outcome);
+  });
+});
