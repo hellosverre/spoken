@@ -48,8 +48,8 @@ describe("secrets", () => {
 describe("speakable", () => {
   test("numbers and times as words", () => {
     expect(toSpeakable("189 kr klokka 18:00")).toBe("hundre og åttini kroner klokka atten");
-    expect(toSpeakable("Ring 22 00 00 01")).toBe("Ring to to null null null null null en");
-    expect(toSpeakable("kl. 9.30")).toBe("klokka ni tretti");
+    expect(toSpeakable("Ring 22 00 00 01")).toBe("Ring tjueto, null null, null null, null en");
+    expect(toSpeakable("kl. 9.30")).toBe("klokka halv ti");
   });
 });
 
