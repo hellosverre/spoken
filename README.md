@@ -102,6 +102,10 @@ Sverre, Jakob
 
 See [ACCESSIBILITY.md](ACCESSIBILITY.md) for proposed core-flow requirements, research caveats and a user-validation plan. These are targets to test, not claims of verified support.
 
+## Pitch preparation
+
+See [PITCH.md](PITCH.md) for jury questions, evidence to prepare and the rehearsal checklist.
+
 ## For AI agents
 
 Read [PRODUCT_CONTEXT.md](PRODUCT_CONTEXT.md) for the product purpose, user journey, architecture, demo modes, safety boundaries and open questions. Start with [AGENTS.md](AGENTS.md) for working instructions.
