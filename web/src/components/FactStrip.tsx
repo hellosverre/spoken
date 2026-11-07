@@ -13,6 +13,7 @@ const subs = new Set<() => void>();
 const emit = () => subs.forEach((f) => f());
 /** Called by the live-call socket with the full list each time it changes. */
 export function setFacts(next: FactItem[]) { items = next; emit(); }
+export function getFacts() { return items; }
 export function resetFacts() { if (items.length) setFacts([]); }
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 const snapshot = () => items;

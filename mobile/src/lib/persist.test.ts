@@ -1,5 +1,16 @@
-import { describe, expect, test } from "bun:test";
+// @ts-nocheck -- runs under bun test / node --test; the app has no node types
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
 import { createPersister, MAX_AGE_MS, parseDurable, PERSIST_KEY, PERSIST_VERSION, toDurable, type Source, type StorageLike } from "./persist";
+
+/** Just enough of expect() for this file, so it runs under bun test and node --test alike. */
+const expect = (v: unknown) => ({
+  toBe: (x: unknown) => assert.equal(v, x),
+  toEqual: (x: unknown) => assert.deepEqual(v, x),
+  toHaveLength: (n: number) => assert.equal((v as unknown[]).length, n),
+  toBeNull: () => assert.equal(v, null),
+  not: { toMatch: (r: RegExp) => assert.ok(!r.test(String(v))) },
+});
 
 const mem = (): StorageLike & { data: Map<string, string> } => {
   const data = new Map<string, string>();
