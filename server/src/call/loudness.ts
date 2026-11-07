@@ -1,10 +1,13 @@
-// The person on the phone is close to the mic; people around them are much quieter.
-// Call c_d3457ddfdd92 (a room full of people): the callee peaked at 2800–5700 RMS, background
-// voices at 300–1300, and the STT turned the background into callee lines.
+// The person on the phone is usually much louder than people around them.
+// c_d3457ddfdd92 (full room): callee 2800–5700 RMS, background voices 300–1300.
+// c_73b6b5529e9b: the callee said «Jeg vil ha pizza» at 604 — quieter than a background
+// voice (751). So only very faint speech is dropped; quiet speech goes to the LLM marked
+// ⟨svak stemme⟩, and it decides whether it belongs to the call.
 
-const BG_RATIO = Number(process.env.BG_RATIO ?? 0.3); // ~ −10 dB below the speaker = background
-const MIN_LEVEL = Number(process.env.BG_MIN_LEVEL ?? 1500); // learn the speaker first
-const DECAY = 0.9; // per accepted segment, so one loud shout doesn't set the bar for the call
+const FAINT = Number(process.env.BG_RATIO ?? 0.3); // quieter than this share of the callee: marked, can't barge in
+const DROP = Number(process.env.BG_DROP_RATIO ?? 0.1); // quieter than this: dropped
+const MIN_LEVEL = Number(process.env.BG_MIN_LEVEL ?? 1500); // learn the callee first
+const KEEP = 5; // median of the last 5 kept lines, so one shout doesn't set the bar
 
 /** 90th percentile of per-frame RMS: how loud the speech in a segment got. */
 export function peakLevel(rms: number[]): number {
@@ -14,10 +17,20 @@ export function peakLevel(rms: number[]): number {
 }
 
 export class SpeakerLevel {
-  level = 0;
-  /** Below this a voice is someone in the background (0 until the speaker is known). */
-  floor() { return this.level >= MIN_LEVEL ? this.level * BG_RATIO : 0; }
-  isBackground(peak: number) { return peak < this.floor(); }
-  /** A segment we kept as the callee's: track their level. */
-  accept(peak: number) { this.level = Math.max(peak, this.level * DECAY); }
+  private peaks: number[] = [];
+  /** The callee's typical loudness (0 until known). */
+  get level() {
+    if (!this.peaks.length) return 0;
+    const s = [...this.peaks].sort((a, b) => a - b);
+    const m = s.length >> 1;
+    const med = s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
+    return med >= MIN_LEVEL ? med : 0;
+  }
+  /** Below this a voice can't barge in and is marked faint. */
+  floor() { return this.level * FAINT; }
+  isFaint(peak: number) { return peak < this.floor(); }
+  /** So quiet it's almost surely someone else in the room. */
+  isBackground(peak: number) { return peak < this.level * DROP; }
+  /** A line we took as the callee's at normal loudness. */
+  accept(peak: number) { this.peaks.push(peak); if (this.peaks.length > KEEP) this.peaks.shift(); }
 }

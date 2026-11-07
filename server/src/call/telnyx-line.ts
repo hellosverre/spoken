@@ -287,10 +287,12 @@ export class TelnyxLine implements CallLine {
           this.saveSegment({ id, startMs: from - this.audioStartAt, endMs: end - this.audioStartAt, realtime: text, background: true, peak: Math.round(peak) });
           return;
         }
-        if (!this.speakResolve) this.speaker.accept(peak); // not while our own voice may echo back
+        const faint = this.speaker.isFaint(peak);
+        if (faint) this.ev.debug?.("faint_speech", { id, text, peak: Math.round(peak), speaker: Math.round(this.speaker.level) });
+        else if (!this.speakResolve) this.speaker.accept(peak); // not while our own voice may echo back
         // Quiet speech can stay under the energy threshold; the last partial is a later bound.
         const speechEndAt = Math.max(this.lastVoicedAt, this.lastPartialAt) || undefined;
-        this.ev.calleeFinal(id, text, undefined, { speechEndAt });
+        this.ev.calleeFinal(id, text, undefined, { speechEndAt, faint });
         this.secondOpinion(id, text, from, end, peak);
       },
       words: (text, words) => {

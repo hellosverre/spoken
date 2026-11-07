@@ -44,6 +44,8 @@ interface TurnTiming {
   awaitAudio: boolean;
 }
 
+/** A quiet voice: maybe the callee, maybe someone near them (c_73b6b5529e9b). */
+const FAINT_HINT = "⟨svak stemme⟩";
 // Agent lines that mean "I didn't get that". Two turns of these in a row → change strategy.
 const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (deg )?ikke|linja er (litt )?dårlig|unnskyld,? hva sa du)/i;
 // Short fillers for when a reply is slow (> FILLER_AFTER_MS). Rotated, never the same twice in a row.
@@ -338,7 +340,7 @@ export class CallSession {
         },
         calleeFinal: (id, text, words, meta) => {
           this.timing = { commitAt: Date.now(), speechEndAt: meta?.speechEndAt, llmMs: null, ttsMs: null, awaitTts: false, awaitAudio: false };
-          this.onCalleeFinal(id, text, words);
+          this.onCalleeFinal(id, text, words, meta?.faint);
         },
         metric: (m) => this.onMetric(m),
         cost: (c) => { this.lineCost = c; },
@@ -433,7 +435,9 @@ export class CallSession {
     }
   }
 
-  private onCalleeFinal(id: string, text: string, words?: Word[]) {
+  private faintIds = new Set<string>();
+
+  private onCalleeFinal(id: string, text: string, words?: Word[], faint = false) {
     const clean = text.trim();
     if (!clean || this.ended) return;
     this.lastCalleeAt = Date.now();
@@ -443,7 +447,8 @@ export class CallSession {
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
     // Times are parsed in code and handed to the LLM as facts («⟨tid: 19:00⟩»).
     const hint = timeHint(clean);
-    const item: HistoryItem = { role: "callee", text: hint ? `${clean} ${hint}` : clean };
+    if (faint) this.faintIds.add(id);
+    const item: HistoryItem = { role: "callee", text: [clean, hint, faint ? FAINT_HINT : ""].filter(Boolean).join(" ") };
     this.history.push(item);
     this.segItems.set(id, item);
     this.checkMessage(id, clean);
@@ -579,7 +584,7 @@ export class CallSession {
       if (line) line.text = clean;
       const unsure = words.filter((w) => w.confidence < 0.6).map((w) => w.text.replace(/[.,!?]$/, ""));
       const hint = timeHint(clean);
-      item.text = [clean, hint, numberHint(words), unsure.length ? `⟨usikre ord: ${unsure.join(", ")}⟩` : ""].filter(Boolean).join(" ");
+      item.text = [clean, hint, numberHint(words), unsure.length ? `⟨usikre ord: ${unsure.join(", ")}⟩` : "", this.faintIds.has(id) ? FAINT_HINT : ""].filter(Boolean).join(" ");
     }
     this.debug("stt_revised", { id, text: clean });
     // Batch changed the line we're answering and nothing has been said yet: answer the corrected text.
