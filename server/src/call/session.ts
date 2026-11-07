@@ -189,6 +189,8 @@ export interface SessionInit {
   taskText?: string;
   /** Approved for this call only; never put into the LLM context. */
   secrets?: { fnr?: string };
+  /** Compare legs only ask (price, time): «done» needs no approved deal. */
+  infoOnly?: boolean;
 }
 
 let seq = 0;
@@ -1557,7 +1559,7 @@ export class CallSession {
     let honestSummary: string | undefined;
     // «done» needs an approved deal AND a clear yes from the callee afterwards (call #8 claimed done
     // after «Begge to» and a confused 240/274 kr).
-    if (outcome === "done" && !(this.approvedCommit && this.confirmedByCallee)) {
+    if (outcome === "done" && !this.init.infoOnly && !(this.approvedCommit && this.confirmedByCallee)) {
       outcome = "partial";
       honestSummary = this.approvedCommit ? this.U.summary.unclearConfirm : this.U.summary.noDeal;
       this.debug("done_downgraded", { approvedCommit: this.approvedCommit, confirmedByCallee: this.confirmedByCallee });

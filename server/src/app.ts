@@ -12,6 +12,7 @@ import { callLangFor } from "./call/lines.ts";
 import { MockLine } from "./call/mock-line.ts";
 import { MockLlm } from "./llm/mock.ts";
 import { CallSession } from "./call/session.ts";
+import { CompareMockLine, CompareMockLlm, compares, createCompare, stateOf } from "./call/compare.ts";
 import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
 import { ElksLine, elksSecretOk } from "./call/elks-line.ts";
 import { VonageLine } from "./call/vonage-line.ts";
@@ -280,6 +281,56 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
 
+  /** Compare: 2–3 info-only calls at once. Same checks as startCall, applied to every leg. */
+  async function startCompare(req: Request, server: Server<WsData>) {
+    const b = await body(req);
+    const v = validTask({ text: b?.text, lang: b?.lang, callLang: b?.callLang });
+    if (typeof v === "string") return err(400, v);
+    const ts = b?.targets;
+    if (!Array.isArray(ts) || ts.length < 2 || ts.length > 3) return err(400, "targets must have 2–3 entries");
+    const targets: { name: string; e164: string }[] = [];
+    for (const t of ts) {
+      if (typeof t?.name !== "string" || !t.name.trim() || typeof t?.phone !== "string") return err(400, "each target needs name and phone");
+      const n = checkNumber(t.phone);
+      if (!n.ok) return err(403, n.reason + (n.alternative ? ` ${n.alternative}` : ""));
+      targets.push({ name: t.name.trim().slice(0, 80), e164: n.e164 });
+    }
+    const goal = checkGoal(v.text);
+    if (!goal.ok) return err(403, goal.reason);
+    const passKey = `pass:${userKey(req, server)}`;
+    if (wrongPasscodes(passKey) >= 5) return err(429, "For mange feil koder. Prøv igjen om en time.");
+    const pass = passcodeCheck(req.headers.get("x-spoken-passcode"));
+    if (pass === "wrong") noteWrongPasscode(passKey);
+    const realProvider = config.callProvider === "telnyx" || config.callProvider === "46elks" || config.callProvider === "vonage";
+    const real = realProvider && pass === "ok";
+    if (real && !config.callAllowlist.includes("*")) {
+      const bad = targets.find((t) => !config.callAllowlist.includes(t.e164));
+      if (bad) return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
+    }
+    if (overLimit(`compare:${userKey(req, server)}`, 6, 10 * 60_000)) return err(429, "For mange sammenligninger. Vent litt og prøv igjen.");
+    for (const _ of targets) if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+
+    const profile = await profileFor(deviceOf(req));
+    const callLang = v.callLang ?? callLangFor(v.text, config.callLang);
+    const voiceId = profile.voiceId || config.elevenlabs.defaultVoice;
+    const maxSec = Math.min(90, config.maxCallSec); // info calls stay short
+    const id_ = id("cmp");
+    const legs = targets.map((t, i) => {
+      const callId = id("c");
+      const keyt = keyterms(v.text, t.name, profile.name, v.text, callLang);
+      const opts = { callId, to: t.e164, voiceId, lang: callLang, keyterms: keyt, maxSec };
+      const line = real
+        ? config.callProvider === "vonage" ? new VonageLine(opts) : config.callProvider === "46elks" ? new ElksLine(opts) : new TelnyxLine(opts)
+        : new CompareMockLine(i, t.name, realProvider ? 1 : config.mockSpeed, callLang);
+      return { name: t.name, phone: t.e164, callId, line, llm: real ? llm : new CompareMockLlm(callLang) };
+    });
+    const c = createCompare({
+      id: id_, text: v.text, lang: v.lang, callLang, mode: real ? "real" : "mock", device: deviceOf(req), profile, voiceId,
+      opening: ensureDisclosure("", profile.name, callLang), maxSec, legs,
+    });
+    return json({ compareId: c.id, mode: c.mode, legs: c.legs.map((l) => ({ name: l.name, callId: l.callId })), ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
+  }
+
   function keyterms(text: string, callee: string, userName: string, goal = "", lang: "no" | "en" = "no"): string[] {
     // Names and nouns from the task, then the call lexicon. Scribe realtime allows 50.
     const fromTask = `${callee} ${text}`.match(/[A-ZÆØÅ][\wæøåÆØÅ']{2,}|\b[\wæøå]{6,}\b/g) ?? [];
@@ -360,6 +411,13 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (r && m === "POST") return answerTask(r[1]!, req);
     r = path.match(/^\/api\/tasks\/([\w-]+)\/call$/);
     if (r && m === "POST") return startCall(r[1]!, req, server);
+
+    if (path === "/api/compare" && m === "POST") return startCompare(req, server);
+    r = path.match(/^\/api\/compare\/([\w-]+)$/);
+    if (r && m === "GET") {
+      const c = compares.get(r[1]!);
+      return c ? json(stateOf(c)) : err(404, "unknown comparison (kept 30 min, in memory only)");
+    }
 
     r = path.match(/^\/api\/calls\/([\w-]+)\/hangup$/);
     if (r && m === "POST") {
