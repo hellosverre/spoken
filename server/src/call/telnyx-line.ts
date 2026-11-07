@@ -36,6 +36,23 @@ const MUSIC = holdMusic(8);
 
 export function lineForCall(callId: string) { return lines.get(callId); }
 
+/** Telnyx prepaid balance in USD (GET /v2/balance), or null if it can't be read. */
+export async function telnyxBalance(): Promise<number | null> {
+  if (!config.telnyx.apiKey) return null;
+  try {
+    const res = await fetch("https://api.telnyx.com/v2/balance", {
+      headers: { Authorization: `Bearer ${config.telnyx.apiKey}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!res.ok) return null;
+    const j: any = await res.json();
+    const v = Number(j.data?.balance);
+    return Number.isFinite(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 async function telnyx(path: string, body: object): Promise<any> {
   const res = await fetch(`https://api.telnyx.com/v2${path}`, {
     method: "POST",
@@ -57,6 +74,8 @@ export interface TelnyxLineOpts {
   to: string;
   voiceId?: string;
   keyterms: string[];
+  /** Per-call time limit (s), at most MAX_CALL_SEC. Test calls use 60. */
+  maxSec?: number;
   /** Replay harness: no Telnyx dial/hangup; media is fed through attach()/onMedia(). */
   offline?: boolean;
 }
@@ -144,7 +163,7 @@ export class TelnyxLine implements CallLine {
       to: this.o.to,
       from: fromNumber,
       timeout_secs: 40,
-      time_limit_secs: config.maxCallSec,
+      time_limit_secs: Math.min(config.maxCallSec, this.o.maxSec ?? config.maxCallSec),
       webhook_url: `${config.publicUrl}/telnyx/webhook`,
       client_state: Buffer.from(this.o.callId).toString("base64"),
       stream_url: `${wsBase}/telnyx/media?call=${this.o.callId}&t=${this.token}`,

@@ -36,6 +36,8 @@ export const config = {
   // Real calls only go to numbers listed here (comma-separated E.164). Empty = no real calls.
   callAllowlist: env("CALL_ALLOWLIST").split(",").map((s) => s.trim()).filter(Boolean),
   maxCallSec: num("MAX_CALL_SEC", 600),
+  // Telnyx prepaid balance: real calls are refused below this (Sat 7 Nov: top-up failed, ~$2.31 left).
+  minBalanceUsd: num("MIN_BALANCE_USD", 0.3),
   maxCallsPerDay: num("MAX_CALLS_PER_DAY", 20),
   // Mock pacing: 1 = real-time-ish demo, 0.02 = fast tests.
   mockSpeed: num("MOCK_SPEED", 1),
