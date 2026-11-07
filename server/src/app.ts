@@ -397,6 +397,15 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (m === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
     if (path === "/health") return json({ ok: true, callProvider: config.callProvider, llm: llm.name });
+    // Ops only: read a finished call on the box itself (tunnel requests carry cf-connecting-ip and are refused).
+    {
+      const m2 = path.match(/^\/internal\/calls\/([\w-]+)$/);
+      if (m2 && m === "GET") {
+        if (isPublic(req) || !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(server.requestIP(req)?.address ?? "")) return err(404, "not found");
+        const s = calls.get(m2[1]!);
+        return s ? json({ status: s.status, result: s.result, transcript: s.transcript, events: s.events.filter((e: any) => e.type === "debug" || e.type === "note").slice(-200) }) : err(404, "unknown call");
+      }
+    }
 
     // Every /api route except /api/auth/* needs a valid session (Authorization header, or ?token= for
     // websockets). Webhooks and media sockets (/vonage, /telnyx, /elks) keep their own per-call tokens.
