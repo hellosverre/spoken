@@ -55,7 +55,7 @@ export function Profile() {
   const ready = C.ok;
 
   return (
-    <ScrollView contentOffset={{ x: 0, y: 1250 }} style={styles.grow} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+    <ScrollView style={styles.grow} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
       <Text style={styles.h} accessibilityRole="header">
         {m.profileH}
       </Text>
