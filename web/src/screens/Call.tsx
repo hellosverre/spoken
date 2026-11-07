@@ -4,6 +4,7 @@ import { api } from "../api/index.ts";
 import { ApprovalCard } from "../components/call/ApprovalCard.tsx";
 import { CallControls, type Tone } from "../components/call/CallControls.tsx";
 import { CallHeader } from "../components/call/CallHeader.tsx";
+import { VoiceField } from "../components/call/VoiceField.tsx";
 import { Transcript, UNSURE_BELOW } from "../components/call/Transcript.tsx";
 import { Button, Icon } from "../components/ui.tsx";
 import { useT } from "../i18n/useT.ts";
@@ -35,6 +36,10 @@ export function Call({ callId }: { callId: string }) {
   );
 
   const { state, send } = useLiveCall(callId, onEvent);
+  const last = state.lines[state.lines.length - 1];
+  const lastCallee = [...state.lines].reverse().find((l) => l.who === "callee" && l.final);
+  // Who the voice field lights up for: whoever has a line still arriving, or the AI about to speak.
+  const speaking = last && !last.final ? last.who : state.agentTyping ? "agent" : "none";
   const ended = state.status === "ended" || state.status === "failed" || !!state.result;
 
   // Give the last line a moment on screen, then move to the result card.
@@ -75,6 +80,8 @@ export function Call({ callId }: { callId: string }) {
           </p>
         ) : null}
 
+        <VoiceField speaking={speaking} />
+
         <Transcript lines={state.lines} calleeName={plan?.callee.name ?? ""} agentTyping={state.agentTyping} />
 
         {state.lines.some((l) => l.words.some((w) => w.confidence < UNSURE_BELOW)) ? (
@@ -97,6 +104,7 @@ export function Call({ callId }: { callId: string }) {
         {state.approval ? (
           <ApprovalCard
             approval={state.approval}
+            context={lastCallee?.text}
             onChoose={(choice) => send({ type: "approval_response", id: state.approval!.id, choice })}
           />
         ) : null}

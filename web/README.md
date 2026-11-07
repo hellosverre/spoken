@@ -23,14 +23,17 @@ Every type comes from `../shared/contract.ts`. The mock emits the same `LiveEven
 
 ## Where the design goes
 
-All the visual work happens in `src/theme/`. Nothing in `src/screens` or `src/components` sets a colour, font or size.
+All the visual work happens in `src/theme/`. Nothing in `src/screens` or `src/components` sets a colour, font or size. A theme is a token file plus a skin, layered over a shared structure. `src/main.tsx` picks which theme is active.
 
-| File | What to do with it |
+| File | Role |
 |---|---|
-| `src/theme/tokens.css` | **Replace first.** Colour, type, space, radius and motion variables. Dark is the default, plus `[data-theme=light]`, `[data-contrast=high]`, `[data-text=big]` and `[data-motion=reduce]`. |
-| `src/theme/components.css` | **Replace.** Plain layout and state styles for every `sp-*` class. Restyle freely. |
-| `src/theme/base.css` | Keep: reset, focus ring, visually-hidden, skip link, reduced-motion override. |
-| `src/components/ui.tsx` → `ICONS` | Redraw the custom glyphs in place. Keep the names. |
+| `src/theme/base.css` | Keep: reset, focus ring, visually-hidden, skip link, reduced-motion override |
+| `src/theme/plain/components.css` | Shared structure: layout and states for every `sp-*` class, using tokens only |
+| `src/theme/plain/tokens.css` | Neutral baseline tokens (not imported by default) |
+| `src/theme/signal/tokens.css` + `skin.css` | **Active:** direction C "Signal". Monochrome, Sora, dot voice field, and the full-screen inverted approval. |
+| `src/components/ui.tsx` → `ICONS` | Custom glyphs. Redraw them in place and keep the names. |
+
+To apply another design (Sverre's mockup), add `src/theme/<name>/tokens.css` + `skin.css` and point the two imports in `main.tsx` at them. Use `[data-theme=light]`, `[data-contrast=high]`, `[data-text=big]` and `[data-motion=reduce]` on `<html>` for the modes.
 
 The contract between the code and the design is the class names and data attributes:
 

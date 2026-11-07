@@ -4,7 +4,16 @@ import type { Approval } from "../../state/useLiveCall.ts";
 import { Button } from "../ui.tsx";
 
 /** The JA / NEI moment. The AI waits on the line until one is pressed. */
-export function ApprovalCard({ approval, onChoose }: { approval: Approval; onChoose(choice: string): void }) {
+export function ApprovalCard({
+  approval,
+  context,
+  onChoose,
+}: {
+  approval: Approval;
+  /** What the other side just said, so the question has its source next to it. */
+  context?: string;
+  onChoose(choice: string): void;
+}) {
   const { d } = useT();
   const titleId = useId();
   const first = useRef<HTMLButtonElement>(null);
@@ -20,6 +29,11 @@ export function ApprovalCard({ approval, onChoose }: { approval: Approval; onCho
       <h2 id={titleId} className="sp-approval__question">
         {approval.question}
       </h2>
+      {context ? (
+        <blockquote className="sp-approval__context" lang="nb">
+          «{context}»
+        </blockquote>
+      ) : null}
       <p id={`${titleId}-hold`} className="sp-approval__hold">
         {d.call.approvalHold}
       </p>
