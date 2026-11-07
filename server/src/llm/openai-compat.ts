@@ -19,6 +19,19 @@ const ENDPOINTS = {
 
 export type CompatKind = keyof typeof ENDPOINTS;
 
+/**
+ * OpenRouter routing per model (research report, Sat 7 Nov): pin fast providers and set
+ * reasoning explicitly. Haiku 5.5 thinks by default (25.8 s TTFT at high effort) → "none";
+ * Bedrock p50 is 2.5 s → Anthropic/Azure only. gpt-oss and Sonnet 5.5 can't disable
+ * reasoning (mandatory) → "low".
+ */
+export function routing(model: string): { provider: Record<string, unknown>; reasoning: Record<string, unknown> } {
+  if (model.startsWith("anthropic/claude-sonnet")) return { provider: { order: ["anthropic", "azure"], allow_fallbacks: false }, reasoning: { effort: "low" } };
+  if (model.startsWith("anthropic/")) return { provider: { order: ["anthropic", "azure"], allow_fallbacks: false }, reasoning: { effort: "none" } };
+  if (model.startsWith("openai/gpt-oss")) return { provider: { order: ["groq"], allow_fallbacks: true }, reasoning: { effort: "low" } };
+  return { provider: { sort: "latency" }, reasoning: { effort: "none" } };
+}
+
 type Msg = { role: "system" | "user" | "assistant"; content: string };
 
 const SHAREABLE: Shareable[] = ["name", "phone", "address", "email", "birthdate", "fnr", "allergies"];
@@ -32,27 +45,32 @@ export class OpenAiCompatLlm implements LlmProvider {
 
   private reasoningOff: boolean;
 
-  constructor(private kind: CompatKind, private apiKey: string, model?: string, url?: string) {
+  /** Model for clarify/plan/summary (quality over speed); `model` is for in-call turns. */
+  planModel: string;
+
+  constructor(private kind: CompatKind, private apiKey: string, model?: string, url?: string, planModel?: string) {
     this.name = kind;
     this.url = url || process.env.LLM_BASE_URL || ENDPOINTS[kind].url;
     this.model = model || ENDPOINTS[kind].model;
     // Phone turns need the first token fast: no thinking. Dropped on retry if a model rejects it.
     this.reasoningOff = kind === "openrouter";
+    this.planModel = planModel || this.model;
   }
 
-  private async post(body: object, signal: AbortSignal): Promise<Response> {
+  private async post(body: object, signal: AbortSignal, model = this.model): Promise<Response> {
     const headers: Record<string, string> = { "Content-Type": "application/json", Authorization: `Bearer ${this.apiKey}` };
     const extra: Record<string, unknown> = {};
     if (this.kind === "openrouter") {
       headers["HTTP-Referer"] = "https://spoken-api.hellosverre.com";
       headers["X-OpenRouter-Title"] = "Spoken";
-      extra.provider = { sort: "latency" };
-      if (this.reasoningOff) extra.reasoning = { effort: "none" };
+      const r = routing(model);
+      extra.provider = r.provider;
+      if (this.reasoningOff) extra.reasoning = r.reasoning;
     }
     const send = () => fetch(this.url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model: this.model, ...extra, ...body }),
+      body: JSON.stringify({ model, ...extra, ...body }),
       signal,
     });
     let res = await send();
@@ -73,10 +91,10 @@ export class OpenAiCompatLlm implements LlmProvider {
     const res = await this.post({
       messages: [{ role: "user", content: prompt }],
       response_format: { type: "json_object" },
-    }, AbortSignal.timeout(timeoutMs));
+    }, AbortSignal.timeout(timeoutMs), this.planModel);
     const data: any = await res.json();
     const u = toUsage(data.usage);
-    if (u) { onUsage?.(u); logUsage(this.model, "json", u); }
+    if (u) { onUsage?.(u); logUsage(this.planModel, "json", u); }
     // Some models wrap JSON in ``` fences or add a sentence; take the outermost object.
     const content = String(data.choices?.[0]?.message?.content ?? "{}");
     const a = content.indexOf("{"), b = content.lastIndexOf("}");

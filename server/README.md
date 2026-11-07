@@ -106,6 +106,27 @@ STT heard: «Der går det bra», «Okay», «Med røret ett», «Så har vi grup
 | meta-llama/llama-4-maverick | 464 ms | 674 ms | 3 issues | dropped the time |
 | openai/gpt-4.1-mini | 724 ms | 880 ms | all ok | asks [[ASK]] too early |
 
+## Model bench #2 (Sat 7 Nov evening, OpenRouter, after the research report)
+
+Routing per model in `routing()` (`src/llm/openai-compat.ts`): Haiku 5.5 reasoning **none**, providers Anthropic → Azure only (no Bedrock, p50 2.5 s); gpt-oss on Groq (reasoning can't be off → low); Sonnet 5.5 reasoning low (mandatory); others sort by latency, reasoning none. Planning model is separate: `LLM_PLAN_MODEL` (clarify/plan/summary), `LLM_MODEL` for in-call turns. Both default to Haiku 5.5.
+
+**In-call turns** (`bun scripts/llm-bench.ts 3 …`, 3 turns × 3 runs, medians):
+
+| Model | TTFT | 1st sentence | Checks | Norwegian / behaviour | $/M in/out |
+|---|---|---|---|---|---|
+| **anthropic/claude-haiku-5.5 (default)** | 594 ms | 906 ms | ok | best cards: item + time + price | 0.10/0.50 |
+| mistralai/mistral-small-2603 (Small 4) | 531 ms | 600 ms | ok | terse; card «Godtar du prisen på 189 kroner?» lacks item/time | 0.15/0.60 |
+| openai/gpt-oss-120b (Groq) | **132 ms** | 181 ms | ok* | *asks the user instead of stating the errand; copies the END template literally. Not usable without prompt work | 0.15/0.60 |
+| deepseek/deepseek-v4.1-flash | 482 ms | 723 ms | ok | good Norwegian, good card; hosts include unknown/Chinese providers (privacy) | 0.05/0.57 |
+
+**Planning** (`bun scripts/plan-bench.ts`, clarify + plan on pizza / fastlege / SATS):
+
+| Model | clarify + plan (median) | Quality |
+|---|---|---|
+| **anthropic/claude-haiku-5.5 (default)** | 3.6 s | 3–4 clear questions, confirm last, minimal sharing (name), sensible approvals |
+| anthropic/claude-sonnet-5.5 | 8.5 s | most thorough, but 3-in-1 questions (too long for a phone screen), offers fnr as a quick option, very long goals; 20× the price |
+| deepseek/deepseek-v4.1-flash | 3.7 s | short good questions, but asked for the name the profile already has and shared nothing (not even name) |
+
 ## Calls #6 and #7 (Sat 7 Nov, Creator key, Haiku 5.5)
 
 | | #6 | #7 |
