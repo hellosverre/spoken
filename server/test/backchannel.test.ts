@@ -48,14 +48,21 @@ describe("backchannel", () => {
     await s.finish("test");
   });
 
-  test("slow replies: at most once every 3 turns, and varied", async () => {
+  test("replies slower than 1.2 s: one backchannel per call", async () => {
     const { line, s } = await session(llm(1500));
-    for (let i = 0; i < 4; i++) { line.ev.calleeFinal(`c${i}`, `Greit, notert nummer ${i}.`); await Bun.sleep(1700); }
+    for (let i = 0; i < 4; i++) { line.ev.calleeFinal(`c${i}`, `Greit, notert nummer ${i}.`); await Bun.sleep(1900); }
+    expect(line.spoken.filter((t) => BACK.includes(t)).length).toBe(1);
+    await s.finish("test");
+  }, 15_000);
+
+  test("replies slower than 2 s: again, but at most every 3rd turn and varied", async () => {
+    const { line, s } = await session(llm(2300));
+    for (let i = 0; i < 4; i++) { line.ev.calleeFinal(`c${i}`, `Greit, notert nummer ${i}.`); await Bun.sleep(2600); }
     const backs = line.spoken.filter((t) => BACK.includes(t));
     expect(backs.length).toBe(2); // turn 1 and turn 4
     expect(backs[0]).not.toBe(backs[1]);
     await s.finish("test");
-  }, 15_000);
+  }, 20_000);
 
   test("never after a question from the callee", async () => {
     const { line, s } = await session(llm(1500));

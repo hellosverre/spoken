@@ -114,7 +114,7 @@ describe("session safety", () => {
     await tick(60);
     expect(line.spoken.some((t) => /bestiller/.test(t))).toBe(false);
     expect(evs.some((e) => e.type === "approval_request")).toBe(true);
-    expect(line.spoken).toContain("Et øyeblikk…");
+    expect(line.spoken).toContain("Et lite øyeblikk, jeg sjekker med Sverre.");
     await s.finish("test");
   });
 

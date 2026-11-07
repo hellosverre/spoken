@@ -8,13 +8,14 @@ import { config } from "../config.ts";
 import { mockSummary } from "../llm/mock.ts";
 import type { AgentContext, HistoryItem, LlmProvider, Tone, Usage } from "../llm/types.ts";
 import {
-  ADDRESS_REFUSAL, CARD_REFUSAL, FNR_REFUSAL, detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment,
+  ADDRESS_REFUSAL, CARD_REFUSAL, FNR_REFUSAL, detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim,
 } from "../safety.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLine, LineMetric } from "./line.ts";
 import { timeHint, timesIn } from "../time.ts";
 import { HoldFlow } from "./hold.ts";
+import { endsSentence, errandParts, isEcho, isMeta, parseErrand, shortenErrand, type Errand } from "./style.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 
 export const WAIT_PHRASE = "Et øyeblikk…";
@@ -45,13 +46,19 @@ interface TurnTiming {
 // Agent lines that mean "I didn't get that". Two turns of these in a row → change strategy.
 const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (deg )?ikke|linja er (litt )?dårlig|unnskyld,? hva sa du)/i;
 // Short fillers for when a reply is slow (> FILLER_AFTER_MS). Rotated, never the same twice in a row.
-const FILLERS = ["Mm, et øyeblikk.", "Ja, la meg se.", "Et lite øyeblikk."];
+// Never «Et øyeblikk» again and again (call #8): short, different, at most 2 per call.
+const FILLERS = ["La meg se.", "Ett sekund."];
+const MAX_FILLERS = 2;
+// Extras the plan didn't cover: the user decides, not the agent (call #8: «Ingen drikke»).
+const EXTRAS_Q = /\b(drikke|brus|cola|tillegg|ekstra|dressing|saus|dip|bunn|størrelse|dessert|salat|hvitløk|ost|topping|glutenfri|levering)\b/i;
 const FILLER_AFTER_MS = 2500;
 // Instant cached backchannel when content is not ready this long after the callee's commit.
 // Backchannel only when the reply is clearly slow, at most once every 3 turns, never after a
 // question (Sverre, call #5: «mm» after everything sounded robotic).
 const BACKCHANNELS = ["Ja.", "Okei.", "Skjønner."];
+// First backchannel of a call if the reply isn't ready at 1.2 s; later ones only past 2 s.
 const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 1200);
+const BACKCHANNEL_LATER_MS = 2000;
 const BACKCHANNEL_EVERY = 3;
 // Don't start talking until the callee has been quiet this long (call #5: half-sentences from
 // turns that were cancelled because the callee was still talking).
@@ -102,6 +109,15 @@ interface Spec {
   done: boolean;
   error?: unknown;
   wake?: () => void;
+}
+
+/** Word-overlap similarity 0..1 of two normalised strings. */
+function similar(a: string, b: string): number {
+  const A = new Set(a.split(" ").filter((w) => w.length > 2)), B = new Set(b.split(" ").filter((w) => w.length > 2));
+  if (!A.size || !B.size) return 0;
+  let n = 0;
+  for (const w of A) if (B.has(w)) n++;
+  return n / Math.min(A.size, B.size);
 }
 
 const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
@@ -179,6 +195,15 @@ export class CallSession {
   private turnNo = 0;
   private rephrased = false;
   private turnSpoke = false; // the running turn has started speaking
+  private errand: Errand;
+  private errandStated = false;
+  private backchannels = 0;
+  private fillers = 0;
+  private waitLines = 0; // how many approval-wait lines were said this call
+  private lastApprovalAt = 0;
+  private answered: { q: string; choice: string }[] = []; // approval questions the user answered
+  private approvedCommit = false;
+  private confirmedByCallee = false;
   private goalAsks = 0; // agent questions about the goal since the last progress
   private lastProgressAt = 0;
   private messages = new Map<string, string>(); // callee segment id → message for the user
@@ -204,6 +229,7 @@ export class CallSession {
   constructor(private init: SessionInit) {
     this.callId = init.callId;
     this.taskId = init.taskId;
+    this.errand = parseErrand(init.plan.goal, init.profile.name);
     this.hold = new HoldFlow({
       userName: init.profile.name,
       say: (t) => this.say(t, "filler"),
@@ -355,14 +381,22 @@ export class CallSession {
     if (this.speaking) this.onCalleeSpeech();
 
     if (this.pending) {
-      if (this.hold.onCallee(clean)) return;
-      // Keep the line warm while the user decides; say it once so they know we're there.
-      if (!this.waitingNoticeSaid) {
-        this.waitingNoticeSaid = true;
-        void this.say(`Et øyeblikk, jeg sjekker med ${this.init.profile.name || "brukeren"}.`, "filler").then(() => {
-          if (this.pending) this.init.line.startWaitingSound();
-        });
-      }
+      // We already said one wait line; stay quiet until the user answers or the hold flow (30 s) takes over.
+      this.hold.onCallee(clean);
+      return;
+    }
+
+    // After the user approved the deal, a clear yes from the callee is what makes the result «done».
+    if (this.approvedCommit && !/\?|\b(ikke|nei|feil|galt|stemmer ikke)\b/i.test(clean) &&
+        /\b(ja|jo|greit|fint|supert|perfekt|flott|notert|klar|i orden|det går|skal bli|ordner)\b/i.test(clean)) {
+      this.confirmedByCallee = true;
+    }
+
+    // Questions about extras the plan doesn't cover → ask the user (Nei / Ja / write), don't decide.
+    const extra = clean.match(EXTRAS_Q)?.[1];
+    if (extra && /\?|^(hva|vil|skal|ønsker|trenger)\b/i.test(clean) && !new RegExp(extra, "i").test(this.init.plan.goal)) {
+      this.debug("extras_to_user", { text: clean });
+      void this.requestApproval(`${this.init.plan.callee.name || "De"} spør: «${clean.replace(/\s*⟨.*?⟩/g, "")}»`, ["Nei", "Ja", "Skriv svar"], "choice");
       return;
     }
 
@@ -589,6 +623,7 @@ export class CallSession {
     const answeringCallee = lastCallee?.role === "callee";
     const askedQuestion = !!lastCallee && /\?\s*(⟨.*⟩)?$/.test(lastCallee.text);
     const mayBackchannel = answeringCallee && !askedQuestion && turnNo - this.lastBackchannelTurn >= BACKCHANNEL_EVERY;
+    const backAfter = this.backchannels === 0 ? BACKCHANNEL_MS : BACKCHANNEL_LATER_MS;
     // A short cached «Ja.» / «Okei.» / «Skjønner.» only if real content still isn't ready at 1.2 s.
     const backTimer = mayBackchannel ? setTimeout(() => {
       if (spokeAnything || stop || abort.signal.aborted || this.ended || this.pending) return;
@@ -596,12 +631,14 @@ export class CallSession {
       backchannel = options[turnNo % options.length]!;
       this.lastBackchannel = backchannel;
       this.lastBackchannelTurn = turnNo;
+      this.backchannels++;
       this.debug("backchannel", { text: backchannel });
       void this.say(backchannel, "filler");
-    }, Math.max(0, BACKCHANNEL_MS - (Date.now() - t0))) : undefined;
+    }, Math.max(0, backAfter - (Date.now() - t0))) : undefined;
     // Only fill silence when the reply is genuinely slow.
     const fillerTimer = setTimeout(() => {
-      if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending) return;
+      if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending || this.fillers >= MAX_FILLERS) return;
+      this.fillers++;
       const f = FILLERS.find((x) => x !== this.lastFiller) ?? FILLERS[0]!;
       this.lastFiller = f;
       this.debug("filler", { text: f, afterMs: FILLER_AFTER_MS });
@@ -609,6 +646,9 @@ export class CallSession {
     }, FILLER_AFTER_MS);
 
     let waited = false;
+    let sentences = 0;
+    let rawText = "";
+    let speechCapped = false; // one sentence per turn; two when answering a direct question
     this.turnSpoke = false;
     const handle = async (s: Segment) => {
       if (stop || abort.signal.aborted) return;
@@ -624,6 +664,18 @@ export class CallSession {
           const w = backchannel.replace(/[.,]$/, "");
           const stripped = s.text.replace(new RegExp(`^${w}[,!.]?\\s+`, "i"), "");
           if (stripped !== s.text && stripped.trim()) s = { ...s, text: stripped.charAt(0).toUpperCase() + stripped.slice(1) };
+        }
+        // Style rules (call #8): no meta talk, no echoing the callee, no «done» claims before the
+        // callee confirmed, the full order only once, and short turns.
+        const lastCalleeText = [...this.history].reverse().find((h) => h.role === "callee")?.text.replace(/\s*⟨.*?⟩/g, "") ?? "";
+        if (isMeta(s.text) || isEcho(s.text, lastCalleeText)) { this.debug("style_dropped", { text: s.text }); return; }
+        if (isDoneClaim(s.text) && !this.confirmedByCallee) { this.debug("done_claim_dropped", { text: s.text }); return; }
+        if (speechCapped) { this.debug("turn_capped", { text: s.text }); return; }
+        if (this.errandStated && errandParts(s.text, this.errand) >= 2) {
+          const short = shortenErrand(s.text, this.errand, lastCalleeText);
+          this.debug("errand_shortened", { original: s.text, short });
+          if (!short || short.split(/\s+/).length < 2) return;
+          s = { ...s, text: short };
         }
         const deintro = this.withoutReintro(s.text);
         if (deintro !== s.text) {
@@ -685,6 +737,9 @@ export class CallSession {
         if (firstAudio && this.timing && !this.timing.awaitAudio) { this.timing.awaitTts = true; this.timing.awaitAudio = true; }
         if (firstAudio) { firstAudio = false; this.latencies.push(Date.now() - t0); }
         said.push(s.text);
+        if (errandParts(s.text, this.errand) >= 2) this.errandStated = true;
+        // «Flott!» / «Ja.» don't count as the turn's sentence.
+        if (endsSentence(s.text) && s.text.split(/\s+/).length >= 3 && ++sentences >= (askedQuestion ? 2 : 1)) speechCapped = true;
         if (GOODBYE.test(s.text)) saidBye = true;
         const r = await this.say(s.text, "say", false, abort.signal);
         if (r.interrupted) stop = true;
@@ -695,6 +750,18 @@ export class CallSession {
         // The model asking again right after the user answered, with nothing new from the
         // callee in between, would loop the JA card. Treat it as already answered.
         const calleeSince = this.history.slice(Math.max(0, this.answeredAtHistory)).some((h) => h.role === "callee");
+        // Same question as one the user already answered (call #8 asked «274 kroner?» 5×): reuse the answer.
+        const askQ = norm(s.question);
+        const prior = this.answered.find((a) => similar(a.q, askQ) >= 0.6);
+        if (prior) {
+          this.debug("suppressed_reask_similar", { question: s.question, prior: prior.choice });
+          if (/^(ja|yes|ok|godta)/i.test(prior.choice)) this.approvalCredit = 1;
+          if (this.reasked++ < 1) {
+            this.wantTurn = true;
+            this.history.push({ role: "user", text: `[instruks] ${this.init.profile.name || "Brukeren"} har allerede svart «${prior.choice}» på dette. Ikke spør igjen; svar mottakeren kort nå.` });
+          }
+          return;
+        }
         if (this.answeredAtHistory >= 0 && !calleeSince) {
           this.debug("suppressed_reask", { question: s.question });
           if (this.reasked++ < 1) { this.wantTurn = true; this.history.push({ role: "user", text: "[instruks] Du har allerede fått svar på dette. Gi beskjed til mottakeren nå." }); }
@@ -718,9 +785,11 @@ export class CallSession {
       for await (const tok of source) {
         if (abort.signal.aborted || stop) break;
         if (timing && timing.llmMs === null && tok.trim()) timing.llmMs = Date.now() - llmStart;
+        rawText += tok;
         for (const s of seg.push(tok)) await handle(s);
       }
       if (!abort.signal.aborted && !stop) for (const s of seg.end()) await handle(s);
+      this.debug("llm_text", { text: rawText });
     } catch (e) {
       if (!abort.signal.aborted) {
         console.error("[session] LLM failed:", (e as Error).message);
@@ -763,7 +832,7 @@ export class CallSession {
       return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
     }
     // Don't re-introduce ourselves (the callee complained on call #5); once per call.
-    const rephrase = `Kort sagt: jeg vil gjerne ${this.init.plan.goal}. Går det, ja eller nei?`;
+    const rephrase = "Går det, ja eller nei?";
     if (this.confusedRun === 2 || dup) {
       if (this.rephrased || this.recentTurns.some((t) => t.has(norm(rephrase)))) {
         return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
@@ -946,6 +1015,7 @@ export class CallSession {
     const since = Date.now();
     this.silenceTimer = setTimeout(() => {
       if (this.ended || this.pending || this.speaking || this.turnRunning || this.lastCalleeAt > since) return;
+      if (Date.now() - this.lastApprovalAt < 30_000) { this.armSilenceNudge(); return; } // we are the ones waiting
       // Only after real silence: no voice energy for 8 s (call #5 nudged while the callee talked).
       const quiet = this.init.line.silenceMs?.() ?? Infinity;
       if (quiet < 8000 || this.lastPartialAt > since) { this.armSilenceNudge(); return; }
@@ -956,21 +1026,33 @@ export class CallSession {
     }, 8000);
   }
 
-  private async requestApproval(question: string, options: string[], kind: PendingApproval["kind"], spoken = WAIT_PHRASE) {
+  private async requestApproval(question: string, options: string[], kind: PendingApproval["kind"], spoken?: string) {
     if (this.pending || this.ended) return;
+    // One natural wait line per call, a shorter one the second time, then silence (+ typing sound).
+    const name = this.init.profile.name || "brukeren";
+    if (spoken === undefined) {
+      spoken = [`Et lite øyeblikk, jeg sjekker med ${name}.`, `Jeg sjekker det med ${name}.`][this.waitLines] ?? "";
+      this.waitLines++;
+    }
+    this.lastApprovalAt = Date.now();
     const id = nid("ap");
     this.pending = { id, question, options, kind };
     this.progress();
     this.waitingNoticeSaid = false;
     this.emit({ type: "approval_request", id, question, options, at: Date.now() });
     this.hold.arm(); // 30 s: ask the callee to hold; 2 min: offer a callback
-    await this.say(spoken, "filler");
+    if (spoken) await this.say(spoken, "filler");
     if (this.pending?.id === id) this.init.line.startWaitingSound();
   }
 
   private answer(id: string, choice: string) {
     const p = this.pending;
     if (!p || p.id !== id) return;
+    if (/^skriv( svar)?$/i.test(choice.trim())) {
+      this.note("Skriv svaret ditt i meldingsfeltet, så sier jeg det videre.");
+      return; // card stays open; the next instruction is the answer
+    }
+    this.answered.push({ q: norm(p.question), choice });
     clearTimeout(p.timer);
     this.pending = undefined;
     this.init.line.stopWaitingSound();
@@ -982,12 +1064,13 @@ export class CallSession {
       if (yes) this.init.plan.willShare.push("address");
       this.history.push({ role: "user", text: yes ? "[godkjent] Du kan oppgi adressen: {{ADDRESS}}" : "[avslått] Ikke oppgi adressen." });
     } else if (p.kind === "stuck") {
-      if (/godta/i.test(choice)) this.approvalCredit = 1;
+      if (/godta/i.test(choice)) { this.approvalCredit = 1; this.approvedCommit = true; }
       this.history.push({ role: "user", text: /godta/i.test(choice)
         ? `[godkjent] Brukeren godtar det butikken tilbyr (${p.question}). Bekreft det kort.`
         : `[svar] ${choice}. Ikke gjenta det samme spørsmålet; prøv en annen løsning eller avslutt høflig.` });
     } else if (yes) {
       this.approvalCredit = 1;
+      if (p.kind === "commit") this.approvedCommit = true;
       this.history.push({ role: "user", text: `[godkjent] ${p.question}` });
     } else if (no) {
       this.history.push({ role: "user", text: `[avslått] ${p.question}` });
@@ -1015,6 +1098,7 @@ export class CallSession {
       case "instruction": {
         const text = cmd.text.trim().slice(0, 500);
         if (!text) return;
+        if (this.pending?.kind === "choice") { this.answer(this.pending.id, text); break; }
         this.history.push({ role: "user", text: `[instruks] ${text}` });
         this.progress();
         this.note(`Instruks sendt: ${text}`);
@@ -1079,10 +1163,18 @@ export class CallSession {
     }
     const tagIn = tag ?? this.endTag;
     let outcome: Outcome = tagIn?.outcome ?? s.outcome;
+    let honestSummary: string | undefined;
+    // «done» needs an approved deal AND a clear yes from the callee afterwards (call #8 claimed done
+    // after «Begge to» and a confused 240/274 kr).
+    if (outcome === "done" && !(this.approvedCommit && this.confirmedByCallee)) {
+      outcome = "partial";
+      honestSummary = this.approvedCommit ? "Uklart om de bekreftet bestillingen." : "Ikke bekreftet: ingen godkjent avtale.";
+      this.debug("done_downgraded", { approvedCommit: this.approvedCommit, confirmedByCallee: this.confirmedByCallee });
+    }
     if (!this.connectedAt) outcome = this.status === "failed" ? "failed" : "no_answer";
     const summary = !this.connectedAt
       ? (outcome === "no_answer" ? "Ingen svarte." : "Samtalen kunne ikke kobles opp.")
-      : tag ? tag.summary : (s.summary || tagIn?.summary || "Samtalen er ferdig.");
+      : honestSummary ? `${honestSummary} ${s.summary || ""}`.trim() : tag ? tag.summary : (s.summary || tagIn?.summary || "Samtalen er ferdig.");
     this.result = {
       callId: this.callId,
       taskId: this.taskId,
