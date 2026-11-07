@@ -41,16 +41,35 @@ page.on("websocket", (ws) => sockets.push(new URL(ws.url()).pathname));
 const step = (s) => console.log(`- ${s}`);
 
 const home = page.locator("#home");
-const composer = home.locator("textarea");
+const composer = home.locator("#pane-chat textarea, textarea").first();
+
+/** Login (demo/demo) if shown, skip the intro if shown, open the Chat tab. */
+async function enterApp() {
+  for (let i = 0; i < 60; i++) {
+    if (await page.locator("#login.on").count()) {
+      const login = page.locator("#login.on");
+      await login.locator("input").nth(0).fill("demo");
+      await login.locator("input").nth(1).fill("demo");
+      await login.locator("button[type=submit]").click();
+    } else if (await page.locator("#intro.on").count()) {
+      await page.locator("#intro.on").click().catch(() => {});
+    } else if (await page.locator("#tab-chat").isVisible().catch(() => false)) {
+      await page.locator("#tab-chat").click();
+      await composer.waitFor();
+      return;
+    }
+    await page.waitForTimeout(300);
+  }
+  throw new Error("could not get past intro/login to the Chat tab");
+}
 const botTexts = async () => (await home.locator(".bubble.bot").allInnerTexts()).filter((t) => t.trim());
 const stable = async () => { const a = await botTexts(); await page.waitForTimeout(400); const b = await botTexts(); return JSON.stringify(a) === JSON.stringify(b) ? b : null; };
 
 let ok = false;
 try {
   await page.goto(`http://localhost:${PORT}/`);
-  await page.locator("#intro").click();
-  await composer.waitFor();
-  step("app loaded, intro skipped");
+  await enterApp();
+  step("app loaded: logged in (demo), Chat tab open");
   await composer.fill("Bestill en stor pepperoni fra Domino's Storo til 18:00");
   await composer.press("Enter");
   step("task sent from the chat");
@@ -88,8 +107,7 @@ try {
   step(`${lines} transcript lines shown`);
   // The scripted demo stays available as the fallback: D plays the pizza call hands-free.
   await page.goto(`http://localhost:${PORT}/`);
-  await page.locator("#intro").click();
-  await composer.waitFor();
+  await enterApp();
   await page.locator("body").click({ position: { x: 5, y: 5 } });
   await page.keyboard.press("d");
   await page.locator(".sheet.open [data-back]").waitFor({ timeout: 60000 });

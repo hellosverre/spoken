@@ -14,7 +14,8 @@ import { lookup } from "./directory.ts";
 import { createLlm } from "./llm/index.ts";
 import type { LlmProvider, TaskForLlm } from "./llm/types.ts";
 import { EMERGENCY_ALTERNATIVE, checkGoal, checkNumber, disclosureLine, ensureDisclosure } from "./safety.ts";
-import { calls, profile, purge, setProfile, takeCallSlot, tasks } from "./store.ts";
+import { calls, profile as defaultProfile, purge, setProfile, takeCallSlot, tasks } from "./store.ts";
+import { FallbackDb, isDeviceId, type Db } from "./db.ts";
 import { designVoice, listVoices } from "./voice/voices.ts";
 
 // Words that come up on service calls in Norwegian; boosted in Scribe on every call.
@@ -31,7 +32,7 @@ type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "me
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User, X-Spoken-Passcode",
+  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User, X-Spoken-Passcode, X-Spoken-Device",
 };
 
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: CORS });
@@ -47,8 +48,14 @@ function userKey(req: Request, server: Server<WsData>): string {
   return req.headers.get("x-spoken-user") || req.headers.get("cf-connecting-ip") || server.requestIP(req)?.address || "local";
 }
 
-function taskForLlm(input: TaskInput): TaskForLlm {
+function taskForLlm(input: TaskInput, profile: Profile): TaskForLlm {
   return { text: input.text, lang: input.lang, phone: input.phone, profile };
+}
+
+/** The app's device id (header, or ?device= for GET /api/calls). */
+function deviceOf(req: Request): string | undefined {
+  const d = req.headers.get("x-spoken-device") ?? new URL(req.url).searchParams.get("device");
+  return isDeviceId(d) ? d.toLowerCase() : undefined;
 }
 
 function validTask(b: any): TaskInput | string {
@@ -77,7 +84,13 @@ function validProfile(b: any): Profile | string {
   };
 }
 
-export function createApp(llm: LlmProvider = createLlm()) {
+export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackDb(null)) {
+  /** The device's saved profile, or the default one (demo without a device id). */
+  async function profileFor(device?: string): Promise<Profile> {
+    if (!device) return defaultProfile;
+    return (await db.getProfile(device)) ?? { ...defaultProfile, name: "" };
+  }
+
   void llm.warm?.(); // open the LLM connection before the first call
   setInterval(() => purge(), 60_000).unref?.();
 
@@ -85,6 +98,8 @@ export function createApp(llm: LlmProvider = createLlm()) {
     const v = validTask(await body(req));
     if (typeof v === "string") return err(400, v);
     const taskId = id("t");
+    const device = deviceOf(req);
+    const profile = await profileFor(device);
     const goal = checkGoal(v.text);
     const num = v.phone ? checkNumber(v.phone) : null;
     let clarify: Clarify;
@@ -94,11 +109,11 @@ export function createApp(llm: LlmProvider = createLlm()) {
     if (blocked) {
       clarify = { taskId, summary: blocked.reason, questions: [] };
     } else {
-      const c = await llm.clarify(taskForLlm(v));
+      const c = await llm.clarify(taskForLlm(v, profile));
       clarify = { taskId, summary: c.summary, questions: c.questions };
     }
     if (blocked?.reason.startsWith("Nødnummer")) blocked.alternative = EMERGENCY_ALTERNATIVE;
-    tasks.set(taskId, { id: taskId, input: v, clarify, blocked, createdAt: Date.now() });
+    tasks.set(taskId, { id: taskId, input: v, clarify, blocked, createdAt: Date.now(), device, profile });
     return json(clarify);
   }
 
@@ -111,15 +126,19 @@ export function createApp(llm: LlmProvider = createLlm()) {
       for (const [k, val] of Object.entries(b.answers)) if (typeof val === "string") answers[k.slice(0, 40)] = val.slice(0, 300);
     }
     t.answers = answers;
+    const profile = t.profile;
     const voiceId = profile.voiceId || config.elevenlabs.defaultVoice;
     const opening = ensureDisclosure("", profile.name);
     if (t.blocked) {
       t.plan = { taskId, callee: { name: "", phone: "", source: "user" }, goal: t.input.text, opening, willShare: [], needsApprovalFor: [], voiceId, blocked: t.blocked };
       return json(t.plan);
     }
-    const p = await llm.plan(taskForLlm(t.input), answers);
-    const rawPhone = t.input.phone || answers.phone || p.phone || lookup(t.input.text)?.phone;
-    const source: Plan["callee"]["source"] = t.input.phone || answers.phone ? "user" : lookup(t.input.text) ? "lookup" : "user";
+    const p = await llm.plan(taskForLlm(t.input, profile), answers);
+    // A saved contact (TaskInput.contactId) gives the number and the name.
+    const contact = t.device && t.input.contactId ? (await db.listContacts(t.device)).find((c) => c.id === t.input.contactId) : undefined;
+    if (contact) p.calleeName = contact.name;
+    const rawPhone = contact?.phone || t.input.phone || answers.phone || p.phone || lookup(t.input.text)?.phone;
+    const source: Plan["callee"]["source"] = contact ? "contact" : t.input.phone || answers.phone ? "user" : lookup(t.input.text) ? "lookup" : "user";
     let blocked: Plan["blocked"];
     let phone = "";
     if (!rawPhone) blocked = { reason: "Fant ikke nummeret. Skriv inn nummeret du vil at jeg skal ringe." };
@@ -172,21 +191,30 @@ export function createApp(llm: LlmProvider = createLlm()) {
     const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
     const line = real
-      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name), maxSec })
+      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name), maxSec })
       : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed);
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
     const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
-    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...profile }, line, llm: callLlm, secrets: { fnr }, maxSec });
+    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile }, line, llm: callLlm, secrets: { fnr }, maxSec });
+    // History: the call's summary (never the transcript) is saved for the device when it ends.
+    if (t.device) {
+      const device = t.device, calleeName = t.plan.callee.name;
+      const unsub = session.subscribe((ev) => {
+        if (ev.type !== "result") return;
+        unsub();
+        void db.saveResult(device, ev.result, calleeName).catch((e) => console.warn("[db] saveResult:", (e as Error).message));
+      });
+    }
     calls.set(callId, session);
     void session.start();
     const mode = config.callProvider === "telnyx" && real ? "real" : "mock";
     return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
 
-  function keyterms(text: string, callee: string): string[] {
+  function keyterms(text: string, callee: string, userName: string): string[] {
     // Names and nouns from the task, then the call lexicon. Scribe realtime allows 50.
     const fromTask = `${callee} ${text}`.match(/[A-ZÆØÅ][\wæøåÆØÅ']{2,}|\b[\wæøå]{6,}\b/g) ?? [];
-    return [...new Set(["KI-assistent", profile.name, ...fromTask.map((w) => w.trim()), ...CALL_LEXICON].filter(Boolean))].slice(0, 50);
+    return [...new Set(["KI-assistent", userName, ...fromTask.map((w) => w.trim()), ...CALL_LEXICON].filter(Boolean))].slice(0, 50);
   }
 
   async function route(req: Request, server: Server<WsData>): Promise<Response | undefined> {
@@ -246,11 +274,16 @@ export function createApp(llm: LlmProvider = createLlm()) {
       return json(await designVoice(b.description));
     }
 
-    if (path === "/api/profile" && m === "GET") return json(profile);
+    if (path === "/api/profile" && m === "GET") {
+      const device = deviceOf(req);
+      return json(device ? await profileFor(device) : defaultProfile);
+    }
     if (path === "/api/profile" && m === "PUT") {
       const v = validProfile(await body(req));
       if (typeof v === "string") return err(400, v);
-      setProfile(v);
+      const device = deviceOf(req);
+      if (device) await db.putProfile(device, v);
+      else setProfile(v);
       return json(v);
     }
 
@@ -260,7 +293,30 @@ export function createApp(llm: LlmProvider = createLlm()) {
       const page = await webFile(path);
       if (page) return page;
     }
-    if (path === "/") return json({ name: "spoken-server", disclosure: disclosureLine(profile.name) });
+    // Contacts and call history are per device.
+    if (path === "/api/contacts" || path.startsWith("/api/contacts/") || (path === "/api/calls" && m === "GET")) {
+      const device = deviceOf(req);
+      if (!device) return err(400, "X-Spoken-Device header (a UUID) is required");
+      if (path === "/api/calls") {
+        const limit = Math.max(1, Math.min(100, Number(url.searchParams.get("limit") ?? 20) || 20));
+        return json(await db.listResults(device, limit));
+      }
+      if (path === "/api/contacts" && m === "GET") return json(await db.listContacts(device));
+      if (path === "/api/contacts" && m === "POST") {
+        const b = await body(req);
+        const name = typeof b?.name === "string" ? b.name.trim().slice(0, 80) : "";
+        if (!name) return err(400, "name is required");
+        const n = checkNumber(typeof b?.phone === "string" ? b.phone : "");
+        if (!n.ok) return err(400, n.reason);
+        const kind = b?.kind === "person" ? "person" : "business";
+        return json(await db.addContact(device, { name, phone: n.e164, kind }), 201);
+      }
+      const del = path.match(/^\/api\/contacts\/([\w-]+)$/);
+      if (del && m === "DELETE") return (await db.deleteContact(device, del[1]!)) ? json({ ok: true }) : err(404, "unknown contact");
+      return err(405, "method not allowed");
+    }
+
+    if (path === "/") return json({ name: "spoken-server", disclosure: disclosureLine(defaultProfile.name) });
     return err(404, "not found");
   }
 

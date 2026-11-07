@@ -37,6 +37,25 @@ Offline TTS → Scribe check, no phone call (about 200 TTS chars the first time,
 BAS_SECRET_TOKEN=… /home/sverre/Projects/bas/ops/bas-secret run -- bun scripts/loopback.ts
 ```
 
+## Persistence (Supabase)
+
+Profile, contacts and call **summaries** per device, never transcripts or audio (`db/schema.sql`,
+project `txyzvjmfdnrhrprzjmdc`). At startup the server fetches the project URL and service-role
+key from the Management API (`SUPABASE_ACCESS_TOKEN`) and keeps the key in memory only. If that
+fails, or Supabase is down mid-demo, everything falls back to memory (`src/db.ts`, one warning per outage).
+
+The app sends `X-Spoken-Device: <uuid>` (made once, localStorage `spoken-device`).
+
+| Route | Body → response |
+|---|---|
+| `GET/PUT /api/profile` | `Profile` per device (no header = the shared default profile) |
+| `GET /api/contacts` | → `Contact[]` |
+| `POST /api/contacts` | `{name, phone, kind?}` → `Contact` (201; number validated, emergency numbers refused) |
+| `DELETE /api/contacts/:id` | → `{ok}` |
+| `GET /api/calls?limit=20` | → `CallSummary[]` (newest first; `?device=` works too) |
+
+A task with `contactId` calls that saved contact. Every finished call is saved as a summary.
+
 ## Web app on the real server
 
 Sverre's Next.js app (`web/`) is exported statically and served by this server at `/`, so the page,

@@ -11,6 +11,10 @@ export interface Task {
   answers?: Record<string, string>;
   plan?: Plan;
   createdAt: number;
+  /** X-Spoken-Device of the app that created it (history and profile are per device). */
+  device?: string;
+  /** Profile at task time (the device's, or the default one). */
+  profile: Profile;
 }
 
 export const tasks = new Map<string, Task>();
