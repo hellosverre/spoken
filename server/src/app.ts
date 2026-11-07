@@ -14,6 +14,7 @@ import { MockLlm } from "./llm/mock.ts";
 import { CallSession } from "./call/session.ts";
 import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
 import { ElksLine, elksSecretOk } from "./call/elks-line.ts";
+import { VonageLine } from "./call/vonage-line.ts";
 import { config } from "./config.ts";
 import { lookup } from "./directory.ts";
 import { createLlm } from "./llm/index.ts";
@@ -38,7 +39,7 @@ const CALL_LEXICON_EN = [
   "appointment", "cancel", "reserve", "table", "available", "closed", "open", "allergy", "gluten-free", "lactose-free",
 ];
 
-type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine } | { kind: "elks"; line?: ElksLine };
+type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine } | { kind: "elks"; line?: ElksLine } | { kind: "vonage"; line: VonageLine };
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -228,7 +229,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (!num.ok) return err(403, num.reason);
     // No (or a wrong) demo passcode → this call runs in mock mode: scripted callee, mock agent.
     const pass = passcodeCheck(req.headers.get("x-spoken-passcode"));
-    const realProvider = config.callProvider === "telnyx" || config.callProvider === "46elks";
+    const realProvider = config.callProvider === "telnyx" || config.callProvider === "46elks" || config.callProvider === "vonage";
     const real = realProvider && pass === "ok";
     if (realProvider && !real) console.log(`[call] passcode ${pass}: mock mode`);
     if (real && !config.callAllowlist.includes(num.e164)) {
@@ -249,7 +250,9 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
     const keyt = keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang);
-    const line = real && config.callProvider === "46elks"
+    const line = real && config.callProvider === "vonage"
+      ? new VonageLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
+      : real && config.callProvider === "46elks"
       ? new ElksLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
       : real
       ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang), maxSec })
@@ -301,6 +304,21 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       if (!line) return new Response("forbidden", { status: 403 });
       if (server.upgrade(req, { data: { kind: "media", callId: url.searchParams.get("call")!, line } satisfies WsData })) return undefined;
       return new Response("upgrade required", { status: 426 });
+    }
+
+    // Vonage Voice API websocket: per-call token in the URI of the NCCO connect action.
+    if (path === "/vonage/media") {
+      const line = VonageLine.authorize(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "");
+      if (!line) return new Response("forbidden", { status: 403 });
+      if (server.upgrade(req, { data: { kind: "vonage", line } satisfies WsData })) return undefined;
+      return new Response("upgrade required", { status: 426 });
+    }
+
+    // Vonage call events (JSON): started/ringing/answered/completed/busy/… ; token is per call.
+    if (path === "/vonage/event" && m === "POST") {
+      const b = await body(req);
+      const ok = VonageLine.handleEvent(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "", b);
+      return ok ? new Response("ok") : new Response("forbidden", { status: 403 });
     }
 
     // 46elks Realtime Voice: the websocket number's websocket_url is wss://…/elks/media?t=<ELKS_WS_SECRET>.
@@ -385,7 +403,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
     // The built web app (web/dist) is served from here, so the phone uses one origin for
     // the page, REST and the live socket.
-    if (m === "GET" && !path.startsWith("/api/") && !path.startsWith("/telnyx/") && !path.startsWith("/elks/")) {
+    if (m === "GET" && !path.startsWith("/api/") && !path.startsWith("/telnyx/") && !path.startsWith("/elks/") && !path.startsWith("/vonage/")) {
       const page = await webFile(path);
       if (page) return page;
     }
@@ -429,6 +447,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       open(ws: ServerWebSocket<WsData>) {
         const d = ws.data;
         if (d.kind === "media") { d.line.attach(ws); return; }
+        if (d.kind === "vonage") { d.line.attach(ws); return; }
         if (d.kind === "elks") { setTimeout(() => { if (!d.line) ws.close(1008, "no hello"); }, 5000); return; }
         const s = calls.get(d.callId);
         if (!s) { ws.close(1008, "unknown call"); return; }
@@ -438,6 +457,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       message(ws: ServerWebSocket<WsData>, msg: string | Buffer) {
         const d = ws.data;
         if (d.kind === "media") { d.line.onMedia(String(msg)); return; }
+        if (d.kind === "vonage") { d.line.onMedia(typeof msg === "string" ? msg : new Uint8Array(msg)); return; }
         if (d.kind === "elks") {
           if (d.line) d.line.onMedia(String(msg));
           else if (!(d.line = ElksLine.accept(ws, String(msg)))) ws.close(1008, "no matching call");
@@ -451,6 +471,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       close(ws: ServerWebSocket<WsData>) {
         const d = ws.data;
         if (d.kind === "media") d.line.onSocketClosed();
+        else if (d.kind === "vonage") d.line.onSocketClosed();
         else if (d.kind === "elks") d.line?.onSocketClosed();
         else d.unsub?.();
       },
