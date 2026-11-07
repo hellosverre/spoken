@@ -314,6 +314,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     // Vonage Voice API websocket: per-call token in the URI of the NCCO connect action.
     if (path === "/vonage/media") {
       const line = VonageLine.authorize(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "");
+      console.log(`[vonage] media socket request: ${line ? "ok" : "refused"} upgrade=${req.headers.get("upgrade") ?? "-"} proto=${req.headers.get("sec-websocket-protocol") ?? "-"}`);
       if (!line) return new Response("forbidden", { status: 403 });
       if (server.upgrade(req, { data: { kind: "vonage", line } satisfies WsData })) return undefined;
       return new Response("upgrade required", { status: 426 });
@@ -322,6 +323,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     // Vonage call events (JSON): started/ringing/answered/completed/busy/… ; token is per call.
     if (path === "/vonage/event" && m === "POST") {
       const b = await body(req);
+      if (url.searchParams.get("leg") === "ws") { console.log(`[vonage] ws leg event: ${JSON.stringify(b).slice(0, 400)}`); return new Response("ok"); }
       const ok = VonageLine.handleEvent(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "", b);
       return ok ? new Response("ok") : new Response("forbidden", { status: 403 });
     }

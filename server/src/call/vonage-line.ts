@@ -168,6 +168,8 @@ export class VonageLine implements CallLine {
       from: { type: "phone", number: digits(number) },
       ncco: [{
         action: "connect",
+        eventUrl: [`${config.publicUrl}/vonage/event?leg=ws&call=${encodeURIComponent(this.o.callId)}`],
+        eventMethod: "POST",
         endpoint: [{
           type: "websocket",
           uri: `${wsBase}/vonage/media?call=${encodeURIComponent(this.o.callId)}&t=${this.token}`,
