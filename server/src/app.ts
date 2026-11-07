@@ -15,6 +15,7 @@ import { CallSession } from "./call/session.ts";
 import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
 import { ElksLine, elksSecretOk } from "./call/elks-line.ts";
 import { VonageLine } from "./call/vonage-line.ts";
+import { createInbound, rememberOutbound, takeIncoming, vonageSigned } from "./call/inbound.ts";
 import { config } from "./config.ts";
 import { lookup } from "./directory.ts";
 import { createLlm } from "./llm/index.ts";
@@ -145,6 +146,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     return (await db.getProfile(device)) ?? { ...defaultProfile, name: "" };
   }
 
+  const inbound = createInbound(llm, db);
   void llm.warm?.(); // open the LLM connection before the first call
   setInterval(() => purge(), 60_000).unref?.();
 
@@ -275,6 +277,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       });
     }
     calls.set(callId, session);
+    if (real && config.callProvider === "vonage") rememberOutbound({ callee: num.e164, calleeName: t.plan.callee.name, device: t.device, taskText: t.input.text, profile: t.profile, callId, lang: t.plan.callLang ?? "no" });
     void session.start();
     const mode = real ? "real" : "mock";
     return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
@@ -320,9 +323,21 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       return new Response("upgrade required", { status: 426 });
     }
 
+    // Inbound: the shop rings our number back (answer URL). Returns the NCCO; see call/inbound.ts.
+    if (path === "/vonage/answer" && (m === "GET" || m === "POST")) return inbound.handleAnswer(req);
+    // The app polls this while open; 204 = nothing, else {callId, callerName, topic} once.
+    if (path === "/api/incoming" && m === "GET") {
+      const device = deviceOf(req);
+      if (!device) return err(400, "device is required");
+      const c = takeIncoming(device);
+      return c ? json(c) : new Response(null, { status: 204, headers: CORS });
+    }
+
     // Vonage call events (JSON): started/ringing/answered/completed/busy/… ; token is per call.
     if (path === "/vonage/event" && m === "POST") {
+      if (!vonageSigned(req)) return new Response("bad signature", { status: 401 });
       const b = await body(req);
+      if (!url.searchParams.has("call")) { inbound.handleEvent(b); return new Response("ok"); } // inbound leg: matched by uuid
       if (url.searchParams.get("leg") === "ws") { console.log(`[vonage] ws leg event: ${JSON.stringify(b).slice(0, 400)}`); return new Response("ok"); }
       const ok = VonageLine.handleEvent(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "", b);
       return ok ? new Response("ok") : new Response("forbidden", { status: 403 });

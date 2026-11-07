@@ -189,6 +189,8 @@ export interface SessionInit {
   taskText?: string;
   /** Approved for this call only; never put into the LLM context. */
   secrets?: { fnr?: string };
+  /** The other side called us: plan.opening is the whole greeting (already says it is an AI). */
+  inbound?: boolean;
 }
 
 let seq = 0;
@@ -287,6 +289,8 @@ export class CallSession {
   private cutTimer?: ReturnType<typeof setTimeout>;
 
   private hold: HoldFlow;
+
+  get inbound() { return !!this.init.inbound; }
 
   constructor(private init: SessionInit) {
     this.callId = init.callId;
@@ -412,6 +416,7 @@ export class CallSession {
   }
 
   private opening() {
+    if (this.init.inbound) return this.init.plan.opening;
     // The plan's opening is kept only if it is in the call's language; the disclosure is rebuilt.
     const other = this.lang === "en" ? /KI-assistent/i : /AI assistant/i;
     const op = this.init.plan.opening;
