@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { AccessibilityInfo, Platform, Vibration } from "react-native";
 import { MOBILE_COPY } from "./copy-mobile";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
+import { askNotificationPermission, clearNeedsYou, notifyNeedsYou, setupNotifications } from "./notify";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
@@ -227,6 +228,7 @@ export class SpokenStore {
         }));
     } catch {}
     this.syncRealCalls();
+    setupNotifications();
     this.intro();
   }
 
@@ -391,6 +393,7 @@ export class SpokenStore {
 
   goHome(tab: Tab = "home") {
     this.chatAnswer = null;
+    clearNeedsYou();
     this.introId++;
     this.homeId++;
     this.callId++;
@@ -420,6 +423,7 @@ export class SpokenStore {
       if (!text) return;
       const answer = this.chatAnswer;
       this.chatAnswer = null;
+      clearNeedsYou();
       this.set({ draft: "" });
       this.pushThread({ id: this.uid++, kind: "me", text: this.chatSecret ? "••••••" : text });
       answer(text);
@@ -449,8 +453,11 @@ export class SpokenStore {
       this.pushThread({ id: b, kind: "bot", text: "" });
       await this.typeInto((t) => this.patchThread(b, { text: t }), line, 10, stop);
     };
+    void askNotificationPermission();
     const askUser = async (q: string, secret = false) => {
       await bot(q);
+      if (stop()) return "";
+      notifyNeedsYou(MOBILE_COPY[this.state.lang].notifyQuestion, q);
       this.chatSecret = secret;
       this.set((s) => ({ focusTick: s.focusTick + 1 }));
       const answer = await new Promise<string>((resolve) => { this.chatAnswer = resolve; });
@@ -489,6 +496,7 @@ export class SpokenStore {
   editPlan(text: string) {
     this.homeId++;
     this.chatAnswer = null;
+    clearNeedsYou();
     this.set((s) => ({ threaded: false, thread: [], draft: text, focusTick: s.focusTick + 1 }));
   }
 
@@ -658,8 +666,10 @@ export class SpokenStore {
           pill: "hold", flashTick: s.flashTick + 1, sheet: { kind: "ask", cfg, pressed: null }, sheetOpen: true,
         }));
         buzz();
+        if (!this.demo) notifyNeedsYou(MOBILE_COPY[lang].notifyApproval, cfg.title);
         const done = (v: string) => {
           this.askResolve = null;
+          clearNeedsYou();
           this.set({ sheetOpen: false, pill: "live" });
           resolve(v);
         };
@@ -726,6 +736,7 @@ export class SpokenStore {
 
   private async finish(id: number, o: Outcome) {
     if (id !== this.callId) return;
+    clearNeedsYou();
     this.stopTimer();
     const dur = this.state.elapsed;
     this.set({ pill: "ended", speaker: null, speakerNote: "ended", callEnded: true });

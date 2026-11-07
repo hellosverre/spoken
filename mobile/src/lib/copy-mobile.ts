@@ -82,6 +82,8 @@ const en = {
   passcodeSet: "Saved. Calls can ring real phones.",
   codeAsk: "Real calls need the demo code from the team. Type it here, or type skip for a practice call where no phone rings.",
   scriptedNote: "Scripted demo: no phone is ringing.",
+  notifyApproval: "Spoken needs your OK",
+  notifyQuestion: "Spoken has a question",
 };
 
 export type MobileCopy = typeof en;
@@ -162,6 +164,8 @@ const no: MobileCopy = {
   passcodeSet: "Lagret. Samtaler kan ringe ekte telefoner.",
   codeAsk: "Ekte samtaler krever demo-koden fra teamet. Skriv den her, eller skriv hopp over for en øvingssamtale der ingen telefon ringer.",
   scriptedNote: "Innspilt demo: ingen telefon ringer.",
+  notifyApproval: "Spoken trenger ditt svar",
+  notifyQuestion: "Spoken har et spørsmål",
 };
 
 export const MOBILE_COPY: Record<Lang, MobileCopy> = { en, no };
