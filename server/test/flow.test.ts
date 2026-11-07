@@ -132,8 +132,9 @@ describe("REST basics", () => {
 describe("Telnyx balance guard", () => {
   test("real call refused below the minimum balance, with a clear message", async () => {
     const { config } = await import("../src/config.ts");
-    const saved = { p: config.callProvider, key: config.telnyx.apiKey, allow: config.callAllowlist, f: globalThis.fetch };
+    const saved = { p: config.callProvider, key: config.telnyx.apiKey, allow: config.callAllowlist, code: config.demoPasscode, f: globalThis.fetch };
     config.callProvider = "telnyx";
+    config.demoPasscode = ""; // no passcode configured → every call is real
     config.telnyx.apiKey = "test";
     config.callAllowlist = ["+4722000001"];
     const realFetch = saved.f;
@@ -151,7 +152,49 @@ describe("Telnyx balance guard", () => {
       expect(call.status).toBe(402);
       expect(call.data.error).toContain("$0.21");
     } finally {
-      config.callProvider = saved.p; config.telnyx.apiKey = saved.key; config.callAllowlist = saved.allow; globalThis.fetch = saved.f;
+      config.callProvider = saved.p; config.telnyx.apiKey = saved.key; config.callAllowlist = saved.allow; config.demoPasscode = saved.code; globalThis.fetch = saved.f;
+    }
+  });
+});
+
+describe("demo passcode guards real calls", () => {
+  test("no/wrong code → mock call (nothing dialled); right code → real call", async () => {
+    const { config } = await import("../src/config.ts");
+    const saved = { p: config.callProvider, key: config.telnyx.apiKey, conn: config.telnyx.connectionId, from: config.telnyx.fromNumber, allow: config.callAllowlist, code: config.demoPasscode, f: globalThis.fetch };
+    config.callProvider = "telnyx";
+    config.telnyx.apiKey = "test"; config.telnyx.connectionId = "conn"; config.telnyx.fromNumber = "+10000000000";
+    config.demoPasscode = "123456";
+    const dials: string[] = [];
+    const realFetch = saved.f;
+    globalThis.fetch = (async (url: any, init?: any) => {
+      const u = String(url);
+      if (u.includes("api.telnyx.com/v2/balance")) return Response.json({ data: { balance: "2.00" } });
+      if (u.endsWith("api.telnyx.com/v2/calls")) { dials.push(u); return Response.json({ data: { call_control_id: "cc1" } }); }
+      if (u.includes("api.telnyx.com/v2/calls/")) return Response.json({ data: {} }); // hangup
+      return realFetch(url, init);
+    }) as any;
+    const startWith = async (headers: Record<string, string>) => {
+      const c = await s.post("/api/tasks", { text: "Bestill en stor pepperoni fra Domino's Storo til 18:00", lang: "no" });
+      const answers: Record<string, string> = {};
+      for (const q of c.data.questions) answers[q.id] = q.options?.[0] ?? "ja";
+      const p = await s.post(`/api/tasks/${c.data.taskId}/answers`, { answers });
+      config.callAllowlist = [p.data.callee.phone];
+      const r = await fetch(`${s.base}/api/tasks/${p.data.taskId}/call`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ approved: true }) });
+      const j: any = await r.json();
+      await fetch(`${s.base}/api/calls/${j.callId}/hangup`, { method: "POST" });
+      return j;
+    };
+    try {
+      expect((await startWith({})).mode).toBe("mock");
+      const wrong = await startWith({ "X-Spoken-Passcode": "999999" });
+      expect(wrong).toMatchObject({ mode: "mock", passcode: "wrong" });
+      expect(dials.length).toBe(0);
+      expect((await startWith({ "X-Spoken-Passcode": "123456" })).mode).toBe("real");
+      expect(dials.length).toBe(1);
+    } finally {
+      Object.assign(config, { callProvider: saved.p, callAllowlist: saved.allow, demoPasscode: saved.code });
+      Object.assign(config.telnyx, { apiKey: saved.key, connectionId: saved.conn, fromNumber: saved.from });
+      globalThis.fetch = saved.f;
     }
   });
 });

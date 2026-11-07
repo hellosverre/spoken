@@ -22,12 +22,12 @@ function base(): string {
   return API === "/" ? window.location.origin : API.replace(/\/$/, "");
 }
 
-async function http<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function http<T>(method: string, path: string, body?: unknown, extra: Record<string, string> = {}): Promise<T> {
   let res: Response;
   try {
     res = await fetch(base() + path, {
       method,
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...extra },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -75,6 +75,25 @@ export interface LiveIO extends CallIO {
 }
 
 const NEGATIVE = /^(nei|no|avslå|decline|legg på)$/i;
+
+/* Demo passcode for real calls. Asked once (a tiny browser prompt) and kept in localStorage;
+   without it the server runs the call in mock mode, so anyone opening the link sees the demo.
+   ?passcode=… in the URL sets it, ?passcode= clears it. */
+const PASS_KEY = "spoken-passcode";
+
+function passcode(): string {
+  try {
+    const url = new URLSearchParams(window.location.search);
+    if (url.has("passcode")) localStorage.setItem(PASS_KEY, url.get("passcode") ?? "");
+    const saved = localStorage.getItem(PASS_KEY);
+    if (saved !== null) return saved;
+    const typed = window.prompt("Demo-kode for ekte samtaler (la stå tom for demo):") ?? "";
+    localStorage.setItem(PASS_KEY, typed.trim());
+    return typed.trim();
+  } catch {
+    return "";
+  }
+}
 
 function pickOption(answer: string, options?: string[]): string {
   if (!options?.length) return answer;
@@ -135,7 +154,16 @@ export function isLive(key: ScenarioKey): boolean {
 
 /** The live call: server events → say/ask; the user's messages → the server. */
 async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outcome> {
-  const { callId } = await http<{ callId: string }>("POST", `/api/tasks/${encodeURIComponent(taskId)}/call`, { approved: true });
+  const code = passcode();
+  const { callId, mode, passcode: pc } = await http<{ callId: string; mode?: string; passcode?: string }>(
+    "POST", `/api/tasks/${encodeURIComponent(taskId)}/call`, { approved: true }, code ? { "X-Spoken-Passcode": code } : {},
+  );
+  if (pc === "wrong") {
+    try { localStorage.removeItem(PASS_KEY); } catch {}
+    io.note(lang === "no" ? "Feil demo-kode, så dette er en demosamtale." : "Wrong demo code, so this is a demo call.");
+  } else if (mode === "mock") {
+    io.note(lang === "no" ? "Demosamtale: ingen ekte telefon ringer." : "Demo call: no real phone is ringing.");
+  }
   const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
   const send = (cmd: object) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd)); };
   io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });

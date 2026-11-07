@@ -4,7 +4,9 @@ import type { Server, ServerWebSocket } from "bun";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
+import { timingSafeEqual } from "node:crypto";
 import { MockLine } from "./call/mock-line.ts";
+import { MockLlm } from "./llm/mock.ts";
 import { CallSession } from "./call/session.ts";
 import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
 import { config } from "./config.ts";
@@ -29,7 +31,7 @@ type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "me
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User",
+  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User, X-Spoken-Passcode",
 };
 
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: CORS });
@@ -150,10 +152,14 @@ export function createApp(llm: LlmProvider = createLlm()) {
     if (t.plan.blocked) return err(403, t.plan.blocked.reason + (t.plan.blocked.alternative ? ` ${t.plan.blocked.alternative}` : ""));
     const num = checkNumber(t.plan.callee.phone);
     if (!num.ok) return err(403, num.reason);
-    if (config.callProvider === "telnyx" && !config.callAllowlist.includes(num.e164)) {
+    // No (or a wrong) demo passcode → this call runs in mock mode: scripted callee, mock agent.
+    const pass = passcodeCheck(req.headers.get("x-spoken-passcode"));
+    const real = config.callProvider === "telnyx" && pass === "ok";
+    if (config.callProvider === "telnyx" && !real) console.log(`[call] passcode ${pass}: mock mode`);
+    if (real && !config.callAllowlist.includes(num.e164)) {
       return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
     }
-    if (config.callProvider === "telnyx") {
+    if (real) {
       // Prepaid Telnyx balance: log it before every real call, refuse when it can't cover one.
       const bal = await telnyxBalance();
       console.log(`[telnyx] balance before call: ${bal === null ? "unknown" : `$${bal.toFixed(2)}`}`);
@@ -165,14 +171,16 @@ export function createApp(llm: LlmProvider = createLlm()) {
 
     const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
-    const line = config.callProvider === "telnyx"
+    const line = real
       ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name), maxSec })
-      : new MockLine(config.mockSpeed);
+      : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed);
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
-    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...profile }, line, llm, secrets: { fnr }, maxSec });
+    const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
+    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...profile }, line, llm: callLlm, secrets: { fnr }, maxSec });
     calls.set(callId, session);
     void session.start();
-    return json({ callId });
+    const mode = config.callProvider === "telnyx" && real ? "real" : "mock";
+    return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
 
   function keyterms(text: string, callee: string): string[] {
@@ -307,6 +315,15 @@ async function webFile(path: string): Promise<Response | undefined> {
     }
   }
   return new Response(index, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" } });
+}
+
+/** "ok" | "missing" | "wrong" | "off" (no DEMO_PASSCODE configured → every call is real). */
+function passcodeCheck(given: string | null): "ok" | "missing" | "wrong" {
+  const want = config.demoPasscode;
+  if (!want) return "ok";
+  if (!given) return "missing";
+  const a = Buffer.from(given.trim()), b = Buffer.from(want);
+  return a.length === b.length && timingSafeEqual(a, b) ? "ok" : "wrong";
 }
 
 export function parseCommand(raw: string): LiveCommand | null {
