@@ -8,7 +8,7 @@ import { HISTORY_MAX, historyRepo, type CallRecord } from "./history";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
-import { DEMO_MINUTES, PLANS, type Minutes, type PlanId } from "./plans";
+import { DEMO_MINUTES, migrateMinutes, parseCode, PLANS, type Minutes, type PaidPlanId } from "./plans";
 import { TERMS_VERSION } from "./terms";
 
 export type Screen = "intro" | "login" | "signup" | "plans" | "home" | "call";
@@ -276,7 +276,7 @@ export class SpokenStore {
           highContrast: p.highContrast === true,
           haptics: p.haptics ?? s.haptics,
           terms: p.terms ?? s.terms,
-          minutes: p.minutes ?? s.minutes,
+          minutes: migrateMinutes(p.minutes) ?? s.minutes,
         }));
     } catch {}
     this.syncRealCalls();
@@ -395,16 +395,39 @@ export class SpokenStore {
     this.set({ screen: "plans" });
   }
 
-  choosePlan(id: PlanId) {
-    const plan = PLANS.find((p) => p.id === id) ?? PLANS[0];
-    this.set({ minutes: { plan: plan.id, total: plan.minutes, used: 0 }, authed: true });
+  /** After sign-up: a new plan, nothing used yet, then in as the demo user. */
+  choosePlan(id: PaidPlanId) {
+    const plan = PLANS.find((p) => p.id === id) ?? PLANS[0]!;
+    this.set({ minutes: { plan: plan.id, used: 0, extra: 0 }, authed: true });
     this.savePrefs();
     this.goHome();
   }
 
+  /** Profile → Change plan. Minutes used this month and extra minutes stay. */
+  changePlan(id: PaidPlanId) {
+    this.set((s) => ({ minutes: { plan: id, used: s.minutes.used, extra: s.minutes.extra } }));
+    this.savePrefs();
+  }
+
+  /**
+   * An organisation's code: its plan, paid by them. From the plans page it also logs in.
+   * Returns false for a code that doesn't have the right shape (any well-formed code works).
+   */
+  redeemCode(code: string, login = false): boolean {
+    const r = parseCode(code);
+    if (!r.ok) return false;
+    this.set((s) => ({ minutes: { plan: "org", used: login ? 0 : s.minutes.used, extra: login ? 0 : s.minutes.extra, org: r.org } }));
+    this.savePrefs();
+    if (login) {
+      this.set({ authed: true });
+      this.goHome();
+    }
+    return true;
+  }
+
   /** Profile → Add minutes. No payment: the minutes are just added. */
   addMinutes(n: number) {
-    this.set((s) => ({ minutes: { ...s.minutes, total: s.minutes.total + n } }));
+    this.set((s) => ({ minutes: { ...s.minutes, extra: s.minutes.extra + n } }));
     this.savePrefs();
   }
 

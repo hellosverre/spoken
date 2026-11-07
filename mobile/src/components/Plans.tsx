@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fill } from "../lib/i18n";
@@ -5,12 +6,14 @@ import { kr, perMinute, PLANS, SUGGESTED_PLAN, type Plan } from "../lib/plans";
 import { em, F, HEADING_SCALE, makeStyles, PAD, small, useLargeText, useTheme } from "../lib/theme";
 import { useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
+import { DemoNote, EnterpriseCard, EnterpriseSheet, RedeemForm } from "./Enterprise";
 import { Icon, Wordmark } from "./Icon";
 import { Press, Rise, T } from "./ui";
 
 /**
- * After sign-up: pick a pack of call minutes. A showcase: no payment, and any plan logs in
- * as the demo user. Each card is one button, read out whole (name, minutes, price, per minute).
+ * After sign-up: pick a monthly plan of call minutes, redeem an organisation's code, or
+ * contact us about Enterprise. A showcase: no payment, and a plan or a code logs in as the
+ * demo user. Each plan card is one button, read out whole (name, minutes, price, per minute).
  */
 export function Plans() {
   const store = useStore();
@@ -18,6 +21,7 @@ export function Plans() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
   const on = useSpoken((s) => s.screen === "plans");
+  const [contact, setContact] = useState(false);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -45,11 +49,20 @@ export function Plans() {
             </Rise>
           ))}
         </View>
-        <View style={styles.demo}>
-          <Icon name="alert" size={16} color={styles.demoText.color} />
-          <Text style={styles.demoText}>{m.demoPay}</Text>
+        <Text style={styles.reset}>{m.planReset}</Text>
+        <View style={styles.more}>
+          <EnterpriseCard onContact={() => setContact(true)} />
+          <View style={styles.codeBox}>
+            <Text style={styles.h2} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
+              {m.codeH}
+            </Text>
+            <Text style={styles.codeSub}>{m.codeSub}</Text>
+            <RedeemForm login />
+          </View>
+          <DemoNote text={m.demoPay} />
         </View>
       </ScrollView>
+      <EnterpriseSheet open={contact} onClose={() => setContact(false)} />
     </View>
   );
 }
@@ -62,9 +75,10 @@ function PlanCard({ plan, onChoose }: { plan: Plan; onChoose(): void }) {
   const stack = useLargeText();
   const name = m.planNames[plan.id];
   const suggested = plan.id === SUGGESTED_PLAN;
-  const price = plan.price ? kr(plan.price, lang) : m.free;
+  // Monthly: "239 kr/month" and "30 min/month".
+  const price = plan.price ? fill(m.perMonth, { price: kr(plan.price, lang) }) : m.free;
   const rate = plan.price ? perMinute(plan.price, plan.minutes, lang) : null;
-  const minutes = fill(m.minutesN, { n: String(plan.minutes) });
+  const minutes = fill(m.minutesMonth, { n: String(plan.minutes) });
   const label = [name, minutes, price, rate, suggested ? m.suggested : null, m.planNotes[plan.id]].filter(Boolean).join(", ");
 
   return (
@@ -133,6 +147,9 @@ const useStyles = makeStyles((C) => ({
   priceCol: { alignItems: "flex-end" },
   choose: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: 28, marginTop: 2 },
   chooseText: { fontFamily: F.medium, fontSize: 15, color: C.accent },
-  demo: { flexDirection: "row", gap: 8, marginTop: 20, alignItems: "flex-start" },
-  demoText: { ...small(13), color: C.dim, flex: 1, lineHeight: 18 },
+  reset: { ...small(13), color: C.muted, marginTop: 14, lineHeight: 18 },
+  more: { gap: 20, marginTop: 24 },
+  codeBox: { gap: 10, padding: 18, borderRadius: 20, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface },
+  h2: { fontFamily: F.semibold, fontSize: 18, color: C.ink },
+  codeSub: { ...small(14), color: C.muted, lineHeight: 20 },
 }));
