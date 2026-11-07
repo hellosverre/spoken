@@ -23,14 +23,14 @@ export const ORB_COLORS: Record<string, [string, string]> = {
 };
 
 /** A soft gradient cloud. Idle: slow breathing; playing: a faster, deeper pulse. Static under reduce-motion. */
-export function VoiceOrb({ voiceId, playing, size = 76 }: { voiceId: string; playing: boolean; size?: number }) {
+export function VoiceOrb({ voiceId, playing, size = 76, still }: { voiceId: string; playing: boolean; size?: number; still?: boolean }) {
   const reduce = useReducedMotion();
   const [a, b] = ORB_COLORS[voiceId] ?? ["#7B8CFF", "#B6C2FF"];
   const id = useId().replace(/[^a-zA-Z0-9]/g, "");
   const scale = useSharedValue(1);
 
   useEffect(() => {
-    if (reduce) {
+    if (reduce || still) {
       scale.value = 1;
       return;
     }
@@ -39,7 +39,7 @@ export function VoiceOrb({ voiceId, playing, size = 76 }: { voiceId: string; pla
       withSequence(withTiming(peak, { duration: ms, easing: Easing.inOut(Easing.sin) }), withTiming(0.94, { duration: ms, easing: Easing.inOut(Easing.sin) })),
       -1,
     );
-  }, [playing, reduce, scale]);
+  }, [playing, reduce, still, scale]);
 
   const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
