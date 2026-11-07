@@ -4,4 +4,6 @@ Read CONTRACT.md, then SPEC.md. Stay in the folder you own. Write all code fresh
 
 State, deploy steps and next tasks: HANDOFF.md.
 
+Accessibility requirements and research boundaries: [ACCESSIBILITY.md](ACCESSIBILITY.md). Do not attribute features of other products called Spoken to this repository or claim assistive-technology support without testing.
+
 Product explanation and source map for new agents: [PRODUCT_CONTEXT.md](PRODUCT_CONTEXT.md). Read it after CONTRACT.md and SPEC.md; it separates intent, source observations and unresolved questions.
