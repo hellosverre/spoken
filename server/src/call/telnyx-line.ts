@@ -127,7 +127,17 @@ export class TelnyxLine implements CallLine {
     console.log(`[telnyx] ${type}${p.hangup_cause ? ` cause=${p.hangup_cause} sip=${p.sip_hangup_cause ?? ""}` : ""}`);
     switch (type) {
       case "call.initiated": this.ev.status("ringing"); break;
-      case "call.answered": this.answered = true; this.maybeConnected(); break;
+      case "call.answered":
+        this.answered = true;
+        this.maybeConnected();
+        // No media socket = no audio: don't leave someone on a silent line.
+        setTimeout(() => {
+          if (!this.streaming && !this.hungUp) {
+            this.ev.status("failed", "Lydstrømmen kom aldri fram (sjekk PUBLIC_URL / tunnelen).");
+            void this.hangup();
+          }
+        }, 8000);
+        break;
       case "streaming.failed": this.ev.status("failed", `Lydstrømmen feilet: ${p.failure_reason ?? "ukjent"}`); break;
       case "call.hangup": {
         this.hungUp = true;

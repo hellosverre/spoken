@@ -45,6 +45,8 @@ export function toSpeakable(text: string): string {
     .replace(/(\d+)\s*(?:kr\.?|kroner|,-)/gi, (_, a) => `${numberToWords(Number(a))} kroner`)
     .replace(/\b(\d{1,6})\b/g, (_, a) => numberToWords(Number(a)))
     .replace(/\bkl\.\s*/gi, "klokka ")
+    // "KI" gets read as a word by some models; spell it the Norwegian way.
+    .replace(/\bKI\b/g, "kå-i")
     .replace(/\s{2,}/g, " ")
     .trim();
 }

@@ -101,7 +101,7 @@ export function mockReplyText(ctx: AgentContext): string {
   }
   if (/navn(et)?|hvem (er det|skal)|på hvem/.test(c)) return `Den står på ${name}.`;
   if (/allerg/.test(c)) return ctx.profileFacts.allergies ? `Ja: ${ctx.profileFacts.allergies}.` : "Nei, ingen allergier.";
-  if (/hva skal det være|hva kan jeg (hjelpe|gjøre)|hvordan kan jeg hjelpe|hva gjelder|hva (vil|ønsker) du|ja\??$|hallo|værsågod|det går fint|ok/.test(c)) {
+  if (/hva skal det være|hva kan jeg (hjelpe|gjøre)|hvordan kan jeg hjelpe|hva gjelder|hva (vil|ønsker) du|ja\??$|^hei|hallo|værsågod|det går fint|ok/.test(c)) {
     return `Jeg vil gjerne ${ctx.goal}.`;
   }
   if (/vent|et øyeblikk|ett øyeblikk|sekund/.test(c)) return "Ja, jeg venter.";

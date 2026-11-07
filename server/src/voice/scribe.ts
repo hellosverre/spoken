@@ -11,6 +11,14 @@ export interface ScribeHandlers {
   error(msg: string): void;
 }
 
+/**
+ * Scribe word logprobs sit around -0.4…-0.9 even for correct words, so exp() greys out
+ * everything. Linear map measured on Norwegian phone audio: -0.4 → 0.84, -1.0 → 0.6, -1.3 → 0.48.
+ */
+export function logprobToConfidence(lp: number): number {
+  return Math.max(0, Math.min(1, 1 + lp / 2.5));
+}
+
 export class ScribeStream {
   private ws?: WebSocket;
   private queue: string[] = [];
@@ -28,7 +36,7 @@ export class ScribeStream {
       audio_format: "ulaw_8000",
       language_code: "no",
       commit_strategy: "vad",
-      vad_silence_threshold_secs: "0.5",
+      vad_silence_threshold_secs: process.env.SCRIBE_SILENCE_SECS ?? "0.5",
       include_timestamps: "true",
     });
     for (const k of this.keyterms.slice(0, 20)) q.append("keyterms", k);
@@ -64,7 +72,7 @@ export class ScribeStream {
       case "committed_transcript_with_timestamps": {
         const words: Word[] = (m.words ?? [])
           .filter((w: any) => w.type !== "spacing" && w.text?.trim())
-          .map((w: any) => ({ text: w.text, confidence: typeof w.logprob === "number" ? Math.max(0, Math.min(1, Math.exp(w.logprob))) : 1 }));
+          .map((w: any) => ({ text: w.text, confidence: typeof w.logprob === "number" ? logprobToConfidence(w.logprob) : 1 }));
         if (m.text?.trim() && words.length) this.h.words(m.text, words);
         break;
       }
