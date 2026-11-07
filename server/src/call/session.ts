@@ -75,6 +75,8 @@ const HOLD_SHORT_MS = Number(process.env.HOLD_SHORT_MS ?? 700);
 // disclosure used to start on connect and get cut by that greeting (c_28dd2d9a6285).
 // Wait for the greeting to end (GREETING_GAP_MS of quiet), or GREETING_WAIT_MS if nobody speaks,
 // never longer than GREETING_MAX_MS. The disclosure itself can't be interrupted: they must hear it.
+// Lines heard over the disclosure below this mean confidence are taken as echo.
+const OPENING_ECHO_CONF = Number(process.env.OPENING_ECHO_CONF ?? 0.6);
 const GREETING_WAIT_MS = Number(process.env.GREETING_WAIT_MS ?? 3000);
 const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
 const GREETING_MAX_MS = Number(process.env.GREETING_MAX_MS ?? 8000);
@@ -198,7 +200,10 @@ export class CallSession {
   private connectedAt = 0;
   private openingPending = false; // from connect until the disclosure has been said
   private openingSpeaking = false; // the disclosure is playing: no barge-in
-  private heardDuringOpening = false;
+  // Segments heard while the disclosure played. Unsure ones are our own voice echoing back
+  // (c_252ff0f258ce: «Nei, jeg...» 0.55, «Jeg kan ikke det.» 0.27 → hung up as «refused»).
+  private overOpening = new Set<string>();
+  private refusalChecked = false;
   private lastGreeting = "";
   private ended = false;
   private endTag?: { outcome: Outcome; summary: string };
@@ -385,7 +390,7 @@ export class CallSession {
     try { await this.say(opening); } finally { this.openingSpeaking = false; this.openingPending = false; }
     if (this.ended) return;
     // They spoke over the disclosure («nei», «hvem er det?»): answer that now.
-    if (this.heardDuringOpening) { this.requestTurn(); return; }
+    if (this.overOpening.size) { this.requestTurn(); return; }
     // Otherwise give them a moment, then state the errand ourselves.
     const at = this.lastCalleeAt;
     setTimeout(() => {
@@ -444,7 +449,7 @@ export class CallSession {
     this.checkMessage(id, clean);
     // Greeting, or talk over the disclosure: it's in the history; sayOpening decides what's next.
     if (this.openingPending) {
-      if (this.openingSpeaking) this.heardDuringOpening = true;
+      if (this.openingSpeaking) this.overOpening.add(id);
       else this.lastGreeting = clean;
       this.debug("held_for_opening", { text: clean, speaking: this.openingSpeaking });
       return;
@@ -538,6 +543,11 @@ export class CallSession {
    * that hint, drop it so the model can reinterpret or ask.
    */
   private onWords(id: string, words: Word[]) {
+    if (this.overOpening.has(id) && words.length && words.reduce((a, w) => a + w.confidence, 0) / words.length < OPENING_ECHO_CONF) {
+      this.debug("opening_echo", { id });
+      this.onNoise(id);
+      return;
+    }
     const unsure = words.filter((w) => w.confidence < 0.6).map((w) => w.text.replace(/[.,!?]$/, ""));
     const numHint = numberHint(words);
     const gate = this.gate?.id === id ? this.gate : undefined;
@@ -592,6 +602,7 @@ export class CallSession {
     const t = this.transcript.findIndex((l) => l.who === "callee" && l.text === before);
     if (t >= 0) this.transcript.splice(t, 1);
     this.segItems.delete(id);
+    this.overOpening.delete(id);
     this.emit({ type: "transcript", id, who: "callee", text: "", final: true, at: Date.now() });
     this.debug("stt_noise", { id, text: before });
     if (this.gate?.id === id) { clearTimeout(this.gate.timer); this.gate = undefined; }
@@ -904,6 +915,16 @@ export class CallSession {
         this.note(s.text);
       } else if (s.kind === "end") {
         const outcome = (["done", "partial", "failed", "refused", "no_answer"].includes(s.outcome) ? s.outcome : "partial") as Outcome;
+        // Never hang up on a refusal we only half heard: ask once.
+        const lastCallee = [...this.history].reverse().find((h) => h.role === "callee")?.text ?? "";
+        if (outcome === "refused" && !this.refusalChecked && /⟨usikre ord/.test(lastCallee)) {
+          this.refusalChecked = true;
+          this.debug("refusal_unsure", { lastCallee });
+          stop = true;
+          spokeAnything = true;
+          await this.say("Beklager, jeg hørte deg ikke helt. Er det greit at jeg spør om noe kort?", "say", false, abort.signal, turnLine);
+          return;
+        }
         this.endTag = { outcome, summary: s.summary };
         stop = true;
       }

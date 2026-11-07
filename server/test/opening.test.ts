@@ -29,16 +29,17 @@ const plan: Plan = {
 };
 function session(reply = "Jeg vil gjerne bestille en stor pepperoni til henting.") {
   let calls = 0;
+  const seen: string[] = [];
   const llm: LlmProvider = {
     name: "fake",
     clarify: async () => ({ summary: "", questions: [] }),
     plan: async () => ({ calleeName: "", goal: "", willShare: [], needsApprovalFor: [] }),
     summarize: async () => ({ outcome: "partial", summary: "", details: {} }),
-    async *reply() { calls++; yield reply; },
+    async *reply(...args: unknown[]) { calls++; seen.push(JSON.stringify(args)); yield reply; },
   };
   const line = new PhoneLine();
   const s = new CallSession({ callId: `o_${Math.random()}`, taskId: "t", plan: { ...plan }, profile: { name: "Sverre", hearCall: true, personality: "warm", lang: "no" }, line, llm });
-  return { s, line, llmCalls: () => calls };
+  return { s, line, llmCalls: () => calls, seen };
 }
 const isDisclosure = (t: string) => /KI-assistent/.test(t);
 
@@ -84,5 +85,21 @@ test("nobody speaks: disclosure after ~3 s, then the errand", async () => {
   await Bun.sleep(2700); // 400 ms speech + 2 s for a reply, then we go on
   expect(line.spoken.length).toBe(2);
   expect(line.spoken[1]!.text).toMatch(/pepperoni/);
+  await s.finish("test");
+}, 10000);
+
+test("our own voice echoing back over the disclosure isn't taken as «nei» (c_252ff0f258ce)", async () => {
+  const { s, line, seen } = session();
+  await s.start();
+  await line.callee("c0", "Domino's, hallo?");
+  await Bun.sleep(750);
+  expect(isDisclosure(line.spoken[0]?.text ?? "")).toBe(true);
+  await line.callee("c1", "Nei, jeg...");
+  line.ev.calleeWords?.("c1", "Nei, jeg...", [{ text: "Nei,", confidence: 0.5 }, { text: "jeg...", confidence: 0.6 }]);
+  line.voicedAt = 0; // the echo stops; the line goes quiet
+  await Bun.sleep(2800); // disclosure ends, 2 s of quiet, then the errand
+  expect(line.spoken.length).toBe(2);
+  expect(line.spoken[1]!.text).toMatch(/pepperoni/);
+  expect(seen.some((a) => a.includes("Nei, jeg"))).toBe(false);
   await s.finish("test");
 }, 10000);
