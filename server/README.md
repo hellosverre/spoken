@@ -37,6 +37,24 @@ Offline TTS → Scribe check, no phone call (about 200 TTS chars the first time,
 BAS_SECRET_TOKEN=… /home/sverre/Projects/bas/ops/bas-secret run -- bun scripts/loopback.ts
 ```
 
+## Web app on the real server
+
+The Bun server serves the built web app (`web/dist`) at `/`, so the page, REST and the live
+socket share one origin (`https://spoken-api.hellosverre.com/`). Build it with the same-origin flag:
+
+```bash
+cd ../web && VITE_API_URL=/ bun run build
+```
+
+Browser end-to-end test (real web build, server in mock mode, a human taps JA):
+
+```bash
+node e2e/web-real.mjs
+```
+
+`DIRECTORY_OVERRIDE=+47…` sends directory hits («Domino's Storo») to a test number on real calls.
+The server never answers an approval card by itself; only the hold flow (30 s / 2 min) acts while waiting.
+
 ## Pipeline
 
 ```
