@@ -1,4 +1,5 @@
 import { authHeader } from "./account";
+import { beginLiveAudio, endLiveAudio } from "./live-audio";
 import type { Lang, Row } from "./i18n";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
 import { resetFacts, setFacts, type FactItem } from "@/components/FactStrip";
@@ -223,6 +224,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   }
   resetFacts();
   setReceipt(null);
+  if (mode !== "mock") beginLiveAudio(callId); // "Hear the call": refused by the server unless the profile allows it
   const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
   const send = (cmd: object) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd)); };
   io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });
@@ -313,6 +315,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           break;
         case "result":
           finished = true;
+          endLiveAudio();
           setReceipt((e as { result: CallResult }).result.receipt);
           resolve((e as { result: CallResult }).result);
           break;
