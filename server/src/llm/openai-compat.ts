@@ -138,6 +138,7 @@ export class OpenAiCompatLlm implements LlmProvider {
       return {
         calleeName: String(j.calleeName ?? "Mottaker"),
         phone: task.phone ?? (typeof j.phone === "string" ? j.phone : undefined),
+        ...(Array.isArray(j.targets) ? { targets: j.targets.filter((t: any) => t && typeof t.name === "string").slice(0, 3).map((t: any) => ({ name: String(t.name), phone: typeof t.phone === "string" ? t.phone : undefined })) } : {}),
         goal: String(j.goal ?? task.text),
         willShare: (Array.isArray(j.willShare) ? j.willShare : ["name"]).filter((s: any) => SHAREABLE.includes(s)),
         needsApprovalFor: Array.isArray(j.needsApprovalFor) ? j.needsApprovalFor.map(String) : [], // app.ts adds the price rule

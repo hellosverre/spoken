@@ -32,6 +32,8 @@ export interface ClarifyOut {
 export interface PlanOut {
   calleeName: string;
   phone?: string;
+  /** 2–3 places when the request names several (parallel info calls). */
+  targets?: { name: string; phone?: string }[];
   goal: string;
   willShare: Shareable[];
   needsApprovalFor: string[];
