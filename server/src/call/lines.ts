@@ -30,7 +30,7 @@ export interface Lines {
   user: string; // «the user» when no name is set
 }
 
-export const LINES: Record<Lang, Lines> = {
+export const LINES: Record<"no" | "en", Lines> = {
   no: {
     wait: "Et øyeblikk…",
     fillers: ["La meg se.", "Ett sekund."],
@@ -110,4 +110,18 @@ export function guessLang(text: string): Lang | undefined {
 /** The call language for a task: an explicit cue, else the language it was typed in, else the default. */
 export function callLangFor(text: string, fallback: Lang): Lang {
   return langFromText(text) ?? guessLang(text) ?? fallback;
+}
+
+/** Fixed lines for a call language: Norwegian and English are native; every other language gets the English lines. */
+export function linesFor(lang: Lang): Lines {
+  return lang === "no" ? LINES.no : LINES.en;
+}
+
+/** «Polish», «polsk»: a language's name in `inLang` (English fallback). */
+export function langName(code: Lang, inLang: Lang = "en"): string {
+  try {
+    return new Intl.DisplayNames([inLang], { type: "language" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
 }

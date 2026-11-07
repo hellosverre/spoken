@@ -32,7 +32,7 @@ export interface TtsOptions {
   /** Output format; the phone path uses µ-law 8 kHz. */
   format?: "ulaw_8000" | "pcm_16000";
   /** Language spoken (default Norwegian). English text is sent as is, without number spelling. */
-  lang?: "no" | "en";
+  lang?: string;
   /** Called with the billed character count when a real (uncached) request is made. */
   onBilled?: (chars: number) => void;
 }
