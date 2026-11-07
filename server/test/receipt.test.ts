@@ -41,3 +41,28 @@ test("agreed vs declined approvals", () => {
   expect(r.callee).toBe("Pizzabakeren");
   expect(r.durationSec).toBe(42);
 });
+
+import { afterAll, beforeAll } from "bun:test";
+import { startServer, watchCall } from "./helpers.ts";
+
+let s: ReturnType<typeof startServer>;
+beforeAll(() => { s = startServer(); });
+afterAll(() => s.stop());
+
+test("mock call: facts event on the wire and a receipt on the result", async () => {
+  const c = await s.post("/api/tasks", { text: "Bestill en stor pepperoni fra Domino's Storo til 18:00", lang: "no" });
+  const answers: Record<string, string> = {};
+  for (const q of c.data.questions) answers[q.id] = q.options?.[0] ?? "ja";
+  const p = await s.post(`/api/tasks/${c.data.taskId}/answers`, { answers });
+  const call = await s.post(`/api/tasks/${p.data.taskId}/call`, { approved: true });
+  const evs = await watchCall(s.base, call.data.callId).done;
+  const facts = evs.filter((e: any) => e.type === "facts") as any[];
+  const last = facts.at(-1).items;
+  expect(last.some((i: any) => i.kind === "price" && i.value === "189 kr")).toBe(true);
+  expect(last.some((i: any) => i.kind === "time" && i.value === "kl. 18:00")).toBe(true);
+  const result = (evs.find((e) => e.type === "result") as any).result;
+  expect(result.receipt.disclosedAsAi).toBe(true);
+  expect(result.receipt.shared).toContain("name");
+  expect(result.receipt.agreed.length).toBeGreaterThan(0);
+  expect(result.receipt.stored).toContain("Ingen lydopptak");
+});

@@ -12,6 +12,8 @@ import { Chip } from "./Home";
 import { Glow, PulseRings } from "./Art";
 import { DoneArt, NothingAgreedArt } from "./drawings/ResultArt";
 import { CallFeedback } from "./Feedback";
+import { FactStrip } from "./FactStrip";
+import { Receipt } from "./Receipt";
 import { Icon, Mark } from "./Icon";
 import { Btn, Press, T } from "./ui";
 
@@ -29,6 +31,7 @@ export function Call() {
         <View style={styles.pad}>
           <Speaker />
         </View>
+        <FactStrip />
         <Transcript />
         <CallFooter />
       </KeyboardAvoidingView>
@@ -388,6 +391,7 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
         {sheet.title}
       </Text>
       <Rows rows={sheet.rows} />
+      <Receipt />
       <CallFeedback />
       <View style={styles.acts}>
         <Btn block label={t.back} onPress={() => store.goHome()} />

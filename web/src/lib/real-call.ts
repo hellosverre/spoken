@@ -1,5 +1,7 @@
 import type { Lang, Row } from "./i18n";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
+import { resetFacts, setFacts, type FactItem } from "@/components/FactStrip";
+import { setReceipt, type ReceiptData } from "@/components/Receipt";
 
 /* Real calls through the Spoken call server (server/ in this repo). The app keeps its UI:
    the server's clarify questions arrive as chat messages, the server's plan fills the plan
@@ -66,13 +68,14 @@ interface Plan {
   needsApprovalFor: string[];
   blocked?: { reason: string; alternative?: string };
 }
-interface CallResult { outcome: string; summary: string; details: Record<string, string> }
+interface CallResult { outcome: string; summary: string; details: Record<string, string>; receipt?: ReceiptData }
 type LiveEvent =
   | { type: "status"; status: string }
   | { type: "transcript"; id: string; who: "callee" | "agent"; text: string; final: boolean }
   | { type: "approval_request"; id: string; question: string; options: string[] }
   | { type: "note"; text: string; level: "info" | "warn" }
   | { type: "result"; result: CallResult }
+  | { type: "facts"; items: FactItem[] }
   | { type: string };
 
 /** What the chat needs to run the clarify step. */
@@ -203,6 +206,8 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   } else if (mode === "mock") {
     io.note(lang === "no" ? "Demosamtale: ingen ekte telefon ringer." : "Demo call: no real phone is ringing.");
   }
+  resetFacts();
+  setReceipt(null);
   const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
   const send = (cmd: object) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd)); };
   io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });
@@ -277,8 +282,14 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
         case "note":
           io.note((e as { text: string }).text);
           break;
+        case "facts": {
+          const items = (e as { items: FactItem[] }).items;
+          queue(async () => setFacts(items));
+          break;
+        }
         case "result":
           finished = true;
+          setReceipt((e as { result: CallResult }).result.receipt);
           resolve((e as { result: CallResult }).result);
           break;
       }
@@ -290,7 +301,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
       void (async () => {
         for (let i = 0; i < 30; i++) {
           const r = await http<CallResult & { inProgress?: boolean }>("GET", `/api/calls/${encodeURIComponent(callId)}`).catch(() => null);
-          if (r && !r.inProgress) return resolve(r);
+          if (r && !r.inProgress) { setReceipt(r.receipt); return resolve(r); }
           await new Promise((ok) => setTimeout(ok, 2000));
         }
         reject(new Error("Fikk ikke resultatet fra samtalen."));

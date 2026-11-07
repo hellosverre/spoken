@@ -8,7 +8,9 @@ import type { Sheet as SheetContent } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { DoneArt, NothingAgreedArt } from "./Art";
 import { Composer } from "./Composer";
+import { FactStrip } from "./FactStrip";
 import { Icon } from "./Icon";
+import { Receipt } from "./Receipt";
 
 export function Call({ on }: { on: boolean }) {
   return (
@@ -17,6 +19,7 @@ export function Call({ on }: { on: boolean }) {
       <div className="pad">
         <Speaker />
       </div>
+      <FactStrip />
       <Transcript />
       <CallComposer />
       <Sheet />
@@ -283,6 +286,7 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
       {sheet.ok ? <DoneArt /> : <NothingAgreedArt />}
       <h3 id="sheetTitle">{sheet.title}</h3>
       <Rows rows={sheet.rows} id="sheetDesc" />
+      <Receipt />
       <CallFeedback />
       <div className="acts">
         <button className="btn primary block" data-back onClick={() => store.goHome()}>
