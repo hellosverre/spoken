@@ -4,6 +4,7 @@ import type { ThemePref } from "../lib/store";
 import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
+import { ContactsSection } from "./ContactPicker";
 import { FeedbackSheet } from "./Feedback";
 import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
@@ -156,6 +157,9 @@ export function Profile() {
           </>
         ) : null}
       </View>
+
+      <SectionTitle icon="person" title={lang === "no" ? "Lagrede kontakter" : "Saved contacts"} />
+      <ContactsSection />
 
       <SectionTitle icon="sliders" title={m.appearance} />
       <View style={styles.group}>

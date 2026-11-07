@@ -8,7 +8,10 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "no.spoken.app"
+      "bundleIdentifier": "no.spoken.app",
+      "infoPlist": {
+        "NSContactsUsageDescription": "Spoken leser kontaktene dine bare når du velger «Importer fra telefonen» eller kontaktknappen, så du kan ringe dem. / Spoken reads your contacts only when you tap Import from phone or the contacts button, so you can call them."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,11 +21,19 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "no.spoken.app"
+      "package": "no.spoken.app",
+      "permissions": ["android.permission.READ_CONTACTS"],
+      "blockedPermissions": ["android.permission.WRITE_CONTACTS"]
     },
     "plugins": [
       "expo-router",
       "expo-font",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Spoken leser kontaktene dine bare når du velger «Importer fra telefonen» eller kontaktknappen, så du kan ringe dem. / Spoken reads your contacts only when you tap Import from phone or the contacts button, so you can call them."
+        }
+      ],
       [
         "expo-splash-screen",
         {
