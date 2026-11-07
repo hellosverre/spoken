@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spoken · Direction B · Two lanes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+/* Direction B — Two lanes.
+   A call has two sides, so the screen has two lanes split by "the line": the callee
+   on the left, Spoken on the right, time stamped on the rail between them.
+   Home is a Linear-style command list. Schibsted Grotesk: Norwegian newsroom type. */
+:root{
+  --bg:#09090c; --raise:#111116; --raise-2:#17171e; --line:#22222b; --ink:#f4f4f7; --ink-2:#a2a2b0; --ink-3:#5f5f6e;
+  --vio:#8f86ff; --vio-ink:#bdb7ff; --vio-wash:rgba(143,134,255,.13); --on-vio:#0b0a1a;
+}
+[data-theme=light]{
+  --bg:#fafafb; --raise:#ffffff; --raise-2:#f2f2f5; --line:#e4e4ea; --ink:#0e0e14; --ink-2:#51515f; --ink-3:#9a9aa8;
+  --vio:#5b4ff0; --vio-ink:#4a3fd6; --vio-wash:rgba(91,79,240,.09); --on-vio:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font-family:"Schibsted Grotesk",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.screen{max-width:430px;margin:0 auto;min-height:100vh;display:none;flex-direction:column;padding:16px 16px 18px}
+.screen.on{display:flex}
+svg{display:block}
+.top{display:flex;align-items:center;gap:10px;height:44px;padding:0 4px}
+.mark{font-weight:900;font-size:21px;letter-spacing:-.05em}
+.mark span{color:var(--vio)}
+.top .sp{flex:1}
+.pill{height:30px;padding:0 10px;border-radius:8px;background:var(--raise-2);font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+
+/* home: command list */
+.pal{margin-top:22px;border:1px solid var(--line);border-radius:16px;background:var(--raise);overflow:hidden}
+.inp{padding:18px 16px 16px}
+.inp .ph{font-size:13px;color:var(--ink-3);margin-bottom:8px}
+.inp .tx{font-size:25px;line-height:1.2;letter-spacing:-.025em;font-weight:500}
+.inp .tx i{display:inline-block;width:2px;height:26px;background:var(--vio);vertical-align:-4px;margin-left:1px}
+.inp .bar{display:flex;align-items:center;gap:8px;margin-top:18px}
+.inp .bar .sp{flex:1}
+.k{font-size:12px;color:var(--ink-3);border:1px solid var(--line);border-radius:6px;padding:2px 6px}
+.send{height:40px;padding:0 16px;border-radius:10px;background:var(--vio);color:var(--on-vio);font-weight:700;font-size:15px;display:flex;align-items:center;gap:8px}
+.grp{border-top:1px solid var(--line);padding:8px}
+.grp h2{font-size:12.5px;font-weight:500;color:var(--ink-3);padding:8px 8px 6px}
+.row{display:flex;align-items:center;gap:12px;height:48px;padding:0 8px;border-radius:10px;font-size:16px}
+.row.sel{background:var(--raise-2);box-shadow:inset 2px 0 0 var(--vio)}
+.row .g{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;color:var(--ink-2);background:var(--raise-2)}
+.row.sel .g{color:var(--vio-ink);background:var(--vio-wash)}
+.row b{font-weight:500}
+.row b u{text-decoration:none;color:var(--vio-ink)}
+.row span{color:var(--ink-3);font-size:14px;margin-left:auto}
+.foot{margin-top:auto;padding:16px 6px 0;font-size:13px;color:var(--ink-3);display:flex;justify-content:space-between}
+
+/* call: two lanes */
+.head{display:flex;align-items:flex-end;justify-content:space-between;padding:6px 4px 14px;border-bottom:1px solid var(--line)}
+.head b{font-size:15px;font-weight:600;display:block}
+.head small{font-size:13px;color:var(--ink-3)}
+.clock{font-size:40px;font-weight:800;letter-spacing:-.04em;font-variant-numeric:tabular-nums;line-height:1}
+.lanes{flex:1;position:relative;padding:14px 0 8px;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;overflow:hidden}
+.lanes:before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)}
+.lab{display:grid;grid-template-columns:1fr 1fr;font-size:12.5px;color:var(--ink-3);position:absolute;top:12px;left:0;right:0}
+.lab span:last-child{text-align:right;color:var(--vio-ink)}
+.m{position:relative;width:calc(50% + 46px);font-size:16.5px;line-height:1.38}
+.m.them{align-self:flex-start;padding-right:16px;font-size:21px;line-height:1.27;font-weight:500;letter-spacing:-.015em}
+.m.ai{align-self:flex-end;background:var(--vio-wash);border-radius:14px 4px 14px 14px;padding:10px 12px;color:var(--ink)}
+.m.old{opacity:.45}
+.m .t{position:absolute;font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.m.them .t{right:-30px;top:4px;background:var(--bg);padding:2px 0}
+.u{color:var(--ink-3)}
+.m .c{display:inline-block;width:2px;height:21px;background:var(--ink);vertical-align:-3px;margin-left:2px}
+.ask{position:relative;align-self:stretch;border:1px solid var(--vio);background:var(--raise);border-radius:18px;padding:16px;margin-top:6px}
+.ask .l{font-size:12.5px;color:var(--vio-ink);font-weight:600;display:flex;align-items:center;gap:7px}
+.ask .l i{width:7px;height:7px;border-radius:50%;background:var(--vio);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.ask h3{font-size:26px;line-height:1.12;letter-spacing:-.03em;font-weight:700;margin:8px 0 14px}
+.yn{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.yn div{height:84px;border-radius:12px;display:grid;place-items:center;font-size:36px;font-weight:900;letter-spacing:-.03em}
+.yes{background:var(--vio);color:var(--on-vio)}
+.no{background:var(--raise-2);color:var(--ink)}
+.ctl{display:flex;gap:6px;margin-top:12px}
+.ctl .in{flex:1;height:46px;border-radius:12px;background:var(--raise);border:1px solid var(--line);display:flex;align-items:center;padding:0 12px;font-size:15px;color:var(--ink-3)}
+.tone{display:flex;margin-top:8px;background:var(--raise);border:1px solid var(--line);border-radius:12px;padding:3px;font-size:14px}
+.tone span{flex:1;height:36px;display:grid;place-items:center;color:var(--ink-2);border-radius:9px}
+.tone span.on{background:var(--raise-2);color:var(--ink);font-weight:600}
+.tone span.sim{flex:1.3;border-left:1px solid var(--line);border-radius:0}
+.hang{width:46px;height:46px;border-radius:12px;background:#e5484d;display:grid;place-items:center;color:#fff}
+</style>
+</head>
+<body>
+<section class="screen" id="home">
+  <div class="top"><div class="mark">spoken<span>.</span></div><div class="sp"></div><div class="pill">EN</div><div class="pill">Sverre</div></div>
+  <div class="pal">
+    <div class="inp">
+      <div class="ph">What do you want done?</div>
+      <div class="tx">Order a large pepperoni from Domino's Storo for 18:00<i></i></div>
+      <div class="bar"><span class="k">Number: look up</span><span class="k">Read only</span><span class="sp"></span><div class="send">Plan<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h8M7.5 3.5 11 7l-3.5 3.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div></div>
+    </div>
+    <div class="grp">
+      <h2>Shortcuts</h2>
+      <div class="row sel"><div class="g"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 4.5 7.5 13 13 4.5a9 9 0 0 0-11 0Z" stroke-linejoin="round"/></svg></div><b><u>Order</u> food for pickup</b><span>⏎</span></div>
+      <div class="row"><div class="g"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="2" y="3" width="11" height="10" rx="2"/><path d="M2 6.5h11" /></svg></div><b>Book a doctor's time</b><span>2</span></div>
+      <div class="row"><div class="g"><svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 3l9 9M12 3l-9 9" stroke-linecap="round"/></svg></div><b>Cancel an appointment</b><span>3</span></div>
+    </div>
+    <div class="grp">
+      <h2>Saved places</h2>
+      <div class="row"><div class="g">D</div><b>Domino's Storo</b><span>22 15 00 00</span></div>
+      <div class="row"><div class="g">T</div><b>Torshov legesenter</b><span>23 22 41 00</span></div>
+      <div class="row"><div class="g">M</div><b>Mamma</b><span>913 40 552</span></div>
+    </div>
+  </div>
+  <div class="foot"><span>You type. We talk.</span><span>3 calls today</span></div>
+</section>
+
+<section class="screen" id="call">
+  <div class="head">
+    <div><b>Domino's Storo</b><small>Connected · +47 22 15 00 00</small></div>
+    <div class="clock">01:42</div>
+  </div>
+  <div class="lanes">
+    <div class="lab"><span>Domino's</span><span>Spoken</span></div>
+    <div class="m ai old">Hei, jeg er en KI-assistent som ringer på vegne av Sverre. Du kan si nei.</div>
+    <div class="m them old"><span class="t">01:12</span>Hei! Det går fint. Hva skal det være?</div>
+    <div class="m ai">En stor pepperoni, til henting klokka 18.</div>
+    <div class="m them"><span class="t">01:40</span>Det blir 189 kroner. Betaler du nå eller <span class="u">ved henting</span><span class="c"></span></div>
+    <div class="ask">
+      <div class="l"><i></i>Waiting for you · they hear «Et øyeblikk…»</div>
+      <h3>Pay 189 kr at pickup?</h3>
+      <div class="yn"><div class="yes">JA</div><div class="no">NEI</div></div>
+    </div>
+  </div>
+  <div class="ctl"><div class="in">Message Spoken mid-call…</div><div class="hang"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11.5c4-3.5 10-3.5 14 0l-1.8 2-2.7-1.2V10a9 9 0 0 0-5 0v2.3L4.8 13.5Z" stroke-linejoin="round"/></svg></div></div>
+  <div class="tone"><span class="on">Friendly</span><span>Firm</span><span>Hurry</span><span class="sim">Say simpler</span></div>
+</section>
+<script>
+const q=new URLSearchParams(location.search);
+document.documentElement.dataset.theme=q.get('theme')||'dark';
+document.getElementById(q.get('screen')||'home').classList.add('on');
+</script>
+</body>
+</html>
