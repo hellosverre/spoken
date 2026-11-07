@@ -13,6 +13,7 @@ On top of the web design, mobile adds:
 - **Back to home** on the call screen once the call has ended.
 - **Cancel** on the plan card, next to Change: drops the plan and starts an empty chat.
 - **A bigger tab bar**: full width, 56 pt tabs, every label shown.
+- **Colour-blind safe colours**: done is teal and not done is orange (not green against red), delete is a vermilion, and the preset tints are picked to stay apart under protanopia, deuteranopia and tritanopia, checked by simulation (Machado 2009) along with 4.5:1 text contrast in both themes. Status always has an icon and words as well, so nothing depends on colour alone. Not yet checked with colour-blind users. See the note at the top of `src/lib/theme.tsx`.
 - **Plainer labels**: no "Live" status pill or blinking dots in the call, and small labels are sentence-case Inter instead of the web's uppercase mono ("Spoken", "You", not "SPOKEN · AI", "YOU → SPOKEN"). Mobile-only names live in `copy-mobile.ts`.
 
 ```bash

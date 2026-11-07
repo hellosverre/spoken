@@ -108,16 +108,17 @@ const useStyles = makeStyles((C) => ({
   rowLine: { borderTopWidth: 1, borderTopColor: C.line },
   pressed: { backgroundColor: C.surface2 },
   ic: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: C.accentSoft },
-  icDanger: { backgroundColor: C.tints.rose.bg },
+  icDanger: { backgroundColor: C.dangerSoft },
   accent: { color: C.accent },
   danger: { color: C.danger },
   dim: { color: C.dim },
   seg: { flexDirection: "row", borderWidth: 1, borderColor: C.line2, borderRadius: 12, padding: 3 },
-  segBtn: { height: 30, paddingHorizontal: 11, borderRadius: 9, justifyContent: "center", alignItems: "center" },
+  // The chosen option gets an outline and a heavier label as well as the tint, so it doesn't rest on colour.
+  segBtn: { height: 30, paddingHorizontal: 11, borderRadius: 9, justifyContent: "center", alignItems: "center", borderWidth: 1.5, borderColor: "transparent" },
   // With an icon: the glyph over a small label, so three choices fit beside a row title.
   segIconBtn: { height: 50, minWidth: 52, paddingHorizontal: 8, gap: 3 },
   segWide: { alignSelf: "stretch" },
-  segOn: { backgroundColor: C.accentSoft },
+  segOn: { backgroundColor: C.accentSoft, borderColor: C.accent },
   segText: { fontFamily: F.medium, fontSize: 12, color: C.dim },
-  segTextOn: { color: C.accent },
+  segTextOn: { color: C.accent, fontFamily: F.semibold },
 }));

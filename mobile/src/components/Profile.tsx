@@ -52,10 +52,10 @@ export function Profile() {
   const hour = new Date().getHours();
   const greet = m.greet[hour < 5 ? "night" : hour < 11 ? "morning" : hour < 18 ? "day" : "evening"];
   const realOn = serverCalls && !!savedCode;
-  const teal = C.tints.teal;
+  const ready = C.ok;
 
   return (
-    <ScrollView style={styles.grow} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+    <ScrollView contentOffset={{ x: 0, y: 1250 }} style={styles.grow} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
       <Text style={styles.h} accessibilityRole="header">
         {m.profileH}
       </Text>
@@ -127,10 +127,10 @@ export function Profile() {
       </View>
 
       <SectionTitle icon="phone" title={m.callsH} />
-      <View style={[styles.group, realOn && { borderColor: teal.fg }]}>
+      <View style={[styles.group, realOn && { borderColor: ready.fg }]}>
         <View style={styles.switchRow}>
-          <View style={[styles.tile, { backgroundColor: realOn ? teal.bg : C.accentSoft }]}>
-            <Icon name="cloud" color={realOn ? teal.fg : C.accent} size={19} />
+          <View style={[styles.tile, { backgroundColor: realOn ? ready.bg : C.accentSoft }]}>
+            <Icon name="cloud" color={realOn ? ready.fg : C.accent} size={19} />
           </View>
           <View style={styles.grow}>
             <T size={15} weight="semibold">
@@ -152,7 +152,7 @@ export function Profile() {
         {serverCalls ? (
           <>
             <View style={styles.divider} />
-            <FieldRow icon="key" tint={realOn ? teal : undefined}>
+            <FieldRow icon="key" tint={realOn ? ready : undefined}>
               <Field
                 label={m.passcodeL}
                 value={code}
@@ -168,8 +168,8 @@ export function Profile() {
             </FieldRow>
             {/* The state of calls, said plainly: real phones can ring, or it's a demo. */}
             <View style={styles.state} accessibilityLiveRegion="polite">
-              <Icon name={realOn ? "check" : "phone"} color={realOn ? teal.fg : C.dim} size={16} strokeWidth={realOn ? 2.4 : 1.7} />
-              <Text style={[styles.stateText, { color: realOn ? teal.fg : C.dim }]}>{realOn ? m.passcodeSet : m.passcodeS}</Text>
+              <Icon name={realOn ? "check" : "phone"} color={realOn ? ready.fg : C.dim} size={16} strokeWidth={realOn ? 2.4 : 1.7} />
+              <Text style={[styles.stateText, { color: realOn ? ready.fg : C.dim }]}>{realOn ? m.passcodeSet : m.passcodeS}</Text>
             </View>
           </>
         ) : null}

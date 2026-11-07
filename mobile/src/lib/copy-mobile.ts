@@ -73,6 +73,8 @@ const en = {
   deleteQ: "Delete this preset?",
   deleteBody: "You can't undo this.",
   needName: "Give it a name and say what Spoken should do.",
+  needTitle: "Add a name",
+  needTemplate: "Say what Spoken should do",
   // Profile: calls
   callsH: "Calls",
   serverL: "Use the Spoken server",
@@ -188,6 +190,8 @@ const no: MobileCopy = {
   deleteQ: "Slette denne snarveien?",
   deleteBody: "Dette kan ikke angres.",
   needName: "Gi den et navn og skriv hva Spoken skal gjøre.",
+  needTitle: "Legg til et navn",
+  needTemplate: "Skriv hva Spoken skal gjøre",
   callsH: "Samtaler",
   serverL: "Bruk Spoken-serveren",
   serverS: "Spoken planlegger og ringer. Av: skriptede demoer på telefonen.",

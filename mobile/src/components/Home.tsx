@@ -310,7 +310,7 @@ function TabBar({ tab }: { tab: Tab }) {
               style={[styles.tab, on && styles.tabOn]}
             >
               <Icon name={x.icon} color={color} size={22} />
-              <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+              <Text style={[styles.tabLabel, on && styles.tabLabelOn, { color }]} numberOfLines={1}>
                 {x.label}
               </Text>
             </Pressable>
@@ -369,4 +369,5 @@ const useStyles = makeStyles((C) => ({
   tab: { flex: 1, height: 56, borderRadius: 999, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingHorizontal: 8 },
   tabOn: { backgroundColor: C.surface2 },
   tabLabel: { fontFamily: F.medium, fontSize: 15, letterSpacing: em(-0.006, 15) },
+  tabLabelOn: { fontFamily: F.semibold },
 }));

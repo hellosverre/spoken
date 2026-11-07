@@ -79,7 +79,7 @@ function CallCard({ call, onOpen }: { call: CallRecord; onOpen(): void }) {
   const lang = useSpoken((s) => s.lang);
   const { C } = useTheme();
   const styles = useStyles();
-  const tint = call.ok ? C.tints.teal : C.tints.rose;
+  const tint = call.ok ? C.ok : C.fail;
   return (
     <View style={styles.card}>
       <View style={styles.cardTop}>

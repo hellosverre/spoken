@@ -245,7 +245,7 @@ export function PresetEditor({ open, preset, onClose }: { open: boolean; preset:
       left={<HeadButton label={m.cancel} onPress={onClose} />}
       right={<HeadButton label={m.save} onPress={save} strong />}
     >
-      <Field label={m.presetName} value={draft.title} placeholder={m.presetNamePh} onChangeText={(title) => patch({ title })} error={invalid && !draft.title.trim()} />
+      <Field label={m.presetName} value={draft.title} placeholder={m.presetNamePh} onChangeText={(title) => patch({ title })} error={invalid && !draft.title.trim() ? m.needTitle : undefined} />
 
       <View style={styles.group}>
         <Text style={styles.groupLabel}>{m.iconL}</Text>
@@ -306,7 +306,7 @@ export function PresetEditor({ open, preset, onClose }: { open: boolean; preset:
         onChangeText={(template) => patch({ template })}
         onSelectionChange={(e) => setSel(e.nativeEvent.selection)}
         multiline
-        error={invalid && !draft.template.trim()}
+        error={invalid && !draft.template.trim() ? m.needTemplate : undefined}
         style={styles.multiline}
       />
       {draft.fields.some((f) => f.label.trim()) ? (

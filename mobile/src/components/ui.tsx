@@ -21,6 +21,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { ease, em, F, makeStyles, useTheme } from "../lib/theme";
+import { Icon } from "./Icon";
 
 // Shared pieces for the screens, matching the .btn, .rise and .dots rules in web/src/app/globals.css.
 
@@ -153,8 +154,12 @@ export function T({
   return <Text {...rest} style={[s, style]} />;
 }
 
-/** A labelled single-line input in the composer's look (.field): surface, hairline, accent on focus. */
-export function Field({ label, error, style, ...rest }: TextInputProps & { ref?: Ref<TextInputInstance>; label: string; error?: boolean }) {
+/**
+ * A labelled single-line input in the composer's look (.field): surface, hairline, accent on focus.
+ * `error` as text is written under the field with an icon and read out with it, so a mistake
+ * is never shown by the red border alone.
+ */
+export function Field({ label, error, style, ...rest }: TextInputProps & { ref?: Ref<TextInputInstance>; label: string; error?: boolean | string }) {
   const { C, scheme } = useTheme();
   const styles = useStyles();
   const [focused, setFocused] = useState(false);
@@ -163,6 +168,7 @@ export function Field({ label, error, style, ...rest }: TextInputProps & { ref?:
       <Text style={styles.fieldLabel}>{label}</Text>
       <TextInput
         accessibilityLabel={label}
+        accessibilityHint={typeof error === "string" ? error : undefined}
         placeholderTextColor={C.dim}
         selectionColor={C.accent}
         cursorColor={C.accent}
@@ -176,8 +182,14 @@ export function Field({ label, error, style, ...rest }: TextInputProps & { ref?:
           setFocused(false);
           rest.onBlur?.(e);
         }}
-        style={[styles.field, focused && { borderColor: C.accent }, error && { borderColor: C.danger }, style]}
+        style={[styles.field, focused && { borderColor: C.accent }, error ? styles.fieldBad : null, style]}
       />
+      {typeof error === "string" && error ? (
+        <View style={styles.fieldError}>
+          <Icon name="alert" color={C.danger} size={16} />
+          <Text style={styles.fieldErrorText}>{error}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -190,6 +202,9 @@ const useStyles = makeStyles((C) => ({
   dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.muted },
   fieldWrap: { gap: 6 },
   fieldLabel: { fontFamily: F.medium, fontSize: 13, color: C.muted },
+  fieldBad: { borderColor: C.danger, borderWidth: 2 },
+  fieldError: { flexDirection: "row", alignItems: "center", gap: 6 },
+  fieldErrorText: { fontFamily: F.medium, fontSize: 13.5, color: C.danger, flexShrink: 1 },
   field: {
     height: 48,
     paddingHorizontal: 14,

@@ -44,6 +44,12 @@ const PATHS = {
   send: <Path d="M5 12h13M13 6l6 6-6 6" />,
   check: <Path d="M5 12.5l4.5 4.5L19 7.5" />,
   x: <Path d="M7 7l10 10M17 7 7 17" />,
+  alert: (
+    <>
+      <Circle cx="12" cy="12" r="8.5" />
+      <Path d="M12 7.8v5.2M12 16.2v.1" />
+    </>
+  ),
   replay: (
     <>
       <Path d="M4 12a8 8 0 1 0 2.4-5.7" />
