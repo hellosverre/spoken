@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ThemePref } from "@/lib/store";
 import { useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { HeroDuet } from "./Art";
@@ -10,6 +10,8 @@ import { AccountSection, useAccountCopy } from "./Account";
 import { ContactsSection, useContactCopy } from "./ContactPicker";
 import { VoicePicker } from "./VoicePicker";
 import { Field } from "./ui";
+import { api } from "@/lib/account";
+import { VoiceSheet } from "./VoiceSheet";
 
 const THEMES: { v: ThemePref; icon: IconName }[] = [
   { v: "system", icon: "auto" },
@@ -25,6 +27,118 @@ function SectionTitle({ icon, children }: { icon: IconName; children: ReactNode 
     </h3>
   );
 }
+
+type Reason = "deaf" | "hard_of_hearing" | "speech" | "anxiety" | "other";
+type Mode = "always" | "when_helpful" | "never";
+interface ReasonState { reason?: Reason; reasonText?: string; reasonMode?: Mode }
+const REASONS: Reason[] = ["deaf", "hard_of_hearing", "speech", "anxiety", "other"];
+const MODES: Mode[] = ["always", "when_helpful", "never"];
+
+const REASON_COPY = {
+  no: {
+    title: "Fortell hvorfor jeg bruker Spoken", none: "Ikke satt", done: "Ferdig", clear: "Fjern",
+    hint: "Valgfritt. Sies bare i samtaler, og lagres først når du velger noe. Du kan fjerne det når som helst.",
+    why: "Grunn", when: "Når skal Spoken nevne det?", otherL: "Egen tekst", otherPh: "f.eks. har dysleksi", saveFail: "Fikk ikke lagret.",
+    reasons: { deaf: "Døv", hard_of_hearing: "Hørselshemmet", speech: "Talevansker", anxiety: "Telefonangst", other: "Annet" },
+    modes: { always: "Alltid", when_helpful: "Bare når det hjelper", never: "Aldri" },
+  },
+  en: {
+    title: "Tell why I use Spoken", none: "Not set", done: "Done", clear: "Remove",
+    hint: "Optional. Only said on calls, and stored only once you choose something. You can remove it any time.",
+    why: "Reason", when: "When should Spoken mention it?", otherL: "Your own words", otherPh: "e.g. has dyslexia", saveFail: "Couldn't save.",
+    reasons: { deaf: "Deaf", hard_of_hearing: "Hard of hearing", speech: "Speech", anxiety: "Phone anxiety", other: "Other" },
+    modes: { always: "Always", when_helpful: "Only when it helps", never: "Never" },
+  },
+} as const;
+
+/** Optional «why I use Spoken»: a collapsed row, details in a sheet. Health data, so it only exists once the user sets it. */
+function ReasonSection() {
+  const lang = useSpoken((s) => s.lang);
+  const c = REASON_COPY[lang];
+  const [st, setSt] = useState<ReasonState>({});
+  const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api<ReasonState>("GET", "/api/profile").then((p) => { setSt({ reason: p.reason, reasonText: p.reasonText, reasonMode: p.reasonMode }); setDraft(p.reasonText ?? ""); }).catch(() => {});
+  }, []);
+
+  /** next = null clears all three. The server keeps the old value when the keys are absent. */
+  async function save(next: ReasonState | null) {
+    const prev = st;
+    const value = next ?? {};
+    setSt(value);
+    setError("");
+    try {
+      const cur = await api<Record<string, unknown>>("GET", "/api/profile");
+      await api("PUT", "/api/profile", {
+        hearCall: true, personality: "warm", ...cur, lang,
+        reason: value.reason ?? null, reasonText: value.reasonText ?? null, reasonMode: value.reasonMode ?? null,
+      });
+    } catch {
+      setSt(prev);
+      setError(c.saveFail);
+    }
+  }
+
+  const label = st.reason ? (st.reason === "other" && st.reasonText ? st.reasonText : c.reasons[st.reason]) + " · " + c.modes[st.reasonMode ?? "when_helpful"] : c.none;
+  const mode = st.reasonMode ?? "when_helpful";
+
+  return (
+    <div className="rs">
+      <style>{REASON_CSS}</style>
+      <button type="button" className="rs-row" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
+        <span className="rs-t"><b>{c.title}</b><span>{label}</span></span>
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9.5 6l6 6-6 6" /></svg>
+      </button>
+      {error && <p className="help" role="status">{error}</p>}
+      {open && (
+        <VoiceSheet title={c.title} closeLabel={c.done} onClose={() => setOpen(false)}>
+          <p className="help" style={{ margin: "0 0 0.75rem" }}>{c.hint}</p>
+          <div role="group" aria-label={c.why} className="rs-chips">
+            {REASONS.map((r) => (
+              <button key={r} type="button" aria-pressed={st.reason === r}
+                onClick={() => void save({ reason: r, reasonMode: mode, reasonText: r === "other" ? draft.trim().slice(0, 60) || undefined : undefined })}>
+                {c.reasons[r]}
+              </button>
+            ))}
+          </div>
+          {st.reason === "other" && (
+            <Field label={c.otherL} placeholder={c.otherPh} maxLength={60} value={draft} autoComplete="off"
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={() => draft.trim() !== (st.reasonText ?? "") && void save({ ...st, reasonText: draft.trim() || undefined })} />
+          )}
+          {st.reason && (
+            <>
+              <h4 className="rs-h">{c.when}</h4>
+              <div className="seg wide" role="group" aria-label={c.when}>
+                {MODES.map((m) => (
+                  <button key={m} type="button" aria-pressed={mode === m} onClick={() => void save({ ...st, reasonMode: m })}>{c.modes[m]}</button>
+                ))}
+              </div>
+              <button type="button" className="rs-clear" onClick={() => { setDraft(""); void save(null); }}>{c.clear}</button>
+            </>
+          )}
+        </VoiceSheet>
+      )}
+    </div>
+  );
+}
+
+const REASON_CSS = `
+.rs-row{display:flex;align-items:center;gap:0.75rem;width:100%;min-height:3.25rem;padding:0.5rem 0.875rem;background:var(--surface);border:1px solid var(--line);border-radius:1.125rem;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.rs-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.rs-t{flex:1;display:flex;flex-direction:column;min-width:0}
+.rs-t b{font-size:0.9375rem;font-weight:560}
+.rs-t span{font-size:0.8125rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rs-row svg{color:var(--muted);flex:none}
+.rs-chips{display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem}
+.rs-chips button{min-height:2.5rem;padding:0 0.875rem;border-radius:999px;border:1px solid var(--line-2);background:transparent;color:var(--ink);font:inherit;font-size:0.875rem;cursor:pointer}
+.rs-chips button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.rs-h{margin:1rem 0 0.5rem;font-size:0.8125rem;font-weight:510;color:var(--muted)}
+.rs-clear{margin-top:1rem;min-height:2.5rem;background:none;border:0;color:var(--muted);font:inherit;font-size:0.875rem;text-decoration:underline;cursor:pointer}
+`;
 
 /** The Profile tab: who you are, the theme, language and the rest of the old settings. */
 export function Profile() {
@@ -118,6 +232,8 @@ export function Profile() {
 
         <SectionTitle icon="phone">{lang === "no" ? "Stemme" : "Voice"}</SectionTitle>
         <VoicePicker />
+
+        <ReasonSection />
 
         <SectionTitle icon="lock">{ac.title}</SectionTitle>
         <AccountSection />
