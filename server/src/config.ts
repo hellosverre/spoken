@@ -1,6 +1,6 @@
 // Runtime config from env. Secrets are read here and nowhere else; never log them.
 
-export type CallProvider = "mock" | "telnyx";
+export type CallProvider = "mock" | "telnyx" | "46elks";
 export type LlmProviderName = "mock" | "mistral" | "openai" | "openrouter";
 
 function env(name: string, fallback = ""): string {
@@ -28,6 +28,16 @@ export const config = {
     apiKey: env("TELNYX_API_KEY"),
     connectionId: env("TELNYX_CONNECTION_ID"),
     fromNumber: env("TELNYX_FROM_NUMBER"),
+  },
+  elks: {
+    apiUser: env("ELKS_API_USER"),
+    apiPassword: env("ELKS_API_PASSWORD"),
+    /** Our voice-enabled 46elks number: caller id of the outbound call. */
+    number: env("ELKS_NUMBER"),
+    /** The 46elks WebSocket number whose websocket_url points at /elks/media. */
+    wsNumber: env("ELKS_WS_NUMBER"),
+    /** Shared secret in that websocket_url (?t=…): 46elks can't carry a per-call token. */
+    wsSecret: env("ELKS_WS_SECRET"),
   },
   elevenlabs: {
     apiKey: env("ELEVENLABS_API_KEY"),
