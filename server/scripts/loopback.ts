@@ -27,7 +27,7 @@ for (const model of models) {
     committed: (t) => { commits++; console.log(`\n  committed (+${Date.now() - endAt} ms after audio end): ${t}`); },
     words: (_t, w) => { console.log(`  low-confidence words: ${w.filter((x) => x.confidence < 0.6).map((x) => `${x.text}(${x.confidence.toFixed(2)})`).join(" ") || "none"}`); done.resolve(); },
     error: (m) => { console.log(`  scribe error: ${m}`); done.resolve(); },
-  }, ["Domino's", "pepperoni"]);
+  }, ["Domino's", "pepperoni"], "", "ulaw_8000");
   s.connect();
   const silence = new Uint8Array(8000 * 2).fill(0xff);
   const all = concat([audio, silence]);

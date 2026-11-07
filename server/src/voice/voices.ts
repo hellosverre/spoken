@@ -4,6 +4,7 @@
 import type { Voice } from "../../../shared/contract.ts";
 import { config } from "../config.ts";
 import { designedVoices } from "../store.ts";
+import { elKey, elKeyFailed } from "./el-key.ts";
 
 export const PRESET_VOICES: Voice[] = [
   { id: "nPczCjzI2devNBz1zQrb", name: "Brian", description: "Rolig, dyp og varm. Standard.", preset: true },
@@ -18,11 +19,15 @@ export function listVoices(): Voice[] {
 async function el(path: string, body: object): Promise<any> {
   const res = await fetch(`https://api.elevenlabs.io${path}`, {
     method: "POST",
-    headers: { "xi-api-key": config.elevenlabs.apiKey, "Content-Type": "application/json" },
+    headers: { "xi-api-key": elKey(), "Content-Type": "application/json" },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(30_000),
   });
-  if (!res.ok) throw new Error(`ElevenLabs ${path} HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    if (elKeyFailed(res.status, text)) return el(path, body);
+    throw new Error(`ElevenLabs ${path} HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
   return res.json();
 }
 
@@ -30,7 +35,7 @@ async function el(path: string, body: object): Promise<any> {
 export async function designVoice(description: string): Promise<Voice> {
   const desc = description.trim().slice(0, 1000);
   const name = `Egen stemme ${designedVoices.length + 1}`;
-  if (config.callProvider === "telnyx" && config.elevenlabs.apiKey) {
+  if (config.callProvider === "telnyx" && elKey()) {
     try {
       const d = await el("/v1/text-to-voice/design", {
         voice_description: desc,

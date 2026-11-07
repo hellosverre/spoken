@@ -106,6 +106,17 @@ STT heard: «Der går det bra», «Okay», «Med røret ett», «Så har vi grup
 | meta-llama/llama-4-maverick | 464 ms | 674 ms | 3 issues | dropped the time |
 | openai/gpt-4.1-mini | 724 ms | 880 ms | all ok | asks [[ASK]] too early |
 
+## Calls #6 and #7 (Sat 7 Nov, Creator key, Haiku 5.5)
+
+| | #6 | #7 |
+|---|---|---|
+| Result | `failed` («restauranten selger ikke pizza»), 69 s | `done` («1 stor pepperoni, hentes 18:00 i dag på navnet Sverre»), 79 s |
+| Approval card | none (no offer) | 1, correct item/time/name, auto-JA |
+| Total latency median (callee stops → agent audio) | ~1.5 s | ~2.1 s (accuracy waits: 250 ms for confidences + 2 batch restarts) |
+| Cost | Telnyx $0.0814, LLM $0.00059, TTS 553 chars | Telnyx $0.0814, LLM $0.00104, TTS 618 chars |
+
+#6 answered realtime «vi selger ekte pizza» before batch corrected it to «ikke» → fixed in #7 (wait for confidences, restart an unspoken turn on correction; it fired twice in #7 and both answers were right).
+
 ## Fixes after the call #5 review
 
 | # | Issue | Cause | Fix | Test |

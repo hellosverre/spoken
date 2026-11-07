@@ -1,7 +1,7 @@
 // Scribe v2 batch on one finished callee segment: slower (~0.7 s) but more accurate than
 // realtime. Used as a second opinion that corrects the live transcript.
 import type { Word } from "../../../shared/contract.ts";
-import { config } from "../config.ts";
+import { elKey, elKeyFailed } from "./el-key.ts";
 import { logprobToConfidence } from "./scribe.ts";
 
 function upsample16k(pcm8k: Int16Array): Int16Array {
@@ -14,7 +14,7 @@ function upsample16k(pcm8k: Int16Array): Int16Array {
 }
 
 export async function transcribeSegment(pcm8k: Int16Array, keyterms: string[], timeoutMs = 4000): Promise<{ text: string; words: Word[] }> {
-  if (!config.elevenlabs.apiKey) throw new Error("ELEVENLABS_API_KEY missing");
+  if (!elKey()) throw new Error("ELEVENLABS_API_KEY missing");
   const form = new FormData();
   form.append("model_id", "scribe_v2");
   form.append("language_code", "no");
@@ -23,11 +23,15 @@ export async function transcribeSegment(pcm8k: Int16Array, keyterms: string[], t
   form.append("file", new Blob([upsample16k(pcm8k).buffer as ArrayBuffer]), "segment.pcm");
   const res = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
     method: "POST",
-    headers: { "xi-api-key": config.elevenlabs.apiKey },
+    headers: { "xi-api-key": elKey() },
     body: form,
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!res.ok) throw new Error(`Scribe batch HTTP ${res.status}: ${(await res.text()).slice(0, 150)}`);
+  if (!res.ok) {
+    const body = await res.text();
+    if (elKeyFailed(res.status, body)) return transcribeSegment(pcm8k, keyterms, timeoutMs);
+    throw new Error(`Scribe batch HTTP ${res.status}: ${body.slice(0, 150)}`);
+  }
   const j: any = await res.json();
   const words: Word[] = (j.words ?? [])
     .filter((w: any) => w.type === "word" && w.text?.trim())
