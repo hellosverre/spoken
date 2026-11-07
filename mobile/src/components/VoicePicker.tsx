@@ -3,8 +3,10 @@ import { Pressable, Text, View } from "react-native";
 import { api } from "../lib/account";
 import { F, makeStyles, small, useTheme } from "../lib/theme";
 import { useSpoken } from "../lib/use-spoken";
+import { Icon } from "./Icon";
 import { T } from "./ui";
 import { VoiceOrb } from "./VoiceOrb";
+import { VoiceSheet } from "./VoiceSheet";
 
 interface VoiceItem {
   id: string;
@@ -28,13 +30,13 @@ const DEFAULTS = { no: "4kCDY3HJwvO7Zp3con83", en: "Cz0K1kOv9tD8l0b5Qu53" } as c
 
 const COPY = {
   en: {
-    no: "Norsk", en: "English", choose: "Choose", chosen: "Chosen", standard: "Default", male: "male", female: "female",
+    title: "Voice", done: "Done", no: "Norsk", en: "English", choose: "Choose", chosen: "Chosen", standard: "Default", male: "male", female: "female",
     play: (n: string) => `Preview ${n}`, stop: (n: string) => `Stop preview of ${n}`, pick: (n: string) => `Choose ${n} as your voice`,
     fail: "Couldn't save on the server.",
     hint: "The voice your calls use. A call uses it when it matches the call's language.",
   },
   no: {
-    no: "Norsk", en: "English", choose: "Velg", chosen: "Valgt", standard: "Standard", male: "mann", female: "kvinne",
+    title: "Stemme", done: "Ferdig", no: "Norsk", en: "English", choose: "Velg", chosen: "Valgt", standard: "Standard", male: "mann", female: "kvinne",
     play: (n: string) => `Hør ${n}`, stop: (n: string) => `Stopp ${n}`, pick: (n: string) => `Velg ${n} som stemme`,
     fail: "Fikk ikke lagret på serveren.",
     hint: "Stemmen samtalene dine bruker. Den brukes når den passer til språket i samtalen.",
@@ -52,6 +54,7 @@ export function VoicePicker() {
   const [selected, setSelected] = useState("");
   const [playing, setPlaying] = useState("");
   const [error, setError] = useState("");
+  const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
@@ -72,6 +75,8 @@ export function VoicePicker() {
   async function choose(id: string) {
     setSelected(id);
     setError("");
+    setPlaying("");
+    setOpen(false);
     try {
       const cur = await api<Record<string, unknown>>("GET", "/api/profile");
       await api("PUT", "/api/profile", { hearCall: true, personality: "warm", ...cur, lang, voiceId: id });
@@ -80,8 +85,26 @@ export function VoicePicker() {
     }
   }
 
+  const current = voices.find((v) => v.id === (selected || DEFAULTS[lang])) ?? voices[0];
+  const sub = current ? `${current.name} · ${current.lang ? c[current.lang] : ""}` : "";
+
   return (
     <View>
+      <Pressable
+        onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`${c.title}: ${sub}`}
+        style={styles.row}
+      >
+        {current ? <VoiceOrb voiceId={current.id} playing={false} size={24} still /> : null}
+        <View style={styles.rowText}>
+          <T size={15} weight="semibold">{c.title}</T>
+          <Text style={styles.sub}>{sub}</Text>
+        </View>
+        <Icon name="chevron" size={16} color={C.muted} />
+      </Pressable>
+      {error ? <Text style={styles.hint} accessibilityLiveRegion="polite">{error}</Text> : null}
+      <VoiceSheet visible={open} title={c.title} closeLabel={c.done} onClose={() => { setPlaying(""); setOpen(false); }}>
       <Text style={styles.hint}>{c.hint}</Text>
       {(["no", "en"] as const).map((l) => (
         <View key={l} accessibilityRole="none">
@@ -119,12 +142,17 @@ export function VoicePicker() {
           </View>
         </View>
       ))}
-      {error ? <Text style={styles.hint} accessibilityLiveRegion="polite">{error}</Text> : null}
+      </VoiceSheet>
     </View>
   );
 }
 
 const useStyles = makeStyles((C) => ({
+  row: {
+    flexDirection: "row", alignItems: "center", gap: 12, minHeight: 52, paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 18, borderWidth: 1, borderColor: C.line, backgroundColor: C.surface,
+  },
+  rowText: { flex: 1 },
   hint: { ...small(13), color: C.dim, marginBottom: 6 },
   group: { fontFamily: F.medium, fontSize: 13, color: C.muted, marginTop: 10, marginBottom: 8 },
   grid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },

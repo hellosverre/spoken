@@ -16,11 +16,13 @@ export const ORB_COLORS: Record<string, [string, string]> = {
 const FALLBACK: [string, string] = ["#7B8CFF", "#B6C2FF"];
 
 /** A soft blurred gradient cloud. Idle: slow breathing. Playing: swells with `level` (0..1, read per frame). */
-export function VoiceOrb({ voiceId, playing, level, size = 4.75 }: {
+export function VoiceOrb({ voiceId, playing, level, size = 4.75, still }: {
   voiceId: string;
   playing: boolean;
   level: MutableRefObject<number>;
   size?: number;
+  /** No breathing at all: for the small orb in the Profile row. */
+  still?: boolean;
 }) {
   const core = useRef<HTMLSpanElement>(null);
   const [a, b] = ORB_COLORS[voiceId] ?? FALLBACK;
@@ -50,6 +52,7 @@ export function VoiceOrb({ voiceId, playing, level, size = 4.75 }: {
       ref={core}
       className="vorb"
       data-playing={playing || undefined}
+      data-still={still || undefined}
       aria-hidden
       style={{ ["--a" as string]: a, ["--b" as string]: b, width: `${size}rem`, height: `${size}rem` }}
     >
@@ -67,6 +70,7 @@ export const ORB_CSS = `
 .vorb-c1{background:radial-gradient(circle at 35% 35%,var(--b),var(--a) 62%,transparent 78%);transform:scale(calc(.92 + var(--lvl)*.32));animation:vorb-breathe 5s ease-in-out infinite}
 .vorb-c2{background:radial-gradient(circle at 70% 70%,var(--a),transparent 62%);opacity:.75;border-radius:46% 54% 52% 48%/55% 45% 55% 45%;transform:scale(calc(.78 + var(--lvl)*.5)) rotate(0deg);animation:vorb-drift 9s ease-in-out infinite}
 .vorb-c3{background:radial-gradient(circle at 30% 25%,#fff,transparent 45%);opacity:calc(.28 + var(--lvl)*.4);inset:12%;filter:blur(.35rem)}
+.vorb[data-still] i{animation:none!important;filter:blur(.1rem)}
 .vorb[data-playing] i{animation-duration:2.4s,4s}
 @keyframes vorb-breathe{0%,100%{scale:1}50%{scale:1.07}}
 @keyframes vorb-drift{0%,100%{rotate:0deg;translate:0 0}50%{rotate:70deg;translate:.12rem -.1rem}}

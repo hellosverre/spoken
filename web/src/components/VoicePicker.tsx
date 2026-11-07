@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/account";
 import { useSpoken } from "@/lib/use-spoken";
 import { ORB_CSS, VoiceOrb } from "./VoiceOrb";
+import { VoiceSheet } from "./VoiceSheet";
 
 interface VoiceItem {
   id: string;
@@ -30,7 +31,7 @@ const LOCAL_KEY = "spoken-voice";
 
 const COPY = {
   en: {
-    title: "Voice", no: "Norsk", en: "English", choose: "Choose", chosen: "Chosen", standard: "Default",
+    title: "Voice", done: "Done", no: "Norsk", en: "English", choose: "Choose", chosen: "Chosen", standard: "Default",
     play: (n: string) => `Play sample of ${n}`, stop: (n: string) => `Stop sample of ${n}`,
     pick: (n: string) => `Choose ${n} as your voice`, male: "male", female: "female",
     saveFail: "Couldn't save on the server. Saved on this device.",
@@ -38,7 +39,7 @@ const COPY = {
     sample: { no: "Hei, jeg ringer på vegne av deg.", en: "Hi, I'm calling on behalf of you." },
   },
   no: {
-    title: "Stemme", no: "Norsk", en: "English", choose: "Velg", chosen: "Valgt", standard: "Standard",
+    title: "Stemme", done: "Ferdig", no: "Norsk", en: "English", choose: "Velg", chosen: "Valgt", standard: "Standard",
     play: (n: string) => `Spill av prøve av ${n}`, stop: (n: string) => `Stopp prøve av ${n}`,
     pick: (n: string) => `Velg ${n} som stemme`, male: "mann", female: "kvinne",
     saveFail: "Fikk ikke lagret på serveren. Lagret på denne enheten.",
@@ -134,6 +135,7 @@ export function VoicePicker() {
   const [voices, setVoices] = useState<VoiceItem[]>(OFFLINE);
   const [selected, setSelected] = useState("");
   const [error, setError] = useState("");
+  const [open, setOpen] = useState(false);
   const { level, playingId, play, stop } = usePreview();
 
   useEffect(() => {
@@ -145,9 +147,12 @@ export function VoicePicker() {
     api<{ voiceId?: string }>("GET", "/api/profile").then((p) => p.voiceId && setSelected(p.voiceId)).catch(() => {});
   }, []);
 
+  const close = useCallback(() => { stop(); setOpen(false); }, [stop]);
+
   async function choose(id: string) {
     setSelected(id);
     setError("");
+    close();
     try { localStorage.setItem(LOCAL_KEY, id); } catch { /* ignore */ }
     try {
       const cur = await api<Record<string, unknown>>("GET", "/api/profile");
@@ -157,11 +162,23 @@ export function VoicePicker() {
     }
   }
 
+  const current = voices.find((v) => v.id === (selected || DEFAULTS[lang])) ?? voices[0];
   const groups = (["no", "en"] as const).map((l) => ({ l, items: voices.filter((v) => v.lang === l) }));
 
   return (
     <div className="vp">
       <style>{ORB_CSS + PICKER_CSS}</style>
+      <button type="button" className="vp-row" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
+        {current && <VoiceOrb voiceId={current.id} playing={false} level={level} size={1.5} still />}
+        <span className="vp-row-t">
+          <b>{c.title}</b>
+          <span>{current ? `${current.name} · ${current.lang ? c[current.lang] : ""}` : ""}</span>
+        </span>
+        <svg className="vp-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9.5 6l6 6-6 6" /></svg>
+      </button>
+      {error && <p className="help" role="status" style={{ color: "var(--muted)" }}>{error}</p>}
+      {open && (
+        <VoiceSheet title={c.title} closeLabel={c.done} onClose={close}>
       <p className="help" style={{ margin: "0 0 0.5rem" }}>{c.hint}</p>
       {groups.map(({ l, items }) => items.length > 0 && (
         <section key={l} aria-label={c[l]}>
@@ -201,12 +218,21 @@ export function VoicePicker() {
           </ul>
         </section>
       ))}
-      {error && <p className="help" role="status" style={{ color: "var(--muted)" }}>{error}</p>}
+        </VoiceSheet>
+      )}
     </div>
   );
 }
 
 const PICKER_CSS = `
+.vp-row{display:flex;align-items:center;gap:0.75rem;width:100%;min-height:3.25rem;padding:0.5rem 0.875rem;background:var(--surface);border:1px solid var(--line);border-radius:1.125rem;color:var(--ink);font:inherit;text-align:left;cursor:pointer}
+.vp-row:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.vp-row .vorb{margin:0 0.125rem}
+.vp-row-t{flex:1;display:flex;flex-direction:column;min-width:0}
+.vp-row-t b{font-size:0.9375rem;font-weight:560}
+.vp-row-t span{font-size:0.8125rem;color:var(--muted)}
+.vp-chev{color:var(--muted);flex:none}
+
 .vp-group{margin:0.75rem 0 0.5rem;font-size:0.8125rem;font-weight:510;color:var(--muted);letter-spacing:.02em}
 .vp-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.625rem}
 .vp-card{display:flex;flex-direction:column;align-items:center;gap:0.125rem;padding:0.875rem 0.5rem 0.625rem;background:var(--surface);border:1px solid var(--line);border-radius:1.125rem;transition:border-color .2s}
