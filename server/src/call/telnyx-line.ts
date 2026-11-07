@@ -324,7 +324,10 @@ export class TelnyxLine implements CallLine {
         this.saveSegment({ ...seg, batch: r.text, batchMs: Date.now() - t0 });
         // Only replace realtime when batch looks like the same utterance (guards bad windows).
         const n = (t: string) => norm(t).split(" ").filter(Boolean).length;
-        const plausible = n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
+        // and must share at least one word ("I Storo." → "Bestill levering" on call #4 was the wrong window).
+        const rw = new Set(norm(realtime).split(" "));
+        const overlap = norm(r.text).split(" ").some((w) => w && rw.has(w));
+        const plausible = overlap && n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
         if (r.text && plausible && norm(r.text) !== norm(realtime)) this.ev.calleeRevised?.(id, r.text, r.words);
       })
       .catch((e) => console.warn("[scribe-batch]", (e as Error).message));

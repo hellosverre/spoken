@@ -106,6 +106,12 @@ STT heard: «Der går det bra», «Okay», «Med røret ett», «Så har vi grup
 | meta-llama/llama-4-maverick | 464 ms | 674 ms | 3 issues | dropped the time |
 | openai/gpt-4.1-mini | 724 ms | 880 ms | all ok | asks [[ASK]] too early |
 
+## Call #4 (Sat 7 Nov, merged main, Haiku 5.5, Sverre as the shop)
+
+88 s, outcome `done` («Bestilt: 1 stor pepperoni, hentes 18:00 på navnet Sverre»). Approval card fired at 37 s (auto-JA by the test script). Cost: Telnyx $0.0814 (120 s billed), LLM $0.00134 (9 req), TTS 597 chars, STT 87 s realtime + 11 batch segments.
+
+Latency regressed: median total ~2.37 s (STT ~650, LLM ~610, TTS ~150) because realtime marks unsure words on almost every real-line segment, so the confidence gate waited 0.6–1.0 s for batch on nearly every turn. Batch fixed real errors («passordet … dronning» → «personen … pepperoni», «Vil gi pizzabestilling» → «Hvilken pizza vil du ha?») but realtime marked none of those words unsure. Misaligned windows produced wrong revisions («I Storo.» → «Bestill levering»); revisions now need word overlap.
+
 ## Approval timeout → hold (Sverre, Sat 7 Nov)
 
 User hasn't answered an approval card after `HOLD_ASK_SEC` (30): agent asks «Beklager ventetiden. Jeg får ikke helt kontakt med {name} akkurat nå. Har du mulighet til å vente litt?».

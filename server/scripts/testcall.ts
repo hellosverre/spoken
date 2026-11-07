@@ -34,7 +34,9 @@ ws.onmessage = (m) => {
   } else if (e.type === "result") {
     console.log(`${ts()} RESULT ${e.result.outcome}: ${e.result.summary} (${e.result.durationSec}s)`);
     process.exit(0);
-  } else if (e.type !== "agent_typing") {
+  } else if (e.type === "latency") {
+    console.log(`${ts()} latency stt ${e.sttMs} | llm ${e.llmMs} | tts ${e.ttsMs} | total ${e.totalMs} ms`);
+  } else if (e.type !== "agent_typing" && e.type !== "level") {
     console.log(`${ts()} ${e.type} ${e.status ?? e.text ?? ""}`);
   }
 };
