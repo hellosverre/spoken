@@ -25,10 +25,8 @@ export function Call({ on }: { on: boolean }) {
 function useContact() {
   const scenario = useSpoken((s) => s.scenario);
   const lang = useSpoken((s) => s.lang);
-  const callee = useSpoken((s) => s.callee);
-  if (callee) return { contact: callee.name, number: callee.number, init: callee.init };
   const sc = SCENARIOS[scenario];
-  return { contact: sc[lang].contact, number: sc.number, init: sc.init };
+  return { ...sc, contact: sc[lang].contact };
 }
 
 function CallHead() {
@@ -121,7 +119,7 @@ function Transcript() {
               <span className="who">{line.kind === "ai" ? t.aiLabel : contact}</span>
               <span className="txt">
                 {line.words.map((w, i) => (
-                  <span key={i} className={cx("w", line.unsure?.[i] && "unsure")}>
+                  <span key={i} className="w">
                     {i ? ` ${w}` : w}
                   </span>
                 ))}
@@ -224,11 +222,9 @@ function AskSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "ask" }> }) 
       </span>
       <h3 id="sheetTitle">{cfg.title}</h3>
       <Rows rows={cfg.rows} />
-      {cfg.hold && (
-        <p className="hold">
-          {t.holdSaid} <q>{cfg.hold}</q>
-        </p>
-      )}
+      <p className="hold">
+        {t.holdSaid} <q>{cfg.hold}</q>
+      </p>
       <div className="acts">
         <div className={many ? "optrow" : undefined}>
           {cfg.options.map((o) => (
