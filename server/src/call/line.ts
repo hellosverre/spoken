@@ -48,6 +48,8 @@ export interface CallLine {
   prefetch?(texts: string[]): void;
   /** ms since the callee's audio last had voice energy (Infinity if unknown). */
   silenceMs?(): number;
+  /** ms of our own audio still to play (0 when quiet, Infinity while TTS is still arriving). */
+  speechLeftMs?(): number;
   /** True if this line sends calleeRevised for segments. */
   readonly revises?: boolean;
   /** True on a real phone line: the person answering speaks first, so we wait for their greeting. */

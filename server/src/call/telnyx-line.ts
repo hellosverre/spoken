@@ -496,6 +496,13 @@ export class TelnyxLine implements CallLine {
     return done;
   }
 
+  speechLeftMs() {
+    if (!this.speakResolve) return 0;
+    if (!this.producerDone) return Infinity;
+    // 8 kHz G.711: 8 bytes per ms still queued, plus what was sent ahead of the clock.
+    return this.buffered() / 8 + Math.max(0, this.sentMs - (Date.now() - this.clockStart));
+  }
+
   stopSpeaking() {
     this.speakAbort?.abort();
     this.chunks = [];

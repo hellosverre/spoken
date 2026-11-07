@@ -116,6 +116,10 @@ const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
 const OVERLAP_BATCH = process.env.OVERLAP_BATCH !== "0";
 // The callee «talked over» us but said nothing real (noise, «mm»): say the cut sentence again.
 const BARGE_RESUME_MS = Number(process.env.BARGE_RESUME_MS ?? 1500);
+const PLAIN_NO = /^(nei|nei takk|nei,? (takk|det vil jeg ikke|det går ikke)|no|no thanks|no,? thank you)[.!]?$/i;
+const REFUSAL_HINT = "⟨svar på om de vil snakke med en KI⟩";
+/** Talk this close to the end of our line doesn't cut it. */
+const BARGE_TAIL_MS = Number(process.env.BARGE_TAIL_MS ?? 400);
 // Questions and normal sentences are finished even if they end in «det»/«den» («vi har ikke det.»).
 const CONNECTOR_END = /\b(og|eller|men|fordi|at|som|hvis|altså|eh|ehm|øh|liksom|til|med|for|om)[.…]?$/i;
 function soundsUnfinished(text: string): boolean {
@@ -439,6 +443,11 @@ export class CallSession {
   private onCalleeSpeech() {
     if (this.openingSpeaking) return; // the disclosure always plays to the end
     // Barge-in: the callee talks over us → stop audio at once and drop the rest of the turn.
+    // Loud at the very end of our line (c_13c78747ac98): the line was said; let it finish.
+    if (this.speaking && (this.init.line.speechLeftMs?.() ?? Infinity) < BARGE_TAIL_MS) {
+      this.debug("barge_in_at_end");
+      return;
+    }
     if (this.speaking) {
       console.log(`[barge-in] callee spoke over the agent; TTS stopped (call ${this.callId})`);
       this.debug("barge_in");
@@ -460,7 +469,10 @@ export class CallSession {
     // Times are parsed in code and handed to the LLM as facts («⟨tid: 19:00⟩»).
     const hint = timeHint(clean);
     if (faint) this.faintIds.add(id);
-    const item: HistoryItem = { role: "callee", text: [clean, hint, faint ? FAINT_HINT : ""].filter(Boolean).join(" ") };
+    // A bare «Nei» right after «Du kan gjerne si nei til å snakke med meg» is the answer to that.
+    const prevAgent = [...this.history].reverse().find((h) => h.role === "agent")?.text ?? "";
+    const refusal = /\b(si nei til å snakke med meg|say no to talking to me)\b/i.test(prevAgent) && PLAIN_NO.test(clean) ? REFUSAL_HINT : "";
+    const item: HistoryItem = { role: "callee", text: [clean, hint, refusal, faint ? FAINT_HINT : ""].filter(Boolean).join(" ") };
     this.history.push(item);
     this.segItems.set(id, item);
     this.checkMessage(id, clean);
@@ -542,11 +554,18 @@ export class CallSession {
       void this.requestApproval("Mottakeren spør etter adressen din. Kan jeg oppgi den?", ["JA", "NEI"], "address", ADDRESS_REFUSAL);
       return;
     }
-    // Short VAD window: a pause after "Det blir…" must not start our turn.
+    // The running turn hasn't said anything yet: drop it and answer this line too
+    // (c_13c78747ac98 answered the disclosure and ignored the «Nei.» that came 30 ms earlier).
     clearTimeout(this.holdTimer);
+    if (this.turnRunning && !this.turnSpoke) {
+      this.debug("turn_restart_on_new_line", { text: clean });
+      this.requestTurn();
+      return;
+    }
+    // Short VAD window: a pause after "Det blir…" must not start our turn.
     if (soundsUnfinished(clean)) {
       this.debug("hold_unfinished", { text: clean });
-      this.holdTimer = setTimeout(() => { this.holdTimer = undefined; this.requestTurn(); }, HOLD_MS);
+      this.holdTimer = setTimeout(() => { this.holdTimer = undefined; if (this.segItems.has(id)) this.requestTurn(); }, HOLD_MS);
       return;
     }
     // «Okay?» / «Ja, men» on its own: give the callee a moment to go on before we answer.
@@ -554,7 +573,8 @@ export class CallSession {
     if (clean.replace(/\s*⟨.*?⟩/g, "").trim().split(/\s+/).length <= 2 && Number.isFinite(this.init.line.silenceMs?.() ?? Infinity)) {
       this.debug("hold_short", { text: clean });
       const id0 = id;
-      this.holdTimer = setTimeout(() => { this.holdTimer = undefined; this.startGate(id0); }, HOLD_SHORT_MS);
+      // Batch may call it noise meanwhile («Okei.» in c_13c78747ac98): then there is nothing to answer.
+      this.holdTimer = setTimeout(() => { this.holdTimer = undefined; if (this.segItems.has(id0)) this.startGate(id0); }, HOLD_SHORT_MS);
       return;
     }
     this.startGate(id);
@@ -953,6 +973,8 @@ export class CallSession {
             return;
           }
           if (dup && !confused) {
+            // Nothing from the callee since we said it: saying it again only talks over them.
+            if (!this.calleeSince(n)) { this.debug("skip_duplicate", { text: s.text, why: "no callee line since" }); return; }
             // Asking the same thing once more is normal on a bad line; a third time is a loop.
             const times = (this.repeats.get(n) ?? 0) + 1;
             this.repeats.set(n, times);
@@ -1085,6 +1107,16 @@ export class CallSession {
         void this.runTurn();
       }
     }
+  }
+
+  /** Did the callee (or the user) say anything since our last line that normalizes to `n`? */
+  private calleeSince(n: string): boolean {
+    for (let i = this.history.length - 1; i >= 0; i--) {
+      const h = this.history[i]!;
+      if (h.role === "callee" || h.role === "user") return true;
+      if (h.role === "agent" && norm(h.text) === n) return false;
+    }
+    return true;
   }
 
   /**
