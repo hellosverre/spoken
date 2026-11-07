@@ -25,6 +25,7 @@ import { EMERGENCY_ALTERNATIVE, checkGoal, checkNumber, disclosureLine, ensureDi
 import { calls, profile as defaultProfile, purge, setProfile, takeCallSlot, tasks } from "./store.ts";
 import { FallbackDb, isDeviceId, type Db } from "./db.ts";
 import { createAuth, type Auth } from "./auth.ts";
+import { audioHub } from "./call/audio-hub.ts";
 import { designVoice, listVoices } from "./voice/voices.ts";
 
 // Words that come up on service calls in Norwegian; boosted in Scribe on every call.
@@ -311,6 +312,9 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       });
     }
     calls.set(callId, session);
+    // "Hear the call": the owner's app may listen on /api/calls/:id/audio until the call ends.
+    audioHub.open(callId, t.device, t.profile.hearCall !== false);
+    const endAudio = session.subscribe((ev) => { if (ev.type === "result") { endAudio(); audioHub.close(callId); } });
     if (real && config.callProvider === "vonage") rememberOutbound({ callee: num.e164, calleeName: t.plan.callee.name, device: t.device, taskText: t.input.text, profile: t.profile, callId, lang: t.plan.callLang ?? "no" });
     void session.start();
     const mode = real ? "real" : "mock";
@@ -382,6 +386,20 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (m === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
     if (path === "/health") return json({ ok: true, callProvider: config.callProvider, llm: llm.name });
+
+    // Live audio, binary frames (see call/audio-hub.ts). Browsers can't set headers on a websocket,
+    // so the device and the optional session token come in the query string.
+    const audio = path.match(/^\/api\/calls\/([\w-]+)\/audio$/);
+    if (audio && m === "GET") {
+      const callId = audio[1]!;
+      const q = url.searchParams;
+      const me = q.get("token") ? await auth.resolve(`Bearer ${q.get("token")}`) : null;
+      const given = q.get("device");
+      const key = me?.device ?? (isDeviceId(given) ? given.toLowerCase() : undefined);
+      if (!audioHub.allows(callId, key)) return err(403, "no live audio for this call");
+      if (server.upgrade(req, { data: { kind: "audio", callId } satisfies WsData })) return undefined;
+      return err(426, "websocket upgrade required");
+    }
 
     const live = path.match(/^\/api\/calls\/([\w-]+)\/live$/);
     if (live && m === "GET") {
@@ -589,6 +607,11 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
         if (d.kind === "media") { d.line.attach(ws); return; }
         if (d.kind === "vonage") { d.line.attach(ws); return; }
         if (d.kind === "elks") { setTimeout(() => { if (!d.line) ws.close(1008, "no hello"); }, 5000); return; }
+        if (d.kind === "audio") {
+          d.unsub = audioHub.listen(d.callId, { send: (b) => ws.sendBinary(b), close: (c, r) => ws.close(c, r), getBufferedAmount: () => ws.getBufferedAmount() });
+          if (!d.unsub || !audioHub.listenerCount(d.callId)) ws.close(1008, "call ended");
+          return;
+        }
         const s = calls.get(d.callId);
         if (!s) { ws.close(1008, "unknown call"); return; }
         for (const ev of s.events) ws.send(JSON.stringify(ev)); // replay for late joiners

@@ -8,6 +8,7 @@
 // Docs: https://developer.vonage.com/en/voice/voice-api/concepts/websockets,
 // /en/api/voice (POST /v1/calls, PUT /v1/calls/{uuid}), /en/getting-started/concepts/authentication.
 
+import { audioHub, WHO_AGENT, WHO_CALLEE } from "./audio-hub.ts";
 import type { ServerWebSocket } from "bun";
 import { createSign } from "node:crypto";
 import { config } from "../config.ts";
@@ -356,6 +357,7 @@ export class VonageLine implements CallLine {
     const raw = msg instanceof Uint8Array ? msg : new Uint8Array(msg);
     if (!this.streaming) { this.streaming = true; this.maybeConnected(); } // audio before the JSON hello
     if (raw.length < 4) return;
+    audioHub.publish(this.o.callId, WHO_CALLEE, raw);
     this.onFrame(down16to8(raw));
   }
 
@@ -450,7 +452,9 @@ export class VonageLine implements CallLine {
   /** One 20 ms µ-law frame → one 640-byte binary message. */
   private sendFrame(f: Uint8Array) {
     if (!this.ws || this.hungUp) return;
-    try { this.ws.send(ulawToPcm16k(f, this.upPrev)); } catch { /* socket gone */ }
+    const pcm = ulawToPcm16k(f, this.upPrev);
+    try { this.ws.send(pcm); } catch { /* socket gone */ }
+    audioHub.publish(this.o.callId, WHO_AGENT, pcm);
   }
 
   private tick() {

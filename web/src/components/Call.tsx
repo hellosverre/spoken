@@ -12,6 +12,7 @@ import { Composer } from "./Composer";
 import { FactStrip } from "./FactStrip";
 import { HoldBanner } from "./HoldBanner";
 import { Icon } from "./Icon";
+import { SpeakerToggle } from "./SpeakerToggle";
 import { Receipt } from "./Receipt";
 import { ReplyChips } from "./ReplyChips";
 
@@ -65,6 +66,7 @@ function CallHead() {
           {status && <span className="status"> · {status}</span>}
         </span>
       </div>
+      <SpeakerToggle />
       <button className="endbtn" aria-label={t.endCall} disabled={callEnded} onClick={() => store.endCall()}>
         <Icon name="hang" />
       </button>
