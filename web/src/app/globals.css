@@ -51,7 +51,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stro
   .device{flex:none;width:390px;height:min(820px,100%);border-radius:40px;border:1px solid var(--line-2)}
 }
 .wordmark{display:flex;align-items:center;gap:8px;font-family:var(--display);font-weight:600;font-size:17px;letter-spacing:-.012em;line-height:1}
-.mark{width:16px;height:12px;background:var(--accent);border-radius:7px 7px 7px 2px;flex:none}
+.mark{width:20px;height:12px;background:var(--accent);flex:none;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='9 18 46 28'%3E%3Cpath d='M9 18H44C44 25 38 29 31 29H24C18 29 13 33 9 37Z M55 46H20C20 39 26 35 33 35H40C46 35 51 31 55 27Z'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='9 18 46 28'%3E%3Cpath d='M9 18H44C44 25 38 29 31 29H24C18 29 13 33 9 37Z M55 46H20C20 39 26 35 33 35H40C46 35 51 31 55 27Z'/%3E%3C/svg%3E") center/contain no-repeat}
 .pitch h1{font-family:var(--display);font-weight:560;font-size:clamp(48px,min(5vw,8vh),72px);line-height:1;letter-spacing:-.022em;margin:0}
 .pitch h1 span{color:var(--dim)}
 .pitch h1 i{font-style:normal;color:var(--accent)}
@@ -137,7 +137,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stro
 @keyframes paneIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 #pane-chat .scroll{display:flex;flex-direction:column}
 .empty{margin:auto 0;display:flex;flex-direction:column;align-items:center;text-align:center;padding:24px 8px}
-.mark.big{width:34px;height:26px;border-radius:14px 14px 14px 4px;margin-bottom:22px}
+.mark.big{width:46px;height:28px;margin-bottom:22px}
 .empty .greet{margin:0 0 10px}
 .empty .lede{max-width:30ch;text-wrap:balance}
 #home.threaded .empty{display:none}
@@ -224,7 +224,7 @@ button.row:hover{background:var(--surface-2)}
 .pod{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:510;transition:opacity .2s}
 .pod.them{background:var(--surface-2);color:var(--ink)}
 .pod.ai{background:var(--accent);color:var(--inv)}
-.pod.ai .mark{background:var(--inv);width:18px;height:14px}
+.pod.ai .mark{background:var(--inv);width:22px;height:13px}
 .speaker[data-who="ai"] .pod.them,.speaker[data-who="them"] .pod.ai{opacity:.35}
 .wave{display:flex;gap:4px;justify-content:center;align-items:center;height:28px}
 .wave i{width:3px;height:100%;border-radius:2px;background:var(--line-2);transform:scaleY(.15);transition:background .2s}

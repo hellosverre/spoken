@@ -1,1 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#0A0C11"/><path d="M14 9H18A7 7 0 0 1 25 16A7 7 0 0 1 18 23H9A2 2 0 0 1 7 21V16A7 7 0 0 1 14 9Z" fill="#A5B4FF"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+<title id="title">Spoken app icon — Duet</title>
+<rect x="0" y="0" width="64" height="64" rx="14" fill="#000000"/><path d="M9 18H44C44 25 38 29 31 29H24C18 29 13 33 9 37Z M55 46H20C20 39 26 35 33 35H40C46 35 51 31 55 27Z" fill="#ffffff" fill-rule="evenodd"/>
+</svg>
