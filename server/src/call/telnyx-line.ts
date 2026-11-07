@@ -178,7 +178,9 @@ export class TelnyxLine implements CallLine {
       time_limit_secs: Math.min(config.maxCallSec, this.o.maxSec ?? config.maxCallSec),
       webhook_url: `${config.publicUrl}/telnyx/webhook`,
       client_state: Buffer.from(this.o.callId).toString("base64"),
-      answering_machine_detection: "detect",
+      // Telnyx AMD marked real people as machines in live tests (Sat 7 Nov), so it is opt-in.
+      // The agent still hangs up on voicemail greetings it hears (prompt rule).
+      ...(process.env.TELNYX_AMD === "1" ? { answering_machine_detection: "detect" } : {}),
       stream_url: `${wsBase}/telnyx/media?call=${this.o.callId}&t=${this.token}`,
       stream_track: "inbound_track",
       stream_bidirectional_mode: "rtp",
