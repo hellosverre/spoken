@@ -16,6 +16,7 @@ export function Row({
   title,
   sub,
   icon,
+  art,
   go,
   onPress,
   tone,
@@ -24,6 +25,8 @@ export function Row({
   title: string;
   sub?: string;
   icon?: IconName;
+  /** A picture shown in the icon badge instead of a glyph. */
+  art?: ReactNode;
   go?: ReactNode;
   onPress?: () => void;
   /** "danger" for destructive rows such as Log out. */
@@ -32,7 +35,7 @@ export function Row({
   const styles = useStyles();
   const body = (
     <>
-      {icon ? (
+      {art ? <View style={styles.ic}>{art}</View> : icon ? (
         <View style={[styles.ic, tone === "danger" && styles.icDanger]}>
           <Icon name={icon} color={tone === "danger" ? styles.danger.color : styles.accent.color} size={17} />
         </View>

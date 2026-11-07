@@ -136,7 +136,7 @@ export function Presets() {
               <li key={r.key}>
                 <button className="row" data-demo={r.key} onClick={() => store.playDemo(r.key)}>
                   <span className="ic">
-                    <Icon name={r.key} />
+                    <PresetArt icon={r.key} />
                   </span>
                   <span className="tx">
                     <b>{r.title}</b>

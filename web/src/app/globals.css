@@ -417,6 +417,7 @@ button.row:hover{background:var(--surface-2)}
 .pcard:hover{border-color:var(--line-2)}
 .pcard.editing::before,.pcard.new::before{display:none}
 .preset-art{width:58px;height:58px;display:block;flex:none}
+.row .ic .preset-art{width:24px;height:24px}
 .pcard:active{transform:scale(.98)}
 .pcard.editing{border-style:dashed;border-color:var(--line-2);box-shadow:none}
 .pcard-top{display:flex;align-items:flex-start;justify-content:space-between;color:var(--dim)}
