@@ -2,7 +2,7 @@
 // committed transcripts out. VAD commits segments; word logprobs become confidences.
 
 import type { Word } from "../../../shared/contract.ts";
-import { config } from "../config.ts";
+import { elKey, elKeyFailed } from "./el-key.ts";
 
 export interface ScribeHandlers {
   partial(text: string): void;
@@ -38,7 +38,7 @@ export class ScribeStream {
   ) {}
 
   connect() {
-    if (!config.elevenlabs.apiKey) { this.h.error("ELEVENLABS_API_KEY missing"); return; }
+    if (!elKey()) { this.h.error("ELEVENLABS_API_KEY missing"); return; }
     const q = new URLSearchParams({
       model_id: "scribe_v2_realtime",
       audio_format: this.format,
@@ -51,7 +51,7 @@ export class ScribeStream {
     for (const k of this.keyterms.slice(0, 20)) q.append("keyterms", k);
     // Bun's WebSocket accepts headers, so the key never goes into the URL.
     const ws = new WebSocket(`wss://api.elevenlabs.io/v1/speech-to-text/realtime?${q}`, {
-      headers: { "xi-api-key": config.elevenlabs.apiKey },
+      headers: { "xi-api-key": elKey() },
     } as any);
     this.ws = ws;
     ws.onopen = () => {
@@ -86,7 +86,11 @@ export class ScribeStream {
         break;
       }
       default:
-        if (m.error || /error|limit|exceeded/i.test(m.message_type ?? "")) this.h.error(`${m.message_type}: ${m.error ?? ""}`);
+        if (m.error || /error|limit|exceeded/i.test(m.message_type ?? "")) {
+          // Auth/quota on the primary key: the next reconnect uses the fallback key.
+          if (/auth|quota/i.test(m.message_type ?? "") && elKeyFailed(401, String(m.message_type))) { this.retries = 0; try { this.ws?.close(); } catch { /* closed */ } }
+          this.h.error(`${m.message_type}: ${m.error ?? ""}`);
+        }
     }
   }
 

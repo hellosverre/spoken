@@ -27,6 +27,7 @@ export const config = {
   },
   elevenlabs: {
     apiKey: env("ELEVENLABS_API_KEY"),
+    fallbackKey: env("ELEVENLABS_API_KEY_FALLBACK"),
     ttsModel: env("TTS_MODEL", "eleven_flash_v2_5"),
     defaultVoice: env("DEFAULT_VOICE_ID", "nPczCjzI2devNBz1zQrb"),
   },

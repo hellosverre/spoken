@@ -4,6 +4,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.ts";
+import { elKey, elKeyFailed } from "./el-key.ts";
 import { toSpeakable } from "./speakable.ts";
 
 const CACHE_DIR = join(import.meta.dir, "../../.cache/tts");
@@ -41,14 +42,14 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
   const cached = memCache.get(key) ?? (await readDisk(key));
   if (cached) { memCache.set(key, cached); yield cached; return; }
 
-  if (!config.elevenlabs.apiKey) throw new Error("ELEVENLABS_API_KEY missing");
+  if (!elKey()) throw new Error("ELEVENLABS_API_KEY missing");
   const firstByte = new AbortController();
   const timer = setTimeout(() => firstByte.abort(), 6000);
   const signal = opts.signal ? AbortSignal.any([opts.signal, firstByte.signal]) : firstByte.signal;
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=${format}`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "xi-api-key": config.elevenlabs.apiKey, "Content-Type": "application/json" },
+    headers: { "xi-api-key": elKey(), "Content-Type": "application/json" },
     body: JSON.stringify({
       text: speakable,
       model_id: model,
@@ -61,7 +62,9 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
   if (res.ok) opts.onBilled?.(speakable.length);
   if (!res.ok) {
     clearTimeout(timer);
-    throw new Error(`ElevenLabs TTS HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const body = await res.text();
+    if (elKeyFailed(res.status, body)) { yield* tts(text, opts); return; }
+    throw new Error(`ElevenLabs TTS HTTP ${res.status}: ${body.slice(0, 200)}`);
   }
   const reader = res.body!.getReader();
   const parts: Uint8Array[] = [];
