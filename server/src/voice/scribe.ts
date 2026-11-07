@@ -56,12 +56,14 @@ export class ScribeStream {
     const q = new URLSearchParams({
       model_id: "scribe_v2_realtime",
       audio_format: this.format,
-      language_code: this.lang,
       commit_strategy: "vad",
       // Short window for fast turns; CallSession holds the turn if the text sounds unfinished.
       vad_silence_threshold_secs: process.env.SCRIBE_SILENCE_SECS ?? "0.5",
       include_timestamps: "true",
     });
+    // Norwegian/English keep the explicit code (best accuracy). Other languages, and SCRIBE_AUTO_LANG=1,
+    // let Scribe auto-detect.
+    if ((this.lang === "no" || this.lang === "en") && process.env.SCRIBE_AUTO_LANG !== "1") q.set("language_code", this.lang);
     for (const k of this.keyterms.slice(0, 20)) q.append("keyterms", k);
     // Bun's WebSocket accepts headers, so the key never goes into the URL.
     const ws = new WebSocket(`wss://api.elevenlabs.io/v1/speech-to-text/realtime?${q}`, {

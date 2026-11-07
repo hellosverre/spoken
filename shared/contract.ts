@@ -1,6 +1,7 @@
 // Shared contract between server/ and web/. Change only via the lead.
 
-export type Lang = "no" | "en";
+/** ISO-639-1 code. "no" and "en" are fully supported; any other code runs on the English prompt + "reply in <language>". UI language is always no|en. */
+export type Lang = "no" | "en" | (string & {});
 
 export interface TaskInput {
   text: string; // "Bestill en stor pepperoni fra Domino's Storo til 18:00"

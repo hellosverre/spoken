@@ -18,7 +18,8 @@ import { isNumberish, numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
 import { OnHoldDetector } from "./onhold.ts";
 import { suggestChips } from "./chips.ts";
-import { LINES, langFromText } from "./lines.ts";
+import { LINES, langFromText, langName, linesFor } from "./lines.ts";
+import { LangSwitcher } from "./langswitch.ts";
 import { uiText } from "./ui-text.ts";
 import { FactTracker } from "./facts.ts";
 import { buildReceipt, type ApprovalLogItem } from "./receipt.ts";
@@ -222,7 +223,8 @@ export class CallSession {
   private tone: Tone = "friendly";
   /** Language spoken on the phone (Plan.callLang); the user can switch it mid-call. */
   private lang: Lang;
-  private get L() { return LINES[this.lang]; }
+  private get L() { return linesFor(this.lang); }
+  private switcher!: LangSwitcher;
   /** What the app shows the user, in the app language. */
   private get U() { return uiText(this.init.profile.lang); }
   private simpler = false;
@@ -314,6 +316,7 @@ export class CallSession {
     this.taskId = init.taskId;
     this.errand = parseErrand(init.plan.goal, init.profile.name);
     this.lang = init.plan.callLang ?? "no";
+    this.switcher = new LangSwitcher(this.lang, (to) => this.autoSwitch(to));
     this.onHold = new OnHoldDetector({
       onHold: (since) => { this.debug("on_hold"); this.emit({ type: "on_hold", since }); },
       holdOver: () => { this.debug("hold_over"); this.emit({ type: "hold_over", at: Date.now() }); },
@@ -558,6 +561,8 @@ export class CallSession {
     clearTimeout(this.silenceTimer);
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: this.lastCalleeAt });
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
+    // The callee (or whoever they handed over to) speaks another language: switch before the reply.
+    this.switcher.feed(clean);
     // Times are parsed in code and handed to the LLM as facts («⟨tid: 19:00⟩»).
     const hint = timeHint(clean);
     if (faint) this.faintIds.add(id);
@@ -1572,12 +1577,21 @@ export class CallSession {
     }
   }
 
-  /** «Speak English» / «snakk norsk» from the user: prompt, fixed lines, STT and TTS switch. */
-  setLang(lang: Lang) {
+  /** Detected from the callee's own speech (langswitch.ts): same switch, but the note says what happened. */
+  private autoSwitch(lang: Lang) {
+    this.setLang(lang, true);
+  }
+
+  /** «Speak English» / «snakk norsk» from the user, or a detected switch: prompt, fixed lines, STT and TTS follow. */
+  setLang(lang: Lang, auto = false) {
+    this.switcher?.set(lang);
     this.lang = lang;
     this.init.line.setLang?.(lang);
     this.debug("call_lang", { lang });
-    this.note(this.U.note.speaking(lang));
+    if (auto || (lang !== "no" && lang !== "en")) {
+      const ui = this.init.profile.lang;
+      this.note(ui === "en" ? `Switched to ${langName(lang, "en")}` : `Byttet til ${langName(lang, "no")}`);
+    } else this.note(this.U.note.speaking(lang));
   }
 
   private async userHangup() {
