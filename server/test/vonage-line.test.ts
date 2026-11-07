@@ -228,3 +228,22 @@ test("POST /calls failing surfaces an error", async () => {
     String(input).startsWith("https://api.nexmo.com") ? new Response('{"title":"Unauthorized"}', { status: 401 }) : f(input, init)) as typeof fetch;
   await expect(line.start(ev)).rejects.toThrow(/HTTP 401/);
 });
+
+test("sendDtmf PUTs /v1/calls/{uuid}/dtmf with the digits; invalid digits are refused; nothing after hangup", async () => {
+  const { line, ev } = newLine();
+  await line.start(ev);
+  await line.sendDtmf("1*#0");
+  const dtmf = apiCalls.find((c) => c.method === "PUT")!;
+  expect(dtmf.url).toBe(`https://api.nexmo.com/v1/calls/uuid-${n}/dtmf`);
+  expect(dtmf.body).toEqual({ digits: "1*#0" });
+  expect(dtmf.auth).toMatch(/^Bearer [\w-]+\.[\w-]+\.[\w-]+$/);
+
+  const before = apiCalls.length;
+  await expect(line.sendDtmf("1a")).rejects.toThrow(/ugyldige DTMF-tegn/);
+  expect(apiCalls.length).toBe(before);
+
+  await line.hangup();
+  const afterHangup = apiCalls.length;
+  await line.sendDtmf("5");
+  expect(apiCalls.length).toBe(afterHangup);
+});
