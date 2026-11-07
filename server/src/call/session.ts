@@ -10,10 +10,26 @@ import type { AgentContext, HistoryItem, LlmProvider, Tone } from "../llm/types.
 import {
   ADDRESS_REFUSAL, CARD_REFUSAL, FNR_REFUSAL, detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment,
 } from "../safety.ts";
+import { appendFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import type { CallLine } from "./line.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 
 export const WAIT_PHRASE = "Et øyeblikk…";
+
+// Agent lines that mean "I didn't get that". Two turns of these in a row → change strategy.
+const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (deg )?ikke|linja er (litt )?dårlig|unnskyld,? hva sa du)/i;
+// Short fillers for when a reply is slow (> FILLER_AFTER_MS). Rotated, never the same twice in a row.
+const FILLERS = ["Mm, et øyeblikk.", "Ja, la meg se.", "Et lite øyeblikk."];
+const FILLER_AFTER_MS = 1500;
+
+const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
+
+// Debug transcript per call (server/logs/<callId>.jsonl, gitignored). CALL_LOG=0 turns it off;
+// keep it off for the public demo (CONTRACT: no transcript stored server-side).
+const LOG_DIR = join(import.meta.dir, "../../logs");
+const CALL_LOG = process.env.CALL_LOG !== "0";
+if (CALL_LOG) { try { mkdirSync(LOG_DIR, { recursive: true }); } catch { /* no log dir */ } }
 
 type Listener = (ev: LiveEvent) => void;
 
@@ -67,6 +83,10 @@ export class CallSession {
   private lastCalleeAt = 0;
   private waitingNoticeSaid = false;
   private silenceTimer?: ReturnType<typeof setTimeout>;
+  private recentTurns: Set<string>[] = []; // normalised sentences of the last 3 agent turns
+  private recentConfused: boolean[] = []; // last 4 agent turns: was it a "didn't get that"?
+  private confusedRun = 0; // confused turns within that window
+  private lastFiller = "";
   private nudged = 0;
 
   constructor(private init: SessionInit) {
@@ -81,8 +101,16 @@ export class CallSession {
     return () => this.listeners.delete(fn);
   }
 
+  /** Append to the per-call debug log. Never contains fnr (only placeholders reach here). */
+  debug(kind: string, data: Record<string, unknown> = {}) {
+    if (!CALL_LOG) return;
+    try { appendFileSync(join(LOG_DIR, `${this.callId}.jsonl`), JSON.stringify({ t: Date.now(), kind, ...data }) + "\n"); }
+    catch { /* logging must never break a call */ }
+  }
+
   private emit(ev: LiveEvent) {
     this.events.push(ev);
+    if (!(ev.type === "transcript" && !ev.final)) this.debug("event", { ev });
     for (const fn of this.listeners) {
       try { fn(ev); } catch (e) { console.error("[session] listener failed", e); }
     }
@@ -113,6 +141,7 @@ export class CallSession {
         calleeFinal: (id, text, words) => this.onCalleeFinal(id, text, words),
         calleeWords: (id, text, words) => this.emit({ type: "transcript", id, who: "callee", text, final: true, words, at: Date.now() }),
         ended: (reason) => void this.finish(reason),
+        debug: (kind, data) => this.debug(kind, data),
       });
     } catch (e) {
       console.error("[session] line start failed:", (e as Error).message);
@@ -150,6 +179,7 @@ export class CallSession {
     // Barge-in: the callee talks over us → stop audio at once and drop the rest of the turn.
     if (this.speaking) {
       console.log(`[barge-in] callee spoke over the agent; TTS stopped (call ${this.callId})`);
+      this.debug("barge_in");
       this.init.line.stopSpeaking();
       this.turnAbort?.abort();
     }
@@ -240,6 +270,17 @@ export class CallSession {
     const seg = new Segmenter();
     const said: string[] = [];
     let stop = false;
+    let turnConfused = false;
+    let spokeAnything = false;
+    this.debug("turn_start", { history: this.history.at(-1) });
+    // Only fill silence when the reply is genuinely slow.
+    const fillerTimer = setTimeout(() => {
+      if (spokeAnything || stop || abort.signal.aborted || this.ended || this.pending) return;
+      const f = FILLERS.find((x) => x !== this.lastFiller) ?? FILLERS[0]!;
+      this.lastFiller = f;
+      this.debug("filler", { text: f, afterMs: FILLER_AFTER_MS });
+      void this.say(f, "filler");
+    }, FILLER_AFTER_MS);
 
     const handle = async (s: Segment) => {
       if (stop || abort.signal.aborted) return;
@@ -253,6 +294,25 @@ export class CallSession {
           return;
         }
         if (commitment) this.approvalCredit--;
+        // Never repeat a line from the previous turn; escalate instead of looping on "say again".
+        const n = norm(s.text);
+        const dup = this.recentTurns.some((t) => t.has(n));
+        const confused = CONFUSED.test(s.text);
+        if (confused || dup) {
+          if (confused && !turnConfused) { turnConfused = true; this.confusedRun = this.recentConfused.slice(-3).filter(Boolean).length + 1; }
+          const esc = this.escalation(dup);
+          if (esc) {
+            this.debug("escalate", { original: s.text, dup, confusedRun: this.confusedRun, replacement: esc.text });
+            stop = true;
+            spokeAnything = true;
+            said.push(esc.text);
+            await this.say(esc.text, "say", false, abort.signal);
+            if (esc.end) this.endTag = { outcome: "failed", summary: "Forsto ikke mottakeren; avsluttet høflig." };
+            return;
+          }
+          if (dup) { this.debug("skip_duplicate", { text: s.text }); return; }
+        }
+        spokeAnything = true;
         if (firstAudio) { firstAudio = false; this.latencies.push(Date.now() - t0); }
         said.push(s.text);
         const r = await this.say(s.text, "say", false, abort.signal);
@@ -279,16 +339,47 @@ export class CallSession {
       if (!abort.signal.aborted) {
         console.error("[session] LLM failed:", (e as Error).message);
         this.note("KI-en svarte ikke i tide.", "warn");
-        await this.say("Beklager, et lite øyeblikk.", "filler");
+        if (!spokeAnything) {
+          const f = FILLERS.find((x) => x !== this.lastFiller) ?? FILLERS[0]!;
+          this.lastFiller = f;
+          await this.say(f, "filler");
+        }
       }
     } finally {
+      clearTimeout(fillerTimer);
       this.turnRunning = false;
+      if (said.length) {
+        this.recentTurns = [...this.recentTurns, new Set(said.map(norm))].slice(-3);
+        this.recentConfused = [...this.recentConfused, turnConfused].slice(-4);
+        this.confusedRun = this.recentConfused.filter(Boolean).length;
+      }
+      this.debug("turn_end", { said, confusedRun: this.confusedRun, aborted: abort.signal.aborted });
       if (this.endTag && !abort.signal.aborted) {
         await this.finish("agent ended");
       } else if (this.wantTurn && !this.pending) {
         void this.runTurn();
       }
     }
+  }
+
+  /**
+   * What to say instead of a "say again" / repeated line, counted over the last 4 turns.
+   * 1st: allowed as is. 2nd: rephrase the errand as a yes/no question. 3rd: end politely.
+   */
+  private escalation(dup: boolean): { text: string; end?: boolean } | null {
+    const name = this.init.profile.name || "brukeren";
+    if (this.confusedRun >= 3) {
+      return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
+    }
+    const rephrase = `Jeg ringer på vegne av ${name} for å ${this.init.plan.goal}. Kan du svare ja eller nei?`;
+    if (this.confusedRun === 2 || dup) {
+      if (this.recentTurns.some((t) => t.has(norm(rephrase)))) {
+        return { text: `Beklager, jeg hører deg dessverre ikke godt nok. ${name} tar kontakt på en annen måte. Ha det bra!`, end: true };
+      }
+      if (this.confusedRun === 2) this.note("Mottakeren er vanskelig å forstå; jeg prøver å spørre enklere.", "warn");
+      return { text: rephrase };
+    }
+    return null;
   }
 
   /** Speak through the safety filter; records the line in the transcript. */
@@ -463,6 +554,7 @@ export class CallSession {
       console.log(`[latency] call ${this.callId}: avg ${avg} ms over ${this.latencies.length} turns (${this.latencies.join(", ")})`);
     }
     console.log(`[session] ${this.callId} ended (${reason}): ${outcome}`);
+    this.debug("ended", { reason, outcome, latencies: this.latencies });
     this.status = "ended";
     this.emit({ type: "status", status: "ended", at: Date.now() });
     this.emit({ type: "result", result: this.result });

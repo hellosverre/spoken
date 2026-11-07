@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "bun --watch src/index.ts",
     "start": "bun src/index.ts",
-    "test": "bun test",
+    "test": "CALL_LOG=0 bun test",
     "typecheck": "bunx tsc --noEmit -p ."
   },
   "devDependencies": {

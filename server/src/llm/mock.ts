@@ -99,6 +99,14 @@ export function mockReplyText(ctx: AgentContext): string {
     const q = callee.replace(/\s+/g, " ").trim();
     return `[[ASK: Si ja til dette? «${q}» | JA | NEI]]`;
   }
+  // A yes after we stated the errand moves the call forward instead of re-asking.
+  const goalStated = ctx.history.some((h) => h.role === "agent" && /^jeg vil gjerne|^jeg ringer på vegne av/i.test(h.text));
+  const assent = !c.includes("?") && /det går (helt )?(bra|fint)|^(ja|jada|javisst|greit|ok|okei|fint|supert|absolutt|det kan vi)\b/.test(c);
+  if (goalStated && assent) {
+    const askedDetails = ctx.history.some((h) => h.role === "agent" && /hva koster det/i.test(h.text));
+    if (!askedDetails) return "Flott! Hva koster det, og når er det klart?";
+    return "Supert, tusen takk for hjelpen. Ha det bra! [[END: partial | Mottakeren sa ja, men pris og tid ble ikke bekreftet.]]";
+  }
   if (/navn(et)?|hvem (er det|skal)|på hvem/.test(c)) return `Den står på ${name}.`;
   if (/allerg/.test(c)) return ctx.profileFacts.allergies ? `Ja: ${ctx.profileFacts.allergies}.` : "Nei, ingen allergier.";
   if (/det går (bra|fint)|^(ja|jada|javisst|greit|ok|okei|sure)\b|hva skal det være|hva kan jeg (hjelpe|gjøre)|hvordan kan jeg hjelpe|hva gjelder|hva (vil|ønsker) du|ja\??$|^hei|hallo|værsågod|det går fint|ok/.test(c)) {

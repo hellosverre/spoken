@@ -125,6 +125,7 @@ export class TelnyxLine implements CallLine {
   }
 
   private onWebhook(type: string, p: any) {
+    this.ev.debug?.("telnyx", { type, cause: p.hangup_cause, sip: p.sip_hangup_cause, source: p.hangup_source, reason: p.failure_reason });
     console.log(`[telnyx] ${type}${p.hangup_cause ? ` cause=${p.hangup_cause} sip=${p.sip_hangup_cause ?? ""} source=${p.hangup_source ?? "?"}` : ""}${p.failure_reason ? ` reason=${p.failure_reason}` : ""}`);
     switch (type) {
       case "call.initiated": this.ev.status("ringing"); break;
@@ -200,6 +201,7 @@ export class TelnyxLine implements CallLine {
         this.streaming = true;
         this.inboundAlaw = m.start?.media_format?.encoding === "PCMA";
         console.log(`[telnyx] media start ${JSON.stringify(m.start?.media_format ?? {})}`);
+        this.ev.debug?.("media_start", { format: m.start?.media_format });
         this.maybeConnected();
         break;
       case "media": {
@@ -226,7 +228,7 @@ export class TelnyxLine implements CallLine {
   private localVad(buf: Uint8Array) {
     if (!this.speakResolve) { this.loudFrames = 0; return; }
     if (ulawRms(buf) > BARGE_RMS) {
-      if (++this.loudFrames === BARGE_FRAMES) this.ev.calleeSpeech();
+      if (++this.loudFrames === BARGE_FRAMES) { this.ev.debug?.("vad_loud", {}); this.ev.calleeSpeech(); }
     } else this.loudFrames = Math.max(0, this.loudFrames - 1);
   }
 
@@ -269,6 +271,7 @@ export class TelnyxLine implements CallLine {
       if (f && this.awaitingFirstAudio && this.lastCommitAt) {
         this.awaitingFirstAudio = false;
         console.log(`[latency] callee commit → agent audio: ${now - this.lastCommitAt} ms`);
+        this.ev.debug?.("latency", { commitToAudioMs: now - this.lastCommitAt });
       }
       if (!f && this.waiting && !this.speakResolve) {
         f = TYPING.subarray(this.typingOff, this.typingOff + FRAME);
@@ -304,7 +307,11 @@ export class TelnyxLine implements CallLine {
     try {
       for await (const chunk of tts(text, { voiceId: this.o.voiceId, signal: abort.signal, cache: kind === "filler" || text.length <= 40 })) {
         if (abort.signal.aborted) break;
-        if (first) { first = false; console.log(`[latency] tts first byte: ${Date.now() - t0} ms (${text.length} chars)`); }
+        if (first) {
+          first = false;
+          console.log(`[latency] tts first byte: ${Date.now() - t0} ms (${text.length} chars)`);
+          this.ev.debug?.("tts", { firstByteMs: Date.now() - t0, chars: text.length, kind });
+        }
         this.chunks.push(chunk);
       }
     } catch (e) {
