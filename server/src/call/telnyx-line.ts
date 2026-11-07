@@ -363,12 +363,12 @@ export class TelnyxLine implements CallLine {
   /** Re-transcribe the finished segment with batch Scribe; report it if it differs. */
   private secondOpinion(id: string, realtime: string, from: number, to: number, peak: number) {
     const frames = this.recent.filter((f) => f.at >= from && f.at <= to);
-    if (!frames.length) return;
+    if (!frames.length) { this.ev.calleeBatchDone?.(id); return; }
     const pcm = new Int16Array(frames.reduce((n, f) => n + f.pcm.length, 0));
     let o = 0;
     for (const f of frames) { pcm.set(f.pcm, o); o += f.pcm.length; }
     const seg = { id, startMs: from - this.audioStartAt, endMs: to - this.audioStartAt, realtime, peak: Math.round(peak), speaker: Math.round(this.speaker.level) };
-    if (!STT_BATCH) { this.saveSegment({ ...seg }); return; }
+    if (!STT_BATCH) { this.saveSegment({ ...seg }); this.ev.calleeBatchDone?.(id); return; }
     const t0 = Date.now();
     transcribeSegment(pcm, this.o.keyterms)
       .then((r) => {
@@ -380,8 +380,9 @@ export class TelnyxLine implements CallLine {
         const v = batchVerdict(realtime, r.text, rtConf, batchConf);
         if (v === "noise") this.ev.calleeNoise?.(id);
         else if (v === "revise") this.ev.calleeRevised?.(id, r.text, r.words);
+        else this.ev.calleeBatchDone?.(id);
       })
-      .catch((e) => console.warn("[scribe-batch]", (e as Error).message));
+      .catch((e) => { console.warn("[scribe-batch]", (e as Error).message); this.ev.calleeBatchDone?.(id); });
   }
 
   private saveSegment(s: Record<string, unknown>) {

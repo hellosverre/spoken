@@ -21,7 +21,9 @@ export function parseErrand(goal: string, userName: string): Errand {
 function asked(lastCallee: string) {
   const c = lastCallee.toLowerCase();
   return {
-    item: /hva (skal|var|vil) (du|dere)|hvilken|hva slags|hva (ønsker|bestiller)|hva var det/.test(c),
+    // c_cc7521a0c46d: «Hvor mange cola bestilte du?» and «Jeg skjønner ikke hva de prater om»
+    // were answered with silence because the answer «restated» the order.
+    item: /hva (skal|var|vil) (du|dere)|hvilken|hva slags|hva (ønsker|bestiller)|hva var det|hvor mange|bestilte|hva (sa|mente) du|hvorfor\b.*\bringer|(skal|vil) (du|dere) ha\b.*\?|hva (er det|skjer)|(skjønner|forstår) (ikke|ingenting)|^hva\??$/.test(c),
     time: /når|hvilken tid|klokka|tidspunkt|hvor sent|hvor tidlig/.test(c),
     name: /navn|hvem (er|står)|på hvem/.test(c),
   };
@@ -83,6 +85,9 @@ export function endsSentence(text: string): boolean {
 export function restatesErrand(text: string, e: Errand, lastCallee: string): boolean {
   if (!e.item || asked(lastCallee).item) return false;
   const core = norm(e.item).replace(/^(en|ei|et|én) /, "").split(" ").filter((w) => w.length >= 4);
+  // A question that names the item («Hvor mange cola …?») may be answered with the order itself.
+  const lc = norm(lastCallee);
+  if (/\?\s*$/.test(lastCallee.trim()) && core.some((w) => lc.includes(w.slice(0, 4)))) return false;
   const t = norm(text);
   const hasItem = core.length > 0 && core.every((w) => t.includes(w.slice(0, 5)));
   return hasItem && /\b(bestille|bestilling|kjøpe|booke|ha en|ha ei|ha et|vil gjerne|ringer for å)\b/.test(t);
