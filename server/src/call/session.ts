@@ -149,6 +149,7 @@ export class CallSession {
   private onCalleeSpeech() {
     // Barge-in: the callee talks over us → stop audio at once and drop the rest of the turn.
     if (this.speaking) {
+      console.log(`[barge-in] callee spoke over the agent; TTS stopped (call ${this.callId})`);
       this.init.line.stopSpeaking();
       this.turnAbort?.abort();
     }

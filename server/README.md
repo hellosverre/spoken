@@ -83,6 +83,17 @@ callee µ-law ─┬─ local energy VAD (100 ms) ─┐
 
 Connected in 8.5 s; disclosure played from cache instantly (TTS first byte 0 ms). Then silence: Telnyx delivered the callee track as **PCMA (A-law)**, Scribe got it labelled µ-law and returned nothing, so the agent never got a turn; the callee hung up after 35 s (`normal_clearing`). Fixed: A-law → µ-law transcode from `media_format`, plus a silence check ("Hallo, hører du meg?" after 8 s, hang up after a second miss).
 
+## Call #2 (Sat 7 Nov, pizza goal, mock LLM)
+
+| | Result |
+|---|---|
+| Connect | ringing 0.7 s, connected 7.6 s |
+| STT | Works after the PCMA fix: "Det går bra." ×3, "Det var det." (callee's real words not logged by us; Sverre to confirm) |
+| Latency, Scribe commit → agent audio | 250 ms first turn (cold TTS), then 75–93 ms (cached TTS); plus the 0.5 s VAD silence window → ~0.6–0.75 s from callee stops to agent speaks. A real LLM will add its time-to-first-sentence |
+| Barge-in | Not triggered in this call (now logged as `[barge-in]`) |
+| End | Callee hung up (`normal_clearing`, source=callee) after the mock agent looped on "kan du si det en gang til?" |
+| Fix | Mock agent treats any non-refusal after the opening as "go ahead" and asks to repeat at most once |
+
 ## Measured (Sat 7 Nov, Hugin → ElevenLabs, offline loopback)
 
 | Step | Result |

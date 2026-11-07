@@ -142,3 +142,15 @@ describe("g711", () => {
     expect(Math.abs(alawToLinear(0x55))).toBeLessThan(16); // A-law silence
   });
 });
+
+describe("mock agent on a real human", () => {
+  test("'Det går bra' after the opening → states the errand, no repeat loop", async () => {
+    const { mockReplyText } = await import("../src/llm/mock.ts");
+    const base = { goal: "bestille en stor pepperoni", calleeName: "X", userName: "Sverre", willShare: [], needsApprovalFor: [], profileFacts: {}, tone: "friendly" as const, simpler: false };
+    const h = [{ role: "agent" as const, text: "Hei, jeg er en KI-assistent." }, { role: "callee" as const, text: "Det går bra." }];
+    expect(mockReplyText({ ...base, history: h })).toStartWith("Jeg vil gjerne");
+    const h2 = [...h, { role: "agent" as const, text: "Jeg vil gjerne bestille en stor pepperoni." }, { role: "callee" as const, text: "Mm hm hm." },
+      { role: "agent" as const, text: "Beklager, linja er litt dårlig. Kan du si det en gang til?" }, { role: "callee" as const, text: "Mm." }];
+    expect(mockReplyText({ ...base, history: h2 })).toContain("oppsummere");
+  });
+});
