@@ -64,7 +64,7 @@ Tone: ${TONES[ctx.tone]}${ctx.simpler ? "\nSnakk ekstra enkelt og sakte: korte o
 export function clarifyPrompt(task: TaskForLlm): string {
   return `Brukeren vil at du ringer for dem. Oppgave: «${task.text}»${task.phone ? ` (nummer: ${task.phone})` : ""}.
 Still 1–4 korte oppklaringsspørsmål på ${task.lang === "en" ? "engelsk" : "norsk"} (tid, antall, pris-grense, henting/levering, osv.). Det siste skal alltid bekrefte detaljene.
-Svar som JSON: {"summary": "én linje", "questions": [{"id": "kort_id", "text": "...", "options": ["...", "..."]}]}`;
+Svar som JSON: {"summary": "én linje på ${task.lang === "en" ? "engelsk" : "norsk"} om hva du skal gjøre", "questions": [{"id": "kort_id", "text": "...", "options": ["...", "..."]}]}`;
 }
 
 export function planPrompt(task: TaskForLlm, answers: Record<string, string>): string {
@@ -80,7 +80,11 @@ willShare kan bare inneholde: name, phone, address, email, birthdate, fnr, aller
 
 export function summaryPrompt(ctx: AgentContext): string {
   const lines = ctx.history.map((h) => `${h.role}: ${h.text}`).join("\n");
-  return `Mål: ${ctx.goal}\nSamtale:\n${lines}\n\nSvar som JSON: {"outcome": "done|partial|failed|refused|no_answer", "summary": "én linje, f.eks. «Bestilt: 1 stor pepperoni, hentes 18:00, 189 kr»", "details": {"tid": "...", "pris": "...", "referanse": "..."}}`;
+  // The summary is read in the app, so it follows the app language, not the call language.
+  const summary = ctx.uiLang === "en"
+    ? "one line in English, e.g. «Ordered: 1 large pepperoni, pickup 18:00, 189 kr»"
+    : "én linje på norsk, f.eks. «Bestilt: 1 stor pepperoni, hentes 18:00, 189 kr»";
+  return `Mål: ${ctx.goal}\nSamtale:\n${lines}\n\nSvar som JSON: {"outcome": "done|partial|failed|refused|no_answer", "summary": "${summary}", "details": {"tid": "...", "pris": "...", "referanse": "..."}}`;
 }
 
 const TONES_EN = {

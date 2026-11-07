@@ -2,6 +2,7 @@ import nodeCrypto from "node:crypto";
 // REST + live WebSocket per CONTRACT.md, plus the Telnyx webhook and media socket.
 
 import type { Server, ServerWebSocket } from "bun";
+import { isPriceRule, uiText } from "./call/ui-text.ts";
 import { parseErrand } from "./call/style.ts";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -193,7 +194,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     const source: Plan["callee"]["source"] = contact ? "contact" : t.input.phone || answers.phone ? "user" : lookup(t.input.text) ? "lookup" : "user";
     let blocked: Plan["blocked"];
     let phone = "";
-    if (!rawPhone) blocked = { reason: "Fant ikke nummeret. Skriv inn nummeret du vil at jeg skal ringe." };
+    if (!rawPhone) blocked = { reason: uiText(t.input.lang).noNumber };
     else {
       const n = checkNumber(rawPhone);
       if (n.ok) phone = n.e164;
@@ -207,7 +208,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       goal: p.goal,
       opening,
       willShare: p.willShare.includes("name") ? p.willShare : ["name", ...p.willShare],
-      needsApprovalFor: p.needsApprovalFor.some((x) => /^pris/i.test(x)) ? p.needsApprovalFor : ["pris over 0 kr", ...p.needsApprovalFor],
+      needsApprovalFor: p.needsApprovalFor.some(isPriceRule) ? p.needsApprovalFor : [uiText(t.input.lang).anyPrice, ...p.needsApprovalFor],
       voiceId,
       callLang,
       ...(blocked ? { blocked } : {}),
@@ -250,7 +251,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed, "pizza", t.plan.callLang ?? "no");
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
     const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
-    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile }, line, llm: callLlm, secrets: { fnr }, maxSec, taskText: t.input.text });
+    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile, lang: t.input.lang ?? t.profile.lang }, line, llm: callLlm, secrets: { fnr }, maxSec, taskText: t.input.text });
     // History: the call's summary (never the transcript) is saved for the device when it ends.
     if (t.device) {
       const device = t.device, calleeName = t.plan.callee.name;

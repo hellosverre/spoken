@@ -140,7 +140,7 @@ export class OpenAiCompatLlm implements LlmProvider {
         phone: task.phone ?? (typeof j.phone === "string" ? j.phone : undefined),
         goal: String(j.goal ?? task.text),
         willShare: (Array.isArray(j.willShare) ? j.willShare : ["name"]).filter((s: any) => SHAREABLE.includes(s)),
-        needsApprovalFor: (Array.isArray(j.needsApprovalFor) ? j.needsApprovalFor.map(String) : []).concat("pris over 0 kr"),
+        needsApprovalFor: Array.isArray(j.needsApprovalFor) ? j.needsApprovalFor.map(String) : [], // app.ts adds the price rule
       };
     } catch (e) {
       console.warn(`[llm] plan fell back to mock: ${(e as Error).message}`);

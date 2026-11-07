@@ -2,6 +2,7 @@
 // simple Norwegian conversation on a real test call when no LLM key is set.
 
 import type { Question, Shareable } from "../../../shared/contract.ts";
+import { uiText } from "../call/ui-text.ts";
 import { lookup } from "../directory.ts";
 import { calleeProposesCommitment } from "../safety.ts";
 import type { AgentContext, ClarifyOut, LlmProvider, PlanOut, SummaryOut, TaskForLlm } from "./types.ts";
@@ -36,7 +37,28 @@ function isFood(text: string) {
   return /pizza|pepperoni|domino|peppes|kebab|burger|sushi|bestill.*mat/i.test(text);
 }
 
+const isDelivery = (a?: string) => /^(levering|delivery)$/i.test(a ?? "");
+const isAsap = (a?: string) => /^(så fort som mulig|as soon as possible)$/i.test(a ?? "");
+
+function mockClarifyEn(task: TaskForLlm): ClarifyOut {
+  const t = task.text;
+  const qs: Question[] = [];
+  const hit = lookup(t);
+  const what = task.callLang === "no" ? goalSentence(t) : goalSentenceEn(t);
+  if (!task.phone && !hit) qs.push({ id: "phone", text: "Which number should I call?" });
+  if (isFood(t)) {
+    if (!/hent|lever|pick ?up|deliver/i.test(t)) qs.push({ id: "pickup", text: "Pickup or delivery?", options: ["Pickup", "Delivery"] });
+    if (!/\d{1,2}[:.]\d{2}|\bkl\b|klokka|\d\s*(am|pm)\b/i.test(t)) qs.push({ id: "time", text: "When do you want it?", options: ["As soon as possible", "18:00", "19:00"] });
+    qs.push({ id: "maxPrice", text: "How much can it cost? I'll ask you before I agree anyway.", options: ["Up to 250 kr", "Up to 400 kr", "Always ask me"] });
+  } else if (/time|lege|frisør|book|appointment|doctor|haircut/i.test(t)) {
+    qs.push({ id: "when", text: "What times work for you?", options: ["Morning", "Afternoon", "Any time"] });
+  }
+  qs.push({ id: "confirm", text: `So I'll ${what}, right?`, options: ["Yes", "No, change it"] });
+  return { summary: `Call ${hit?.name ?? task.phone ?? "a number"} to ${what}.`, questions: qs };
+}
+
 export function mockClarify(task: TaskForLlm): ClarifyOut {
+  if (task.lang === "en") return mockClarifyEn(task);
   const t = task.text;
   const qs: Question[] = [];
   const hit = lookup(t);
@@ -57,19 +79,20 @@ export function mockPlan(task: TaskForLlm, answers: Record<string, string>): Pla
   const en = task.callLang === "en";
   let goal = en ? goalSentenceEn(task.text) : goalSentence(task.text);
   if (en) {
-    if (answers.pickup && !/pick ?up|deliver/i.test(goal)) goal += answers.pickup === "Levering" ? " for delivery" : " for pickup";
-    if (answers.time && !/\d/.test(goal) && answers.time !== "Så fort som mulig") goal += ` at ${answers.time}`;
+    if (answers.pickup && !/pick ?up|deliver/i.test(goal)) goal += isDelivery(answers.pickup) ? " for delivery" : " for pickup";
+    if (answers.time && !/\d/.test(goal) && !isAsap(answers.time)) goal += ` at ${answers.time}`;
   } else if (answers.pickup && !/hent|lever/i.test(goal)) {
-    const how = answers.pickup === "Levering" ? "med levering" : "til henting";
+    const how = isDelivery(answers.pickup) ? "med levering" : "til henting";
     const t = /\s+(til|klokka|kl\.?)\s+(\d{1,2}[:.]\d{2})/i;
     goal = t.test(goal) ? goal.replace(t, ` ${how} klokka $2`) : `${goal} ${how}`;
   }
-  if (!en && answers.time && !/\d{1,2}[:.]\d{2}/.test(goal) && answers.time !== "Så fort som mulig") goal += ` klokka ${answers.time}`;
+  if (!en && answers.time && !/\d{1,2}[:.]\d{2}/.test(goal) && !isAsap(answers.time)) goal += ` klokka ${answers.time}`;
   const willShare: Shareable[] = ["name"];
-  if (answers.pickup === "Levering") willShare.push("address");
+  if (isDelivery(answers.pickup)) willShare.push("address");
   if (task.profile.allergies) willShare.push("allergies");
-  const needs = ["pris over 0 kr", "å bekrefte en bestilling eller time"];
-  if (answers.maxPrice && answers.maxPrice !== "Spør meg alltid") needs[0] = `pris (grense: ${answers.maxPrice.toLowerCase()})`;
+  const U = uiText(task.lang);
+  const needs = [U.anyPrice, U.confirmBooking];
+  if (answers.maxPrice && !/^(spør meg alltid|always ask me)$/i.test(answers.maxPrice)) needs[0] = U.priceLimit(answers.maxPrice);
   return {
     calleeName: hit?.name ?? answers.callee ?? "Mottaker",
     phone: task.phone ?? answers.phone ?? hit?.phone,
@@ -195,10 +218,17 @@ export function mockSummary(ctx: AgentContext): SummaryOut {
   if (time) details.tid = time[1]!.replace(".", ":");
   const outcome = refused ? "refused" : approved ? "done" : declined ? "partial" : "partial";
   const what = ctx.goal.charAt(0).toUpperCase() + ctx.goal.slice(1);
-  const doneWhat = what.replace(/^Bestille\b/, "Bestilt:").replace(/^Booke\b/, "Booket:").replace(/^Avbestille\b/, "Avbestilt:");
+  // The summary is read in the app: app language, whatever language the call was in.
+  const en = ctx.uiLang === "en";
+  const doneWhat = en
+    ? what.replace(/^(Order|Bestille)\b/, "Ordered:").replace(/^(Book|Booke)\b/, "Booked:").replace(/^(Cancel|Avbestille)\b/, "Cancelled:")
+    : what.replace(/^Bestille\b/, "Bestilt:").replace(/^Booke\b/, "Booket:").replace(/^Avbestille\b/, "Avbestilt:");
+  const done = doneWhat === what ? `${en ? "Done" : "Ferdig"}: ${what}` : doneWhat;
   const summary = outcome === "done"
-    ? `${doneWhat === what ? `Ferdig: ${what}` : doneWhat}${details.pris ? `, ${details.pris}` : ""}.`
-    : outcome === "refused" ? `${ctx.calleeName} ville ikke snakke med en KI-assistent.` : `Ikke fullført: ${what}.`;
+    ? `${done}${details.pris ? `, ${details.pris}` : ""}.`
+    : outcome === "refused"
+      ? (en ? `${ctx.calleeName} didn't want to talk to an AI assistant.` : `${ctx.calleeName} ville ikke snakke med en KI-assistent.`)
+      : `${en ? "Not completed" : "Ikke fullført"}: ${what}.`;
   return { outcome, summary, details };
 }
 

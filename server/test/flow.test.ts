@@ -9,8 +9,8 @@ afterAll(() => s.stop());
 const finals = (evs: LiveEvent[], who: "agent" | "callee") =>
   evs.filter((e): e is Extract<LiveEvent, { type: "transcript" }> => e.type === "transcript" && e.final && e.who === who).map((e) => e.text);
 
-async function planFor(text: string, phone?: string) {
-  const c = await s.post("/api/tasks", { text, lang: "no", ...(phone ? { phone } : {}) });
+async function planFor(text: string, phone?: string, lang: "no" | "en" = "no") {
+  const c = await s.post("/api/tasks", { text, lang, ...(phone ? { phone } : {}) });
   expect(c.status).toBe(200);
   const answers: Record<string, string> = {};
   for (const q of c.data.questions) answers[q.id] = q.options?.[0] ?? "ja";
@@ -122,6 +122,42 @@ describe("English call", () => {
     const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true, callLang: "en" });
     const evs = await watchCall(s.base, call.data.callId).done;
     expect(finals(evs, "agent")[0]).toStartWith("Hi, I'm an AI assistant");
+  });
+});
+
+describe("English app", () => {
+  const NORWEGIAN = /[æøå]|\b(jeg|ikke|deg|samtalen|bestilt|ferdig|pris over)\b/i;
+  const notes = (evs: LiveEvent[]) => evs.filter((e: any) => e.type === "note").map((e: any) => e.text as string);
+
+  test("plan, approvals, notes and result are in English", async () => {
+    const { clarify, plan } = await planFor("Order a large pepperoni from Domino's Storo for 6pm", undefined, "en");
+    expect(clarify.summary).not.toMatch(NORWEGIAN);
+    for (const q of clarify.questions) expect(q.text).not.toMatch(NORWEGIAN);
+    expect(plan.needsApprovalFor[0]).toMatch(/^(any price above 0 kr|price \(limit)/);
+    expect(plan.needsApprovalFor.join(" ")).not.toMatch(NORWEGIAN);
+    const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true });
+    const evs = await watchCall(s.base, call.data.callId).done;
+    const result = (evs.at(-1) as any).result;
+    expect(result.outcome).toBe("done");
+    expect(result.summary).toStartWith("Ordered:");
+    expect(notes(evs).length).toBeGreaterThan(0);
+    for (const n of notes(evs)) expect(n).not.toMatch(NORWEGIAN);
+  });
+
+  test("a Norwegian call still gets an English result", async () => {
+    const { plan } = await planFor("Bestill en stor pepperoni fra Domino's Storo til 18:00", undefined, "en");
+    expect(plan.opening).toStartWith("Hei, jeg er en KI-assistent");
+    expect(plan.needsApprovalFor[0]).toMatch(/^(any price above 0 kr|price \(limit)/);
+    const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true });
+    const evs = await watchCall(s.base, call.data.callId).done;
+    const result = (evs.at(-1) as any).result;
+    expect(result.summary).toMatch(/^(Ordered|Done|Not completed|Unclear|Not confirmed)/);
+    for (const n of notes(evs)) expect(n).not.toMatch(NORWEGIAN);
+  });
+
+  test("a missing number is asked for in English", async () => {
+    const { plan } = await planFor("Call my dentist", undefined, "en");
+    expect(plan.blocked?.reason ?? "").not.toMatch(NORWEGIAN);
   });
 });
 
