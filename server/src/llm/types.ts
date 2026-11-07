@@ -56,6 +56,7 @@ export interface Usage {
   promptTokens: number;
   completionTokens: number;
   costUsd?: number; // OpenRouter reports it per request
+  cachedTokens?: number; // prompt tokens read from the provider's prompt cache
 }
 
 export interface LlmProvider {

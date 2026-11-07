@@ -74,6 +74,7 @@ function validProfile(b: any): Profile | string {
 }
 
 export function createApp(llm: LlmProvider = createLlm()) {
+  void llm.warm?.(); // open the LLM connection before the first call
   setInterval(() => purge(), 60_000).unref?.();
 
   async function createTask(req: Request) {

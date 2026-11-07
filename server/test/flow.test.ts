@@ -51,7 +51,7 @@ describe("mock pizza order, end to end", () => {
     const approvalIdx = evs.indexOf(approvals[0]!);
     const commitIdx = evs.findIndex((e) => e.type === "transcript" && e.who === "agent" && /bekrefter/i.test(e.text));
     expect(commitIdx).toBeGreaterThan(approvalIdx);
-    expect(agent).toContain("Et øyeblikk…");
+    expect(agent).toContain("Et lite øyeblikk, jeg sjekker med Sverre.");
 
     // Card number refused, with a note.
     expect(agent.some((t) => /kan ikke oppgi kortnummer/i.test(t))).toBe(true);

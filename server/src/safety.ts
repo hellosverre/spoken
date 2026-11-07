@@ -137,8 +137,22 @@ export function filterOutgoing(
 
 const COMMIT = /\b(bekrefter jeg|jeg (bekrefter|bestiller|booker|tar (den|det|timen)|godtar|aksepterer|avbestiller|kansellerer|betaler)|det er (en )?avtale|legg (den |det )?inn|bare kjør|ja,? (takk,? )?(det|den) (tar jeg|blir bra|passer)|vi tar (den|det)|book(e)? (den|det))/i;
 
+// Norwegian inverted order after an adverb: «da bestiller jeg», «så bekrefter jeg» (call #8
+// said «Flott, da bestiller jeg …» before any approval).
+const COMMIT_INVERTED = /\b(bestiller|booker|bekrefter|tar|godtar|aksepterer|avbestiller|kansellerer|betaler|reserverer|legger inn) jeg\b/i;
+// Conditions and questions are not commitments: «Før jeg bekrefter …», «Skal jeg bestille?».
+const CONDITIONAL = /\b(før|hvis|når|dersom|om|etter at|så snart) jeg\b/i;
+
 export function isCommitment(text: string): boolean {
-  return COMMIT.test(text);
+  const t = text.trim();
+  if (/\?$/.test(t)) return false;
+  if (CONDITIONAL.test(t) && !/[.!]\s+\S/.test(t)) return false;
+  return COMMIT.test(t) || COMMIT_INVERTED.test(t);
+}
+
+/** Claims that the deal is done; only allowed once the callee clearly confirmed. */
+export function isDoneClaim(text: string): boolean {
+  return /(bestillingen er (klar|bekreftet|lagt inn|i orden|registrert)|da er (det|den) (bestilt|booket|i orden|notert|klart)|timen er (booket|bestilt|bekreftet))/i.test(text);
 }
 
 /** Callee is proposing something that would need a yes from the user. */
