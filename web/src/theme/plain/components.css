@@ -4,6 +4,24 @@
   contract with the React code (see web/README.md); keep them, restyle freely.
 */
 
+/* ---------- stage: pages cross over in one grid cell during transitions ---------- */
+body {
+  overflow-x: hidden;
+}
+.sp-stage {
+  display: grid;
+}
+.sp-page {
+  grid-area: 1 / 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sp-page > .sp-screen {
+  flex: 1;
+  width: 100%;
+}
+
 /* ---------- screen ---------- */
 .sp-screen {
   max-width: var(--content-max);
@@ -90,10 +108,9 @@
   color: var(--color-text);
   font-weight: 600;
   text-decoration: none;
-  transition: transform var(--dur-fast) var(--ease-out), background var(--dur-fast);
-}
-.sp-btn:active:not(:disabled) {
-  transform: scale(0.98);
+  transition: background var(--dur-fast);
+  /* transforms belong to motion (press squash, hover lift) */
+  will-change: transform;
 }
 .sp-btn:disabled {
   opacity: 0.5;
@@ -201,7 +218,7 @@
   min-height: 9rem;
 }
 /* the home box's own label repeats the H1, so only screen readers get it */
-[data-screen="home"] .sp-form[data-variant="task"] > .sp-field:first-child > .sp-field__label {
+[data-screen="home"] .sp-morph > .sp-field > .sp-field__label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -473,6 +490,11 @@
   display: flex;
   flex-direction: column;
 }
+#root:has([data-screen="call"]) .sp-stage,
+#root:has([data-screen="call"]) .sp-page {
+  flex: 1;
+  min-height: 0;
+}
 [data-screen="call"] {
   flex: 1;
   min-height: 0;
@@ -644,7 +666,6 @@
   border-radius: var(--radius-lg);
   border: 2px solid var(--color-accent);
   background: var(--color-surface);
-  animation: sp-rise var(--dur-slow) var(--ease-out) both;
 }
 .sp-approval__label {
   font-size: var(--text-sm);

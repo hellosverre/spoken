@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { motion } from "motion/react";
 import { useT } from "../../i18n/useT.ts";
+import { spring } from "../../motion/presets.ts";
 import { Button, Icon } from "../ui.tsx";
 
 export type Tone = "friendly" | "firm" | "hurry";
@@ -80,6 +82,7 @@ export function CallControls({
               disabled={disabled}
               onClick={() => onTone(t)}
             >
+              {tone === t ? <motion.span layoutId="tone-pill" className="sp-tone__pill" transition={spring.pop} /> : null}
               {d.call.tones[t]}
             </button>
           ))}

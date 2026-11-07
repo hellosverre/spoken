@@ -20,6 +20,7 @@ function nixChrome() {
   return d ? path.join(dir, d, "chrome-linux64", "chrome") : undefined;
 }
 
+process.on("exit", () => server.kill());
 const server = spawn("node_modules/.bin/vite", ["preview", "--port", String(PORT), "--strictPort"], { cwd: root, stdio: "pipe" });
 await new Promise((resolve, reject) => {
   server.stdout.on("data", (b) => String(b).includes(String(PORT)) && resolve());
@@ -30,21 +31,29 @@ await new Promise((resolve, reject) => {
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || nixChrome() || chromium.executablePath() });
 const errors = [];
 
-async function run(width, height, scheme) {
-  const tag = `${width}-${scheme}`;
-  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, deviceScaleFactor: width < 500 ? 2 : 1, locale: "en-US" });
+async function run(width, height, scheme, calm = false) {
+  const tag = `${width}-${scheme}${calm ? "-calm" : ""}`;
+  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme: scheme, reducedMotion: calm ? "reduce" : "no-preference", deviceScaleFactor: width < 500 ? 2 : 1, locale: "en-US" });
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`${tag}: ${e.message}`));
   page.on("console", (m) => m.type() === "error" && errors.push(`${tag}: ${m.text()}`));
-  const shot = (name) => page.screenshot({ path: path.join(out, `${name}-${tag}.png`), fullPage: name !== "call" && name !== "approval" });
+  // Wait until the leaving page has finished its exit, so only one screen is on stage.
+  const settle = () => page.waitForFunction(() => document.querySelectorAll(".sp-page").length === 1);
+  const shot = async (name) => {
+    await settle();
+    await page.waitForTimeout(name === "call" || name === "approval" ? 0 : 900);
+    return page.screenshot({ path: path.join(out, `${name}-${tag}.png`), fullPage: name !== "call" && name !== "approval" });
+  };
 
   await page.goto(`http://localhost:${PORT}/?mockSpeed=3#/`);
   await page.getByLabel("Your first name").fill("Sverre");
   await shot("onboarding-1");
   await page.getByRole("button", { name: "Next" }).click();
   await page.getByRole("heading", { name: "How do you want to follow calls?" }).waitFor();
+  await settle();
   await shot("onboarding-2");
   await page.getByRole("button", { name: "Next" }).click();
+  await settle();
   await page.getByText("Ingrid").waitFor();
   await shot("onboarding-3");
   await page.getByRole("button", { name: "Start using Spoken" }).click();
@@ -87,6 +96,8 @@ async function run(width, height, scheme) {
 
 try {
   for (const [w, h] of [[390, 844], [1440, 900]]) for (const s of ["dark", "light"]) await run(w, h, s);
+  // The calm fallback must carry the whole flow too.
+  await run(390, 844, "dark", true);
 } finally {
   await browser.close();
   server.kill();

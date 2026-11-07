@@ -8,7 +8,9 @@ import {
   type Ref,
   type TextareaHTMLAttributes,
 } from "react";
+import { motion } from "motion/react";
 import { useT } from "../i18n/useT.ts";
+import { hover, spring, tap } from "../motion/presets.ts";
 
 // Plain building blocks. No visual decisions in here: each element exposes a
 // stable `sp-*` class plus data-attributes for variants and states, and the
@@ -62,31 +64,45 @@ export function Screen({
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "yes" | "no";
 
+// Motion owns these handler names with different signatures, so plain-DOM versions are dropped.
+type NativeButton = Omit<
+  ButtonHTMLAttributes<HTMLButtonElement>,
+  "onAnimationStart" | "onAnimationEnd" | "onAnimationIteration" | "onDrag" | "onDragStart" | "onDragEnd" | "onDragOver"
+>;
+
 export function Button({
   variant = "secondary",
   size = "md",
   busy,
   children,
+  layoutId,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
+}: NativeButton & {
   variant?: ButtonVariant;
   size?: "sm" | "md" | "lg" | "xl";
   busy?: boolean;
   ref?: Ref<HTMLButtonElement>;
+  /** Shared-element id: the button morphs into whatever mounts next with the same id. */
+  layoutId?: string;
 }) {
+  const disabled = rest.disabled || busy;
   return (
-    <button
+    <motion.button
       type="button"
       {...rest}
+      layoutId={layoutId}
       className={`sp-btn ${rest.className ?? ""}`.trim()}
       data-variant={variant}
       data-size={size}
       data-busy={busy || undefined}
       aria-busy={busy || undefined}
-      disabled={rest.disabled || busy}
+      disabled={disabled}
+      whileTap={disabled ? undefined : tap}
+      whileHover={disabled ? undefined : hover}
+      transition={spring.press}
     >
       {children}
-    </button>
+    </motion.button>
   );
 }
 
@@ -100,9 +116,9 @@ export function LinkButton({
   children: ReactNode;
 }) {
   return (
-    <a className="sp-btn" data-variant={variant} data-size="md" href={href}>
+    <motion.a className="sp-btn" data-variant={variant} data-size="md" href={href} whileTap={tap} whileHover={hover} transition={spring.press}>
       {children}
-    </a>
+    </motion.a>
   );
 }
 
