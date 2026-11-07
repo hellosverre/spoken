@@ -10,6 +10,10 @@ export type LineMetric =
   | { kind: "first_audio"; at: number };
 
 export interface LineEvents {
+  /** Scribe's audio-based language for the last committed segment. */
+  calleeLanguage?(code: string, text: string): void;
+  /** Entities Scribe found in the last committed segment. */
+  calleeEntities?(text: string, entities: import("../voice/scribe.ts").ScribeEntity[]): void;
   status(status: CallStatus, detail?: string): void;
   /** Callee started talking (VAD/partial): used for barge-in. */
   calleeSpeech(): void;

@@ -240,6 +240,8 @@ export class ElksLine implements CallLine {
 
   private attach(_ws: ServerWebSocket<any>) {
     this.scribe = new ScribeStream({
+      language: (code, text) => this.ev.calleeLanguage?.(code, text),
+      entities: (text, entities) => this.ev.calleeEntities?.(text, entities),
       partial: (text) => {
         const n = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
         if (n && this.lastCommittedNorm.startsWith(n) && Date.now() - this.lastCommitAt < 2000) return;

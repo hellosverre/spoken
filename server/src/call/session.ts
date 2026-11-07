@@ -426,6 +426,8 @@ export class CallSession {
         calleeRevised: (id, text, words) => this.onRevised(id, text, words),
         calleeNoise: (id) => this.onNoise(id),
         calleeBatchDone: (id) => { const f = this.facts.batchAgrees(id); if (f) this.emit({ type: "facts", items: f, at: Date.now() }); this.releaseSpeech(id); },
+        calleeLanguage: (code, text) => { this.switcher.feedDetected(code, text); },
+        calleeEntities: (text, entities) => { const f = this.facts.observeEntities(text, entities); if (f) this.emit({ type: "facts", items: f, at: Date.now() }); },
         voicemail: () => this.onVoicemail(),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),

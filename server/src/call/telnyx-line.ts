@@ -272,6 +272,8 @@ export class TelnyxLine implements CallLine {
   attach(ws: ServerWebSocket<any>) {
     this.ws = ws;
     this.scribe = new ScribeStream({
+      language: (code, text) => this.ev.calleeLanguage?.(code, text),
+      entities: (text, entities) => this.ev.calleeEntities?.(text, entities),
       partial: (text) => {
         // Scribe can repeat the just-committed text as a partial; that is not new speech.
         const n = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
