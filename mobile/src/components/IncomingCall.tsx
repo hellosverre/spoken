@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View, type ScrollViewInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { serverUrl } from "../lib/real-call";
 import { makeStyles, PAD, useTheme } from "../lib/theme";
@@ -74,7 +74,7 @@ function Relay({ inc, onClose }: { inc: Incoming; onClose: () => void }) {
   const [ask, setAsk] = useState<Approval | null>(null);
   const [ended, setEnded] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
-  const scroll = useRef<ScrollView>(null);
+  const scroll = useRef<ScrollViewInstance>(null);
 
   useEffect(() => {
     const sock = new WebSocket(`${serverUrl().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(inc.callId)}/live`);
