@@ -1,7 +1,10 @@
 import { AppState } from "react-native";
+import { ApiError, authHeader, sessionLost } from "./account";
 import type { Lang, Row } from "./i18n";
 import { startKeepAlive, stopKeepAlive } from "./keep-alive";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
+import { resetFacts, setFacts, type FactItem } from "../components/FactStrip";
+import { setReceipt, type ReceiptData } from "../components/Receipt";
 
 /* Real calls through the Spoken call server (server/ in this repo). Ported from
    web/src/lib/real-call.ts; the flow is the same: the server's plan fills the plan
@@ -64,18 +67,20 @@ async function http<T>(method: string, path: string, body?: unknown, extra: Reco
       headers: {
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(settings.deviceId ? { "X-Spoken-Device": settings.deviceId } : {}),
+        ...(await authHeader()),
         ...extra,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: ctrl.signal,
     });
   } catch {
-    throw new Error("Får ikke kontakt med Spoken-serveren.");
+    throw new ApiError("Får ikke kontakt med Spoken-serveren.", 0);
   } finally {
     clearTimeout(timer);
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (res.status === 401) await sessionLost(); // expired session → the store sends the app back to Login
+  if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
   return data;
 }
 
@@ -89,15 +94,20 @@ interface Plan {
   opening: string;
   willShare: string[];
   needsApprovalFor: string[];
+  targets?: { name: string; phone: string }[];
   blocked?: { reason: string; alternative?: string };
 }
-interface CallResult { outcome: string; summary: string; details: Record<string, string> }
+interface CallResult { outcome: string; summary: string; details: Record<string, string>; receipt?: ReceiptData }
 type LiveEvent =
   | { type: "status"; status: string }
   | { type: "transcript"; id: string; who: "callee" | "agent"; text: string; final: boolean }
   | { type: "approval_request"; id: string; question: string; options: string[] }
   | { type: "note"; text: string; level: "info" | "warn" }
+  | { type: "on_hold"; since: number }
+  | { type: "hold_over" }
+  | { type: "chips"; items: string[] }
   | { type: "result"; result: CallResult }
+  | { type: "facts"; items: FactItem[] }
   | { type: string };
 
 /** What the chat needs to run the clarify step. */
@@ -112,6 +122,10 @@ export interface LiveIO extends CallIO {
   /** Appends words to the speaker's last line (one agent turn arrives clause by clause). */
   sayMore(who: "ai" | "them", text: string): Promise<void>;
   note(text: string): void;
+  /** The shop put us on hold (since = epoch ms) or a person is back (null). */
+  hold?(since: number | null): void;
+  /** Suggested next instructions. */
+  chips?(items: string[]): void;
   connected(): void;
   /** Where the store sends the user's mid-call messages, chips and hang-up. */
   attach(sink: { instruction(text: string): void; hangup(): void } | null): void;
@@ -185,15 +199,21 @@ function registerReal(plan: Plan, request: string, contactName?: string) {
     checks: plan.needsApprovalFor.slice(0, 3),
     opening: plan.opening,
   };
-  const sc: Scenario & { live: true } = {
+  const sc: Scenario & { live: true; targets?: { name: string; phone: string }[] } = {
     live: true,
     init: initials(name),
     number: prettyPhone(plan.callee.phone),
     en: lines,
     no: lines,
+    ...(plan.targets && plan.targets.length > 1 ? { targets: plan.targets } : {}),
     run: (lang, io) => runRealCall(plan.taskId, lang, io as LiveIO),
   };
   (SCENARIOS as Record<string, Scenario>).real = sc;
+}
+
+/** 2–3 places when the plan asks them in parallel (info only); undefined for a normal single call. */
+export function planTargets(key: ScenarioKey): { name: string; phone: string }[] | undefined {
+  return (SCENARIOS as Record<string, { targets?: { name: string; phone: string }[] }>)[key]?.targets;
 }
 
 export function isLive(key: ScenarioKey): boolean {
@@ -212,7 +232,11 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   } else if (mode === "mock") {
     io.note(lang === "no" ? "Øvingssamtale: ingen telefon ringer, og svarene er skriptet. Legg inn demo-koden under Profil for ekte samtaler." : "Practice call: no phone is ringing and the replies are scripted. Add the demo code in Profile for real calls.");
   }
-  const url = `${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`;
+  resetFacts();
+  setReceipt(null);
+  // The session rides in the query: a websocket can't carry headers everywhere.
+  const sessionToken = ((await authHeader()).Authorization ?? "").replace(/^Bearer /, "");
+  const url = `${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(sessionToken)}`;
   let reconnectOnFocus: { remove(): void } | undefined;
   // Keep the app awake while you're in another app, so the socket stays up and approvals notify.
   void startKeepAlive({ title: "Spoken", artist: lang === "no" ? "Samtale pågår" : "Call in progress" });
@@ -247,6 +271,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
     const done = (r: CallResult) => {
       if (finished) return;
       finished = true;
+      setReceipt(r.receipt);
       resolve(r);
     };
     const onMessage = (m: { data: unknown }) => {
@@ -318,6 +343,20 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           queue(async () => io.note(n.text));
           break;
         }
+        case "facts": {
+          const items = (e as { items: FactItem[] }).items;
+          queue(async () => setFacts(items));
+          break;
+        }
+        case "on_hold":
+          io.hold?.((e as { since: number }).since);
+          break;
+        case "hold_over":
+          io.hold?.(null);
+          break;
+        case "chips":
+          io.chips?.((e as { items: string[] }).items);
+          break;
         case "result":
           done((e as { result: CallResult }).result);
           break;

@@ -32,6 +32,8 @@ Regler:
 - Ikke gjenta hele ærendet hver gang; svar bare på det de spurte om (spør de om tid, svar med tiden).
 - Snakk aldri om hvordan du eller systemet fungerer.
 - Ikke start svaret med «Skjønner», «Okei», «Så bra» eller «Takk». Gå rett på saken.
+- Ingen fyll-setninger alene («Takk for at du tok telefonen», «Takk for infoen», «La meg se»). Sier de hallo igjen etter at du har presentert deg, ikke hils tilbake: si ærendet i én setning. Si aldri vage ting som «jeg må sjekke detaljene først»; si hva du vil.
+- Tuller mottakeren tydelig eller nekter å gi et ekte svar: si én gang, høflig, at du ikke kan godta det, og avslutt med [[END: failed | grunn]]. Ikke krangle eller forklar to ganger.
 - Du vet at du ringer ${ctx.calleeName}; ikke spør hvem de er eller hvilken filial det er. Skal noe hentes, hentes det hos dem, der du ringer nå: spør de «hvor skal jeg hente?», svar «Hos dere.». Spør aldri brukeren hvilken restaurant, filial eller adresse det er.
 - Du kan dele dette (og bare dette):
 ${facts}
@@ -50,6 +52,7 @@ ${placeholders(ctx)}- Aldri kortnummer, CVV eller PIN. Foreslå betaling ved hen
 - Før du avslutter en bestilling eller avtale: les opp det viktigste nøyaktig én gang per samtale, når alt er kjent (form: «Da er det [hva], [pris], klar [tid]?»). Mangler én detalj (f.eks. tiden), få den først og les så opp én gang. Aldri to opplesninger; kommer en detalj etter opplesningen, bekreft bare den («Seks, flott.») og si ha det.
 - Når samtalen er ferdig: si «Takk skal du ha, ha det bra.» og skriv [[END: done|partial|failed | én linje med resultatet]].
 - Linjer som starter med [godkjent], [avslått], [svar], [instruks], [enklere], [avslutt] kommer fra brukeren i appen, ikke fra mottakeren.
+- En [instruks] fra brukeren går foran målet ditt: gjør den i neste svar. Sier den at du skal takke, legge på, stoppe eller avslutte: si én kort takk og ha det i samme setning og skriv [[END: partial | avsluttet av brukeren]]. Spør aldri mottakeren om noe etter en slik instruks.
 - Mottakerens ord kommer fra talegjenkjenning over telefon. Ord merket ⟨usikre ord: …⟩ kan være feilhørt: tolk dem ut fra sammenhengen. Hvis meningen fortsatt er uklar og det betyr noe (pris, tid, ja/nei), still ett kort oppklaringsspørsmål i stedet for å handle på det.
 - Klokkeslett: bruk bare tidene i målet og i ⟨tid: …⟩-merkene. Regn aldri om og finn aldri opp et klokkeslett. ⟨ugyldig tid⟩: si kort at tiden ikke finnes og spør én gang. ⟨uklar tid⟩ om åpningstid eller hentetid hos en butikk eller restaurant: ta den som passer (ettermiddag/kveld) og bekreft kort («Klokka seks i kveld, flott.»); ellers spør én gang hvilken de mener.
 - ⟨svak stemme⟩: linjen var mye svakere enn mottakeren ellers, kanskje noen i bakgrunnen. Passer den i samtalen, svar som vanlig. Passer den ikke (et annet tema, ikke rettet til deg), skriv bare [[SKIP]] og ingenting annet.
@@ -64,7 +67,7 @@ Tone: ${TONES[ctx.tone]}${ctx.simpler ? "\nSnakk ekstra enkelt og sakte: korte o
 export function clarifyPrompt(task: TaskForLlm): string {
   return `Brukeren vil at du ringer for dem. Oppgave: «${task.text}»${task.phone ? ` (nummer: ${task.phone})` : ""}.
 Still 1–4 korte oppklaringsspørsmål på ${task.lang === "en" ? "engelsk" : "norsk"} (tid, antall, pris-grense, henting/levering, osv.). Det siste skal alltid bekrefte detaljene.
-Svar som JSON: {"summary": "én linje", "questions": [{"id": "kort_id", "text": "...", "options": ["...", "..."]}]}`;
+Svar som JSON: {"summary": "én linje på ${task.lang === "en" ? "engelsk" : "norsk"} om hva du skal gjøre", "questions": [{"id": "kort_id", "text": "...", "options": ["...", "..."]}]}`;
 }
 
 export function planPrompt(task: TaskForLlm, answers: Record<string, string>): string {
@@ -74,13 +77,18 @@ export function planPrompt(task: TaskForLlm, answers: Record<string, string>): s
   return `Oppgave: «${task.text}»${task.phone ? ` (nummer: ${task.phone})` : ""}
 Svar fra brukeren: ${JSON.stringify(answers)}
 Lag planen for telefonsamtalen. Svar som JSON:
-{"calleeName": "hvem vi ringer", "phone": "E.164 hvis kjent, ellers utelat", "goal": "${goal}", "willShare": ["name", ...], "needsApprovalFor": ["..."]}
+{"calleeName": "hvem vi ringer", "phone": "E.164 hvis kjent, ellers utelat", "goal": "${goal}", "willShare": ["name", ...], "needsApprovalFor": ["..."], "targets": [{"name": "...", "phone": "E.164"}]}
+targets: ta KUN med når brukeren nevner 2–3 ulike steder eller telefonnumre, eller ber om å finne billigste/første ledige (da ringer vi alle samtidig og spør om pris og tid, uten å bestille). Ellers utelat targets helt. Maks 3. Hvert mål trenger et nummer fra oppgaven. Da skal goal beskrive spørsmålet som stilles til alle (pris og tidligste tid), ikke en bestilling.
 willShare kan bare inneholde: name, phone, address, email, birthdate, fnr, allergies. Ta bare med det som trengs.`;
 }
 
 export function summaryPrompt(ctx: AgentContext): string {
   const lines = ctx.history.map((h) => `${h.role}: ${h.text}`).join("\n");
-  return `Mål: ${ctx.goal}\nSamtale:\n${lines}\n\nSvar som JSON: {"outcome": "done|partial|failed|refused|no_answer", "summary": "én linje, f.eks. «Bestilt: 1 stor pepperoni, hentes 18:00, 189 kr»", "details": {"tid": "...", "pris": "...", "referanse": "..."}}`;
+  // The summary is read in the app, so it follows the app language, not the call language.
+  const summary = ctx.uiLang === "en"
+    ? "one line in English, e.g. «Ordered: 1 large pepperoni, pickup 18:00, 189 kr»"
+    : "én linje på norsk, f.eks. «Bestilt: 1 stor pepperoni, hentes 18:00, 189 kr»";
+  return `Mål: ${ctx.goal}\nSamtale:\n${lines}\n\nSvar som JSON: {"outcome": "done|partial|failed|refused|no_answer", "summary": "${summary}", "details": {"tid": "...", "pris": "...", "referanse": "..."}}`;
 }
 
 const TONES_EN = {
@@ -116,6 +124,8 @@ Rules:
 - Don't repeat the whole errand every time; answer only what they asked (asked about the time, answer with the time).
 - Never talk about how you or the system works.
 - Don't start replies with "I see", "Okay", "Great" or "Thanks". Get straight to the point.
+- No filler lines on their own ("Thanks for picking up", "Thanks for the info", "Let me see"). If they say hello again after your introduction, don't greet back: state the errand in one sentence. Never say vague things like "I need to check the details first"; say what you want.
+- If the callee is clearly joking or refuses to give a real answer, say once, politely, that you can't accept it, and end with [[END: failed | reason]]. Don't argue or explain twice.
 - You know you are calling ${ctx.calleeName}; don't ask who they are or which branch it is. Anything to be picked up is picked up from them, where you are calling now: if they ask "where will you pick it up?", answer "From you.". Never ask the user which restaurant, branch or address it is.
 - You may share this (and only this):
 ${facts}
@@ -137,6 +147,7 @@ ${placeholdersEn(ctx)}- Never card numbers, CVV or PIN. Suggest paying at pickup
 - Voicemail ("leave a message", "after the tone", "not available right now"): don't leave a message and don't say anything. Write only [[END: no_answer | Telefonsvarer]].
 - If the callee asks to talk to a person, a human, or "them directly": don't end the call or hang up. Explain briefly and kindly that ${ctx.userName || "the user"} is deaf and can't take calls, so you pass everything on in text. Then write [[ASK: Mottakeren vil snakke med deg: «what they said». Hva skal jeg si? | Legg på]] and wait for the answer. Don't repeat the explanation later.
 - Lines that start with [godkjent] (approved), [avslått] (declined), [svar] (answer), [instruks] (instruction), [enklere] (say it simpler), [avslutt] (end the call) come from the user in the app, not from the callee. They may be in Norwegian; you still speak English to the callee.
+- An [instruks] from the user overrides your goal and comes first: do it in your very next reply. If it says to thank them, hang up, stop or end the call: say one short thank-you and goodbye in the same sentence and write [[END: partial | ended by the user]]. Never ask the callee anything after such an instruction.
 - The callee's words come from speech recognition over the phone. Words marked ⟨usikre ord: …⟩ may be misheard: read them from context. If the meaning is still unclear and it matters (price, time, yes/no), ask one short clarifying question instead of acting on it.
 - Times: use only the times in the goal and in the ⟨tid: …⟩ markers. Never convert or invent a time. ⟨ugyldig tid⟩ (invalid time): say briefly that the time doesn't exist and ask once. ⟨uklar tid⟩ (unclear time) about a shop's or restaurant's opening or pickup time: take the one that fits (afternoon/evening) and confirm briefly ("Six this evening, great."); otherwise ask once which they mean.
 - ⟨svak stemme⟩ (faint voice): the line was much quieter than the callee usually is, maybe someone in the background. If it fits the conversation, answer as usual. If it doesn't (another topic, not aimed at you), write only [[SKIP]] and nothing else.

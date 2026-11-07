@@ -37,6 +37,41 @@ Offline TTS → Scribe check, no phone call (about 200 TTS chars the first time,
 BAS_SECRET_TOKEN=… /home/sverre/Projects/bas/ops/bas-secret run -- bun scripts/loopback.ts
 ```
 
+## 46elks call line (`CALL_PROVIDER=46elks`)
+
+Same agent, different phone leg: `src/call/elks-line.ts`. Outbound `POST https://api.46elks.com/a1/calls` (Basic auth) with `from=ELKS_NUMBER`, `to=<callee>`, `voice_start={"connect":"<ELKS_WS_NUMBER>"}`, `timeout=40`, `whenhangup=<PUBLIC_URL>/elks/whenhangup?call=…&t=<per-call token>`. When the callee answers, 46elks bridges to the WebSocket number and opens `wss://…/elks/media` to us (Realtime Voice: JSON, field `t`, `ulaw` 8 kHz both ways, same as Telnyx PCMU).
+
+Setup (one time, 46elks dashboard → Numbers):
+
+| Step | What | Env |
+|---|---|---|
+| 1 | Allocate a **voice-enabled virtual number** (Swedish +46 is fine; caller id of the outbound call) | `ELKS_NUMBER=+46…` |
+| 2 | Allocate a free **WebSocket number**; set its `websocket_url` to `wss://spoken-api.hellosverre.com/elks/media?t=<ELKS_WS_SECRET>` (API: `POST /a1/numbers/{id}` with `websocket_url`) | `ELKS_WS_NUMBER=+46…`, `ELKS_WS_SECRET=<random>` |
+| 3 | API username + password from the dashboard | `ELKS_API_USER`, `ELKS_API_PASSWORD` |
+| 4 | Add credit; check the account may call +47 (Norway) | |
+| 5 | `CALL_PROVIDER=46elks CALL_ALLOWLIST=+47… PUBLIC_URL=https://spoken-api.hellosverre.com` | |
+
+Notes:
+- A WebSocket number has one static `websocket_url`, so the media socket cannot carry a per-call token. It carries `ELKS_WS_SECRET` (compared in constant time; refused with 403 otherwise) and the `hello` is matched to the call by `hello.callid` (= the `id` from `POST /calls`), else the single call still waiting for its hello, else by the callee number. Unmatched hellos are closed. The per-call token protects `/elks/whenhangup`.
+- Barge-in: `{"t":"interrupt"}` then `{"t":"sending","format":"ulaw"}` again. Hangup: we send `{"t":"bye"}`, 46elks plays what is buffered and answers `bye`; the socket closes then (6 s cap).
+- `whenhangup` gives `state`/`cost`/`duration` (cost is 1/10000 of the account currency); it is the only signal for a call nobody answered. Logged as `[cost] 46elks call …`.
+- Not covered: DTMF (Realtime Voice has no such message), 46elks balance check (`MIN_BALANCE_USD` applies to Telnyx only), per-call hard time limit at 46elks (the server's `MAX_CALL_SEC` timer hangs up).
+- Passcode, `CALL_ALLOWLIST`, rate limits and mock fallback behave as for Telnyx. Unverified against the live API (no account yet): the exact `hello.from/to` of the bridged leg and `whenhangup` on unanswered calls; the fallbacks above cover both.
+
+## Vonage call line (`CALL_PROVIDER=vonage`)
+
+`src/call/vonage-line.ts`. Outbound `POST https://api.nexmo.com/v1/calls` with an RS256 JWT (`application_id`, built with node:crypto) and an inline NCCO: `connect` → websocket endpoint `wss://<PUBLIC_URL>/vonage/media?call=<callId>&t=<per-call token>`, `content-type: audio/l16;rate=16000`, `headers:{callId}`. Call events (`started/ringing/answered/completed/busy/failed/rejected/timeout/unanswered`) post JSON to `/vonage/event?call=…&t=…`. `ringing_timer=40`, `length_timer=maxSec`.
+
+Wire format: first a JSON text message `websocket:connected`, then binary 640-byte frames (s16le, 16 kHz, 20 ms) both ways. Inbound is downsampled to 8 kHz PCM for Scribe (`pcm_8000`), VAD and batch STT; outbound µ-law TTS is decoded and upsampled to 16 kHz and paced at 20 ms. Barge-in drops our queue (≈120 ms lead is already at Vonage). Hangup: `PUT /v1/calls/{uuid} {"action":"hangup"}`.
+
+| Env | What |
+|---|---|
+| `VONAGE_APPLICATION_ID` | Vonage application (Voice capability on; answer/event URLs may be dummy, the NCCO is inline) |
+| `VONAGE_PRIVATE_KEY` | PEM of that application (literal `\n` accepted; may be a `bas://` handle) |
+| `VONAGE_NUMBER` | a Vonage number linked to the application (caller id) |
+
+Not covered: DTMF (`sendDtmf` undefined), balance check, `CLEAR` on the socket (only documented for the Video audio connector; not used). Unverified against the live API: the exact text events Vonage sends after `websocket:connected` (ignored), and Norway caller-id rules for the `from` number.
+
 ## Persistence (Supabase)
 
 Profile, contacts and call **summaries** per device, never transcripts or audio (`db/schema.sql`,

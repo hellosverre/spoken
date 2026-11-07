@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { SpokenProvider, useSpoken, useStore } from "@/lib/use-spoken";
 import { Call } from "./Call";
 import { Home } from "./Home";
+import { IncomingCall } from "./IncomingCall";
 import { Intro } from "./Intro";
 import { Login } from "./Login";
 import { Pitch } from "./Pitch";
@@ -58,6 +59,7 @@ function Device() {
       <Login on={screen === "login"} />
       <Home on={screen === "home"} />
       <Call on={screen === "call"} />
+      <IncomingCall />
       {flashTick > 0 && <span key={flashTick} className="flash-ring" aria-hidden="true" />}
     </main>
   );

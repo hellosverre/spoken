@@ -9,7 +9,7 @@ import type { Lang } from "./i18n";
  * asked to agree again.
  */
 
-export const TERMS_VERSION = "2026-11-07";
+export const TERMS_VERSION = "2026-11-07b";
 
 export interface TermsSection {
   h: string;
@@ -60,15 +60,15 @@ const en: Terms = {
       h: "Your data",
       body: [
         "On this phone: your call history with full transcripts, your presets, your profile and your settings. You can delete call history in Profile → Call history.",
-        "On the Spoken server: your name and phone number from Profile, saved contacts, a short summary of each call's result, and feedback you send. They are linked to a random ID for this phone, not to an account.",
+        "On the Spoken server: your account, which is your phone number (you log in with a code by text message); your name and phone number from Profile; saved contacts; a short summary of each call's result; and feedback you send.",
         "While Spoken is being tested, the server also keeps a log of each call, including the text of what was said, and may keep a recording of the other side's voice, to improve speech recognition. These are only used by the team to test and fix Spoken.",
-        "To make calls, Spoken uses these services, which process the call: Telnyx (the phone line), ElevenLabs (speech to text and the voice), OpenRouter and Anthropic (the AI model that decides what to say) and Supabase (the database).",
+        "To make calls, Spoken uses these services, which process the call: Vonage, 46elks or Telnyx (the phone line and the login text messages, depending on the setup), ElevenLabs (speech to text and the voice), OpenRouter and Anthropic (the AI model that decides what to say) and Supabase (the database).",
       ],
     },
     {
       h: "Questions and deleting your data",
       body: [
-        "Use Send feedback in Profile to ask a question or to ask us to delete what the server has about you. Your feedback is linked to this phone's ID, so we can find your data.",
+        "Use Send feedback in Profile to ask a question or to ask us to delete what the server has about you. Your feedback is linked to your account, so we can find your data.",
       ],
     },
     {
@@ -116,15 +116,15 @@ const no: Terms = {
       h: "Dataene dine",
       body: [
         "På denne telefonen: samtalehistorikken med hele samtalene, snarveiene, profilen og innstillingene dine. Du kan slette historikken under Profil → Samtalehistorikk.",
-        "På Spoken-serveren: navnet og telefonnummeret fra profilen, lagrede kontakter, et kort sammendrag av resultatet av hver samtale, og tilbakemeldinger du sender. De er knyttet til en tilfeldig ID for denne telefonen, ikke til en konto.",
+        "På Spoken-serveren: kontoen din, som er telefonnummeret ditt (du logger inn med en kode på SMS); navnet og telefonnummeret fra profilen; lagrede kontakter; et kort sammendrag av resultatet av hver samtale; og tilbakemeldinger du sender.",
         "Mens Spoken testes, lagrer serveren også en logg over hver samtale, med teksten til det som ble sagt, og kan lagre et opptak av stemmen til den andre parten, for å forbedre talegjenkjenningen. Dette brukes bare av teamet til å teste og rette Spoken.",
-        "For å ringe bruker Spoken disse tjenestene, som behandler samtalen: Telnyx (telefonlinjen), ElevenLabs (tale til tekst og stemmen), OpenRouter og Anthropic (KI-modellen som bestemmer hva som sies) og Supabase (databasen).",
+        "For å ringe bruker Spoken disse tjenestene, som behandler samtalen: Vonage, 46elks eller Telnyx (telefonlinjen og SMS-ene med innloggingskode, avhengig av oppsettet), ElevenLabs (tale til tekst og stemmen), OpenRouter og Anthropic (KI-modellen som bestemmer hva som sies) og Supabase (databasen).",
       ],
     },
     {
       h: "Spørsmål og sletting",
       body: [
-        "Bruk Send tilbakemelding i Profil for å stille et spørsmål eller be oss slette det serveren har om deg. Tilbakemeldingen er knyttet til denne telefonens ID, så vi finner dataene dine.",
+        "Bruk Send tilbakemelding i Profil for å stille et spørsmål eller be oss slette det serveren har om deg. Tilbakemeldingen er knyttet til kontoen din, så vi finner dataene dine.",
       ],
     },
     {

@@ -2,6 +2,7 @@ import nodeCrypto from "node:crypto";
 // REST + live WebSocket per CONTRACT.md, plus the Telnyx webhook and media socket.
 
 import type { Server, ServerWebSocket } from "bun";
+import { isPriceRule, uiText } from "./call/ui-text.ts";
 import { parseErrand } from "./call/style.ts";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -11,7 +12,11 @@ import { callLangFor } from "./call/lines.ts";
 import { MockLine } from "./call/mock-line.ts";
 import { MockLlm } from "./llm/mock.ts";
 import { CallSession } from "./call/session.ts";
+import { CompareMockLine, CompareMockLlm, INFO_APPROVALS, compares, createCompare, stateOf } from "./call/compare.ts";
 import { TelnyxLine, telnyxBalance } from "./call/telnyx-line.ts";
+import { ElksLine, elksSecretOk } from "./call/elks-line.ts";
+import { VonageLine } from "./call/vonage-line.ts";
+import { createInbound, rememberOutbound, takeIncoming, vonageSigned } from "./call/inbound.ts";
 import { config } from "./config.ts";
 import { lookup } from "./directory.ts";
 import { createLlm } from "./llm/index.ts";
@@ -19,7 +24,9 @@ import type { LlmProvider, TaskForLlm } from "./llm/types.ts";
 import { EMERGENCY_ALTERNATIVE, checkGoal, checkNumber, disclosureLine, ensureDisclosure } from "./safety.ts";
 import { calls, profile as defaultProfile, purge, setProfile, takeCallSlot, tasks } from "./store.ts";
 import { FallbackDb, isDeviceId, type Db } from "./db.ts";
-import { designVoice, listVoices } from "./voice/voices.ts";
+import { createAuth, type Auth } from "./auth.ts";
+import { audioHub } from "./call/audio-hub.ts";
+import { designVoice, listVoices, voiceForCall } from "./voice/voices.ts";
 
 // Words that come up on service calls in Norwegian; boosted in Scribe on every call.
 // "sjefen" was heard as "rektor" on call #3.
@@ -36,12 +43,12 @@ const CALL_LEXICON_EN = [
   "appointment", "cancel", "reserve", "table", "available", "closed", "open", "allergy", "gluten-free", "lactose-free",
 ];
 
-type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine };
+type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "media"; callId: string; line: TelnyxLine } | { kind: "elks"; line?: ElksLine } | { kind: "vonage"; line: VonageLine };
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User, X-Spoken-Passcode, X-Spoken-Device",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User, X-Spoken-Passcode, X-Spoken-Device, Authorization",
 };
 
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: CORS });
@@ -89,10 +96,33 @@ function taskForLlm(input: TaskInput, profile: Profile): TaskForLlm {
   return { text: input.text, lang: input.lang, callLang: input.callLang ?? callLangFor(input.text, config.callLang), phone: input.phone, profile };
 }
 
+/** Requests carrying a valid Bearer token → the account's data key (set in fetch, read by deviceOf). */
+const accountKey = new WeakMap<Request, string>();
+/** Account-scoped rate-limit key (IP limits stay as they are). */
+const acctKey = (req: Request) => `acct:${accountKey.get(req) ?? "none"}`;
+const REAL_CALLS_PER_ACCOUNT_DAY = 10;
+
 /** The app's device id (header, or ?device= for GET /api/calls). */
+/** Valid 2–3 distinct places for a parallel info call: the planner's targets, else numbers typed in the request. */
+function planTargets(fromLlm: { name: string; phone?: string }[] | undefined, text: string): { name: string; phone: string }[] | undefined {
+  const raw = (fromLlm ?? []).map((t) => ({ name: t.name, phone: t.phone ?? "" }));
+  if (raw.filter((t) => t.phone).length < 2) {
+    raw.length = 0;
+    for (const m of text.match(/\+?\d[\d \-]{6,16}\d/g) ?? []) raw.push({ name: "", phone: m });
+  }
+  const out: { name: string; phone: string }[] = [];
+  for (const t of raw) {
+    const n = checkNumber(t.phone.replace(/[ \-]/g, ""));
+    if (!n.ok || out.some((o) => o.phone === n.e164)) continue;
+    out.push({ name: t.name.trim().slice(0, 80) || n.e164.replace(/^\+47(\d{2})(\d{2})(\d{2})(\d{2})$/, "$1 $2 $3 $4"), phone: n.e164 });
+  }
+  return out.length >= 2 ? out.slice(0, 3) : undefined;
+}
+
 function deviceOf(req: Request): string | undefined {
-  const d = req.headers.get("x-spoken-device") ?? new URL(req.url).searchParams.get("device");
-  return isDeviceId(d) ? d.toLowerCase() : undefined;
+  // Every data route is behind the login gate: the account's data key, whatever device this is.
+  // (X-Spoken-Device is only a hint for linking, in /api/auth/verify.)
+  return accountKey.get(req);
 }
 
 function validTask(b: any): TaskInput | string {
@@ -135,13 +165,14 @@ function validProfile(b: any): Profile | string {
   };
 }
 
-export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackDb(null)) {
+export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackDb(null), auth: Auth = createAuth(db)) {
   /** The device's saved profile, or the default one (demo without a device id). */
   async function profileFor(device?: string): Promise<Profile> {
     if (!device) return defaultProfile;
     return (await db.getProfile(device)) ?? { ...defaultProfile, name: "" };
   }
 
+  const inbound = createInbound(llm, db);
   void llm.warm?.(); // open the LLM connection before the first call
   setInterval(() => purge(), 60_000).unref?.();
 
@@ -170,7 +201,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
   async function answerTask(taskId: string, req: Request) {
     const t = tasks.get(taskId);
-    if (!t) return err(404, "unknown task");
+    if (!t || t.device !== deviceOf(req)) return err(404, "unknown task");
     const b = await body(req);
     const answers: Record<string, string> = {};
     if (b?.answers && typeof b.answers === "object") {
@@ -191,23 +222,34 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (contact) p.calleeName = contact.name;
     const rawPhone = contact?.phone || t.input.phone || answers.phone || p.phone || lookup(t.input.text)?.phone;
     const source: Plan["callee"]["source"] = contact ? "contact" : t.input.phone || answers.phone ? "user" : lookup(t.input.text) ? "lookup" : "user";
+    // 2–3 named places/numbers (or "cheapest"): the plan lists all of them and the app POSTs /api/compare.
+    const targets = planTargets(p.targets, t.input.text);
+    if (targets) {
+      p.calleeName = targets[0]!.name;
+      p.goal = callLang === "en"
+        ? `ask ${targets.length} places for the price and the earliest time: ${t.input.text}`
+        : `spørre ${targets.length} steder om pris og tidligste tid: ${t.input.text}`;
+      p.needsApprovalFor = [...INFO_APPROVALS[callLang]];
+    }
     let blocked: Plan["blocked"];
     let phone = "";
-    if (!rawPhone) blocked = { reason: "Fant ikke nummeret. Skriv inn nummeret du vil at jeg skal ringe." };
+    if (targets) phone = targets[0]!.phone;
+    else if (!rawPhone) blocked = { reason: uiText(t.input.lang).noNumber };
     else {
       const n = checkNumber(rawPhone);
       if (n.ok) phone = n.e164;
       else blocked = { reason: n.reason, alternative: n.alternative };
     }
-    const goalCheck = checkGoal(p.goal);
+    const goalCheck = checkGoal(targets ? t.input.text : p.goal);
     if (!goalCheck.ok) blocked = { reason: goalCheck.reason };
     t.plan = {
       taskId,
       callee: { name: p.calleeName, phone, source },
+      ...(targets && !blocked ? { targets } : {}),
       goal: p.goal,
       opening,
       willShare: p.willShare.includes("name") ? p.willShare : ["name", ...p.willShare],
-      needsApprovalFor: p.needsApprovalFor.some((x) => /^pris/i.test(x)) ? p.needsApprovalFor : ["pris over 0 kr", ...p.needsApprovalFor],
+      needsApprovalFor: (targets || p.needsApprovalFor.some(isPriceRule)) ? p.needsApprovalFor : [uiText(t.input.lang).anyPrice, ...p.needsApprovalFor],
       voiceId,
       callLang,
       ...(blocked ? { blocked } : {}),
@@ -217,7 +259,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
   async function startCall(taskId: string, req: Request, server: Server<WsData>) {
     const t = tasks.get(taskId);
-    if (!t) return err(404, "unknown task");
+    if (!t || t.device !== deviceOf(req)) return err(404, "unknown task");
     const b = await body(req);
     if (b?.approved !== true) return err(400, "approved: true is required (the user must tap OK)");
     if (!t.plan) return err(409, "answer the questions first (POST /api/tasks/:id/answers)");
@@ -225,13 +267,19 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     const num = checkNumber(t.plan.callee.phone);
     if (!num.ok) return err(403, num.reason);
     // No (or a wrong) demo passcode → this call runs in mock mode: scripted callee, mock agent.
+    // Wrong passcodes are limited per client IP so the code can't be guessed.
+    const passKey = `pass:${userKey(req, server)}`;
+    if (wrongPasscodes(passKey) >= 5) return err(429, "For mange feil koder. Prøv igjen om en time.");
     const pass = passcodeCheck(req.headers.get("x-spoken-passcode"));
-    const real = config.callProvider === "telnyx" && pass === "ok";
-    if (config.callProvider === "telnyx" && !real) console.log(`[call] passcode ${pass}: mock mode`);
-    if (real && !config.callAllowlist.includes(num.e164)) {
+    if (pass === "wrong") noteWrongPasscode(passKey);
+    const realProvider = config.callProvider === "telnyx" || config.callProvider === "46elks" || config.callProvider === "vonage";
+    const real = realProvider && pass === "ok";
+    if (realProvider && !real) console.log(`[call] passcode ${pass}: mock mode`);
+    // CALL_ALLOWLIST=* lets passcode holders call any number (emergency numbers stay blocked in checkNumber).
+    if (real && !config.callAllowlist.includes("*") && !config.callAllowlist.includes(num.e164)) {
       return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
     }
-    if (real) {
+    if (real && config.callProvider === "telnyx") {
       // Prepaid Telnyx balance: log it before every real call, refuse when it can't cover one.
       const bal = await telnyxBalance();
       console.log(`[telnyx] balance before call: ${bal === null ? "unknown" : `$${bal.toFixed(2)}`}`);
@@ -240,17 +288,24 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       }
     }
     if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+    if (!takeCallSlot(acctKey(req), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+    if (real && !takeCallSlot(`real:${acctKey(req)}`, REAL_CALLS_PER_ACCOUNT_DAY)) return err(429, `Maks ${REAL_CALLS_PER_ACCOUNT_DAY} ekte samtaler per dag.`);
 
     // The call language can still be changed on the plan screen (POST …/start {callLang}).
     if (b.callLang === "no" || b.callLang === "en") t.plan.callLang = b.callLang;
     const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
-    const line = real
-      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang), maxSec })
-      : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed, "pizza", t.plan.callLang ?? "no");
+    const keyt = keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang);
+    const line = real && config.callProvider === "vonage"
+      ? new VonageLine({ callId, to: num.e164, voiceId: voiceForCall(t.plan.voiceId, t.plan.callLang ?? "no"), lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
+      : real && config.callProvider === "46elks"
+      ? new ElksLine({ callId, to: num.e164, voiceId: voiceForCall(t.plan.voiceId, t.plan.callLang ?? "no"), lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
+      : real
+      ? new TelnyxLine({ callId, to: num.e164, voiceId: voiceForCall(t.plan.voiceId, t.plan.callLang ?? "no"), lang: t.plan.callLang ?? "no", keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang), maxSec })
+      : new MockLine(realProvider ? 1 : config.mockSpeed, "pizza", t.plan.callLang ?? "no");
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
-    const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
-    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile }, line, llm: callLlm, secrets: { fnr }, maxSec, taskText: t.input.text });
+    const callLlm = realProvider && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
+    const session = new CallSession({ callId, taskId, plan: structuredClone(t.plan), profile: { ...t.profile, lang: t.input.lang ?? t.profile.lang }, line, llm: callLlm, secrets: { fnr }, maxSec, taskText: t.input.text });
     // History: the call's summary (never the transcript) is saved for the device when it ends.
     if (t.device) {
       const device = t.device, calleeName = t.plan.callee.name;
@@ -261,9 +316,66 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       });
     }
     calls.set(callId, session);
+    // "Hear the call": the owner's app may listen on /api/calls/:id/audio until the call ends.
+    audioHub.open(callId, t.device, t.profile.hearCall !== false);
+    const endAudio = session.subscribe((ev) => { if (ev.type === "result") { endAudio(); audioHub.close(callId); } });
+    if (real && config.callProvider === "vonage") rememberOutbound({ callee: num.e164, calleeName: t.plan.callee.name, device: t.device, taskText: t.input.text, profile: t.profile, callId, lang: t.plan.callLang ?? "no" });
     void session.start();
-    const mode = config.callProvider === "telnyx" && real ? "real" : "mock";
+    const mode = real ? "real" : "mock";
     return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
+  }
+
+  /** Compare: 2–3 info-only calls at once. Same checks as startCall, applied to every leg. */
+  async function startCompare(req: Request, server: Server<WsData>) {
+    const b = await body(req);
+    const v = validTask({ text: b?.text, lang: b?.lang, callLang: b?.callLang });
+    if (typeof v === "string") return err(400, v);
+    const ts = b?.targets;
+    if (!Array.isArray(ts) || ts.length < 2 || ts.length > 3) return err(400, "targets must have 2–3 entries");
+    const targets: { name: string; e164: string }[] = [];
+    for (const t of ts) {
+      if (typeof t?.name !== "string" || !t.name.trim() || typeof t?.phone !== "string") return err(400, "each target needs name and phone");
+      const n = checkNumber(t.phone);
+      if (!n.ok) return err(403, n.reason + (n.alternative ? ` ${n.alternative}` : ""));
+      targets.push({ name: t.name.trim().slice(0, 80), e164: n.e164 });
+    }
+    const goal = checkGoal(v.text);
+    if (!goal.ok) return err(403, goal.reason);
+    const passKey = `pass:${userKey(req, server)}`;
+    if (wrongPasscodes(passKey) >= 5) return err(429, "For mange feil koder. Prøv igjen om en time.");
+    const pass = passcodeCheck(req.headers.get("x-spoken-passcode"));
+    if (pass === "wrong") noteWrongPasscode(passKey);
+    const realProvider = config.callProvider === "telnyx" || config.callProvider === "46elks" || config.callProvider === "vonage";
+    const real = realProvider && pass === "ok";
+    if (real && !config.callAllowlist.includes("*")) {
+      const bad = targets.find((t) => !config.callAllowlist.includes(t.e164));
+      if (bad) return err(403, "Dette nummeret er ikke på CALL_ALLOWLIST for ekte samtaler.");
+    }
+    if (overLimit(`compare:${userKey(req, server)}`, 6, 10 * 60_000)) return err(429, "For mange sammenligninger. Vent litt og prøv igjen.");
+    for (const _ of targets) {
+      if (!takeCallSlot(userKey(req, server), config.maxCallsPerDay) || !takeCallSlot(acctKey(req), config.maxCallsPerDay)) return err(429, `Maks ${config.maxCallsPerDay} samtaler per dag.`);
+      if (real && !takeCallSlot(`real:${acctKey(req)}`, REAL_CALLS_PER_ACCOUNT_DAY)) return err(429, `Maks ${REAL_CALLS_PER_ACCOUNT_DAY} ekte samtaler per dag.`);
+    }
+
+    const profile = await profileFor(deviceOf(req));
+    const callLang = v.callLang ?? callLangFor(v.text, config.callLang);
+    const voiceId = voiceForCall(profile.voiceId, callLang);
+    const maxSec = Math.min(90, config.maxCallSec); // info calls stay short
+    const id_ = id("cmp");
+    const legs = targets.map((t, i) => {
+      const callId = id("c");
+      const keyt = keyterms(v.text, t.name, profile.name, v.text, callLang);
+      const opts = { callId, to: t.e164, voiceId, lang: callLang, keyterms: keyt, maxSec };
+      const line = real
+        ? config.callProvider === "vonage" ? new VonageLine(opts) : config.callProvider === "46elks" ? new ElksLine(opts) : new TelnyxLine(opts)
+        : new CompareMockLine(i, t.name, realProvider ? 1 : config.mockSpeed, callLang);
+      return { name: t.name, phone: t.e164, callId, line, llm: real ? llm : new CompareMockLlm(callLang) };
+    });
+    const c = createCompare({
+      id: id_, text: v.text, lang: v.lang, callLang, mode: real ? "real" : "mock", device: deviceOf(req), profile, voiceId,
+      opening: ensureDisclosure("", profile.name, callLang), maxSec, legs,
+    });
+    return json({ compareId: c.id, mode: c.mode, legs: c.legs.map((l) => ({ name: l.name, callId: l.callId })), ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
 
   function keyterms(text: string, callee: string, userName: string, goal = "", lang: "no" | "en" = "no"): string[] {
@@ -282,6 +394,24 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
     if (path === "/health") return json({ ok: true, callProvider: config.callProvider, llm: llm.name });
 
+    // Every /api route except /api/auth/* needs a valid session (Authorization header, or ?token= for
+    // websockets). Webhooks and media sockets (/vonage, /telnyx, /elks) keep their own per-call tokens.
+    if (path.startsWith("/api/") && !path.startsWith("/api/auth/") && !accountKey.has(req)) {
+      return err(401, "login required");
+    }
+
+    // Live audio, binary frames (see call/audio-hub.ts). Browsers can't set headers on a websocket,
+    // so the device and the optional session token come in the query string.
+    const audio = path.match(/^\/api\/calls\/([\w-]+)\/audio$/);
+    if (audio && m === "GET") {
+      const callId = audio[1]!;
+      const q = url.searchParams;
+      const key = accountKey.get(req);
+      if (!audioHub.allows(callId, key)) return err(403, "no live audio for this call");
+      if (server.upgrade(req, { data: { kind: "audio", callId } satisfies WsData })) return undefined;
+      return err(426, "websocket upgrade required");
+    }
+
     const live = path.match(/^\/api\/calls\/([\w-]+)\/live$/);
     if (live && m === "GET") {
       const callId = live[1]!;
@@ -297,6 +427,50 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       return new Response("upgrade required", { status: 426 });
     }
 
+    // Vonage Voice API websocket: per-call token in the URI of the NCCO connect action.
+    if (path === "/vonage/media") {
+      const line = VonageLine.authorize(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "");
+      console.log(`[vonage] media socket request: ${line ? "ok" : "refused"} upgrade=${req.headers.get("upgrade") ?? "-"} proto=${req.headers.get("sec-websocket-protocol") ?? "-"}`);
+      if (!line) return new Response("forbidden", { status: 403 });
+      if (server.upgrade(req, { data: { kind: "vonage", line } satisfies WsData })) return undefined;
+      return new Response("upgrade required", { status: 426 });
+    }
+
+    // Inbound: the shop rings our number back (answer URL). Returns the NCCO; see call/inbound.ts.
+    if (path === "/vonage/answer" && (m === "GET" || m === "POST")) return inbound.handleAnswer(req);
+    // The app polls this while open; 204 = nothing, else {callId, callerName, topic} once.
+    if (path === "/api/incoming" && m === "GET") {
+      const device = deviceOf(req);
+      if (!device) return err(400, "device is required");
+      const c = takeIncoming(device);
+      return c ? json(c) : new Response(null, { status: 204, headers: CORS });
+    }
+
+    // Vonage call events (JSON): started/ringing/answered/completed/busy/… ; token is per call.
+    if (path === "/vonage/event" && m === "POST") {
+      if (!vonageSigned(req)) return new Response("bad signature", { status: 401 });
+      const b = await body(req);
+      if (!url.searchParams.has("call")) { inbound.handleEvent(b); return new Response("ok"); } // inbound leg: matched by uuid
+      if (url.searchParams.get("leg") === "ws") { console.log(`[vonage] ws leg event: ${JSON.stringify(b).slice(0, 400)}`); return new Response("ok"); }
+      const ok = VonageLine.handleEvent(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "", b);
+      return ok ? new Response("ok") : new Response("forbidden", { status: 403 });
+    }
+
+    // 46elks Realtime Voice: the websocket number's websocket_url is wss://…/elks/media?t=<ELKS_WS_SECRET>.
+    // The call is matched to a pending ElksLine by the `hello` message.
+    if (path === "/elks/media") {
+      if (config.callProvider !== "46elks" || !elksSecretOk(url.searchParams.get("t"))) return new Response("forbidden", { status: 403 });
+      if (server.upgrade(req, { data: { kind: "elks" } satisfies WsData })) return undefined;
+      return new Response("upgrade required", { status: 426 });
+    }
+
+    // whenhangup: form-encoded call result (state, cost, duration). Token is per call.
+    if (path === "/elks/whenhangup" && m === "POST") {
+      const form = Object.fromEntries(new URLSearchParams(await req.text())) as Record<string, string>;
+      const ok = ElksLine.handleHangup(url.searchParams.get("call") ?? "", url.searchParams.get("t") ?? "", form);
+      return ok ? new Response("ok") : new Response("forbidden", { status: 403 });
+    }
+
     if (path === "/telnyx/webhook" && m === "POST") {
       const raw = await req.text();
       if (!telnyxSigned(req, raw)) return new Response("bad signature", { status: 401 });
@@ -307,13 +481,20 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     }
 
     if (path === "/api/tasks" && m === "POST") {
-      if (overLimit(`task:${userKey(req, server)}`, 30, 10 * 60_000)) return err(429, "For mange forespørsler. Vent litt og prøv igjen.");
+      if (overLimit(`task:${userKey(req, server)}`, 30, 10 * 60_000) || overLimit(`task:${acctKey(req)}`, 30, 10 * 60_000)) return err(429, "For mange forespørsler. Vent litt og prøv igjen.");
       return createTask(req);
     }
     let r = path.match(/^\/api\/tasks\/([\w-]+)\/answers$/);
     if (r && m === "POST") return answerTask(r[1]!, req);
     r = path.match(/^\/api\/tasks\/([\w-]+)\/call$/);
     if (r && m === "POST") return startCall(r[1]!, req, server);
+
+    if (path === "/api/compare" && m === "POST") return startCompare(req, server);
+    r = path.match(/^\/api\/compare\/([\w-]+)$/);
+    if (r && m === "GET") {
+      const c = compares.get(r[1]!);
+      return c ? json(stateOf(c)) : err(404, "unknown comparison (kept 30 min, in memory only)");
+    }
 
     r = path.match(/^\/api\/calls\/([\w-]+)\/hangup$/);
     if (r && m === "POST") {
@@ -328,6 +509,29 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       if (!s) return err(404, "unknown call (results are kept 30 min, in memory only)");
       if (!s.result) return json({ status: s.status, inProgress: true }, 202);
       return json(s.result);
+    }
+
+    if (path.startsWith("/api/auth/")) {
+      const authz = req.headers.get("authorization");
+      if (path === "/api/auth/start" && m === "POST") {
+        const b = await body(req);
+        const r = await auth.start(b?.phone, userKey(req, server));
+        return r.ok ? json(r.value) : err(r.status, r.error);
+      }
+      if (path === "/api/auth/verify" && m === "POST") {
+        const b = await body(req);
+        const r = await auth.verify(b?.phone, b?.code, b?.device ?? req.headers.get("x-spoken-device"));
+        return r.ok ? json({ token: r.value.token, phone: r.value.phone, expiresAt: r.value.expiresAt }) : err(r.status, r.error);
+      }
+      if (path === "/api/auth/me" && m === "GET") {
+        const me = await auth.resolve(authz);
+        return me ? json({ phone: me.phone }) : err(401, "not logged in");
+      }
+      if (path === "/api/auth/logout" && m === "POST") {
+        await auth.logout(authz);
+        return json({ ok: true });
+      }
+      return err(404, "not found");
     }
 
     if (path === "/api/feedback" && m === "POST") {
@@ -353,9 +557,15 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       return json(device ? await profileFor(device) : defaultProfile);
     }
     if (path === "/api/profile" && m === "PUT") {
-      const v = validProfile(await body(req));
+      const raw = await body(req);
+      const v = validProfile(raw);
       if (typeof v === "string") return err(400, v);
       const device = deviceOf(req);
+      // Screens that don't know about the voice must not erase it: keep the saved one unless sent.
+      if (device && (raw?.voiceId === undefined || raw?.voiceId === null)) {
+        const prev = await db.getProfile(device);
+        if (prev?.voiceId) v.voiceId = prev.voiceId;
+      }
       if (device) await db.putProfile(device, v);
       else if (isPublic(req)) return err(400, "X-Spoken-Device is required");
       else setProfile(v);
@@ -364,7 +574,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
     // The built web app (web/dist) is served from here, so the phone uses one origin for
     // the page, REST and the live socket.
-    if (m === "GET" && !path.startsWith("/api/") && !path.startsWith("/telnyx/")) {
+    if (m === "GET" && !path.startsWith("/api/") && !path.startsWith("/telnyx/") && !path.startsWith("/elks/") && !path.startsWith("/vonage/")) {
       const page = await webFile(path);
       if (page) return page;
     }
@@ -398,6 +608,15 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
   return {
     async fetch(req: Request, server: Server<WsData>) {
       try {
+        const u = new URL(req.url);
+        if (!u.pathname.startsWith("/api/auth/")) {
+          const qt = u.searchParams.get("token");
+          const authz = req.headers.get("authorization") ?? (qt ? `Bearer ${qt}` : null);
+          if (authz) {
+            const me = await auth.resolve(authz);
+            if (me) { accountKey.set(req, me.device); }
+          }
+        }
         return await route(req, server);
       } catch (e) {
         console.error("[http]", req.method, new URL(req.url).pathname, (e as Error).message);
@@ -408,6 +627,13 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       open(ws: ServerWebSocket<WsData>) {
         const d = ws.data;
         if (d.kind === "media") { d.line.attach(ws); return; }
+        if (d.kind === "vonage") { d.line.attach(ws); return; }
+        if (d.kind === "elks") { setTimeout(() => { if (!d.line) ws.close(1008, "no hello"); }, 5000); return; }
+        if (d.kind === "audio") {
+          d.unsub = audioHub.listen(d.callId, { send: (b) => ws.sendBinary(b), close: (c, r) => ws.close(c, r), getBufferedAmount: () => ws.getBufferedAmount() });
+          if (!d.unsub || !audioHub.listenerCount(d.callId)) ws.close(1008, "call ended");
+          return;
+        }
         const s = calls.get(d.callId);
         if (!s) { ws.close(1008, "unknown call"); return; }
         for (const ev of s.events) ws.send(JSON.stringify(ev)); // replay for late joiners
@@ -416,6 +642,12 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       message(ws: ServerWebSocket<WsData>, msg: string | Buffer) {
         const d = ws.data;
         if (d.kind === "media") { d.line.onMedia(String(msg)); return; }
+        if (d.kind === "vonage") { d.line.onMedia(typeof msg === "string" ? msg : new Uint8Array(msg)); return; }
+        if (d.kind === "elks") {
+          if (d.line) d.line.onMedia(String(msg));
+          else if (!(d.line = ElksLine.accept(ws, String(msg)))) ws.close(1008, "no matching call");
+          return;
+        }
         const s = calls.get(d.callId);
         const cmd = parseCommand(String(msg));
         if (!s || !cmd) { ws.send(JSON.stringify({ type: "note", text: "Ukjent kommando.", level: "warn", at: Date.now() })); return; }
@@ -424,6 +656,8 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       close(ws: ServerWebSocket<WsData>) {
         const d = ws.data;
         if (d.kind === "media") d.line.onSocketClosed();
+        else if (d.kind === "vonage") d.line.onSocketClosed();
+        else if (d.kind === "elks") d.line?.onSocketClosed();
         else d.unsub?.();
       },
     },
@@ -449,6 +683,16 @@ async function webFile(path: string): Promise<Response | undefined> {
 }
 
 /** "ok" | "missing" | "wrong" | "off" (no DEMO_PASSCODE configured → every call is real). */
+const passFails = new Map<string, number[]>();
+function wrongPasscodes(key: string): number {
+  const recent = (passFails.get(key) ?? []).filter((t) => Date.now() - t < 60 * 60_000);
+  passFails.set(key, recent);
+  return recent.length;
+}
+function noteWrongPasscode(key: string) {
+  passFails.set(key, [...(passFails.get(key) ?? []), Date.now()]);
+}
+
 function passcodeCheck(given: string | null): "ok" | "missing" | "wrong" {
   const want = config.demoPasscode;
   if (!want) return "ok";

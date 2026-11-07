@@ -9,12 +9,16 @@ import type { Sheet as SheetContent, SpokenStore } from "../lib/store";
 import { ease, em, F, HEADING_SCALE, makeStyles, PAD, small, useLargeText, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Composer } from "./Composer";
-import { Chip } from "./Home";
 import { Glow, PulseRings } from "./Art";
+import { HoldBanner } from "./HoldBanner";
+import { ReplyChips } from "./ReplyChips";
 import { DoneArt, NothingAgreedArt } from "./drawings/ResultArt";
 import { CallFeedback } from "./Feedback";
+import { FactStrip } from "./FactStrip";
+import { Receipt } from "./Receipt";
 import { Icon, Mark } from "./Icon";
 import { Btn, JumpToLatest, Press, T, useSpeechLang, useStickToEnd } from "./ui";
+import { MultiCall } from "./Compare";
 
 // The live call, as web/src/components/Call.tsx: who you're calling, who is
 // talking right now, every word as chat bubbles, a way to tell Spoken
@@ -23,13 +27,23 @@ import { Btn, JumpToLatest, Press, T, useSpeechLang, useStickToEnd } from "./ui"
 export function Call() {
   const styles = useStyles();
   const insets = useSafeAreaInsets();
+  const multi = useSpoken((s) => s.multi);
+  if (multi) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <MultiCall />
+      </View>
+    );
+  }
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <KeyboardAvoidingView behavior="padding" style={styles.grow}>
         <CallHead />
         <View style={styles.pad}>
           <Speaker />
+          <HoldBanner />
         </View>
+        <FactStrip />
         <Transcript />
         <CallFooter />
       </KeyboardAvoidingView>
@@ -265,8 +279,7 @@ function CallFooter() {
       ) : (
         <>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips} keyboardShouldPersistTaps="handled">
-            <Chip icon="replay" label={t.chipRepeat} onPress={() => store.chip("repeat")} />
-            <Chip icon="heart" label={t.chipThanks} onPress={() => store.chip("thanks")} />
+            <ReplyChips repeat={t.chipRepeat} thanks={t.chipThanks} />
           </ScrollView>
           <Composer
             value={value}
@@ -438,6 +451,7 @@ function ResultSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "r
         {sheet.title}
       </Text>
       <Rows rows={sheet.rows} />
+      <Receipt />
       <CallFeedback />
       <View style={styles.acts}>
         <Btn block label={t.back} onPress={() => store.goHome()} />
@@ -447,7 +461,8 @@ function ResultSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "r
   );
 }
 
-const useStyles = makeStyles((C) => ({
+/** Shared with the multi-call view so its transcript looks exactly like this one. */
+export const useStyles = makeStyles((C) => ({
   root: { flex: 1, backgroundColor: C.app },
   grow: { flex: 1 },
   pad: { paddingHorizontal: PAD },

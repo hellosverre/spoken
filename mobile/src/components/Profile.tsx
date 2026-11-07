@@ -4,6 +4,8 @@ import type { ThemePref } from "../lib/store";
 import { em, F, HEADING_SCALE, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
+import { AccountSection, useAccountCopy } from "./Account";
+import { ContactsSection } from "./ContactPicker";
 import { FeedbackSheet } from "./Feedback";
 import { historyCount, HistorySheet } from "./History";
 import { MinutesCard } from "./Minutes";
@@ -12,6 +14,7 @@ import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
 import { List, Row, Seg } from "./List";
 import { Field, T } from "./ui";
+import { VoicePicker } from "./VoicePicker";
 
 /**
  * The Profile tab: who you are, how the app looks, how calls are made, and the
@@ -30,6 +33,8 @@ export function Profile() {
   const savedCode = useSpoken((s) => s.passcode);
   const calls = useSpoken((s) => s.history.length);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const ac = useAccountCopy();
+  const [contactsKey, setContactsKey] = useState(0);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [code, setCode] = useState(savedCode);
@@ -76,7 +81,7 @@ export function Profile() {
           </T>
         </View>
         <Text style={styles.hello}>{first ? `${greet}, ${first}` : greet}</Text>
-        <T size={22} weight="semibold" numberOfLines={1}>
+        <T size={22} weight="semibold">
           {name.trim() || "—"}
         </T>
         <Text style={styles.handle}>@demo</Text>
@@ -135,6 +140,9 @@ export function Profile() {
         </View>
       </View>
 
+      <SectionTitle icon="phone" title={lang === "no" ? "Stemme" : "Voice"} />
+      <VoicePicker />
+
       <SectionTitle icon="phone" title={m.callsH} />
       <View style={[styles.group, realOn && { borderColor: ready.fg }]}>
         <View style={styles.switchRow}>
@@ -185,6 +193,12 @@ export function Profile() {
         <View style={styles.divider} />
         <SwitchRow icon="phone" title={m.hapticsL} sub={m.hapticsS} value={haptics} onChange={(v) => store.setHaptics(v)} />
       </View>
+
+      <SectionTitle icon="key" title={ac.title} />
+      <AccountSection onChange={() => setContactsKey((k) => k + 1)} />
+
+      <SectionTitle icon="person" title={lang === "no" ? "Lagrede kontakter" : "Saved contacts"} />
+      <ContactsSection key={contactsKey} />
 
       <SectionTitle icon="sliders" title={m.appearance} />
       <View style={styles.group}>

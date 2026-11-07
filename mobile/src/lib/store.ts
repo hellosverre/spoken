@@ -1,4 +1,5 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { hasSession, logoutAccount, onUnauthorized } from "./account";
 import * as Haptics from "expo-haptics";
 import { AccessibilityInfo, Platform, Vibration } from "react-native";
 import { MOBILE_COPY } from "./copy-mobile";
@@ -6,7 +7,7 @@ import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { askNotificationPermission, clearNeedsYou, notifyNeedsYou, notifyOnce, onNotificationAction, setupNotifications } from "./notify";
 import { HISTORY_MAX, historyRepo, type CallRecord } from "./history";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
-import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
+import { configureRealCalls, isLive, newDeviceId, planRealCall, planTargets, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
 import { DEMO_MINUTES, migrateMinutes, parseCode, PLANS, type Minutes, type PaidPlanId } from "./plans";
 import { TERMS_VERSION } from "./terms";
@@ -49,6 +50,11 @@ export interface IntroState {
   word: boolean;
 }
 
+export interface MultiRequest {
+  request: string;
+  targets: { name: string; phone: string }[];
+}
+
 export interface State {
   lang: Lang;
   screen: Screen;
@@ -66,18 +72,24 @@ export interface State {
   transcript: Line[];
   elapsed: string;
   callEnded: boolean;
+  /** Epoch ms when the shop put us on hold; null when not on hold. */
+  holdSince: number | null;
+  /** Suggested next instructions from the server (empty = show Repeat/Thanks). */
+  chips: string[];
   sheet: Sheet | null;
   sheetOpen: boolean;
   /** Bumped to flash the device frame when Spoken needs you. */
   flashTick: number;
   /* Mobile only, not in the web store. */
-  /** Signed in this session. The login is a placeholder (demo / demo) until real accounts exist. */
+  /** Signed in with a phone number (a session token is stored). Everything but Login needs it. */
   authed: boolean;
   themePref: ThemePref;
   profile: Profile;
   presets: StoredPreset[];
   /** Finished calls with their transcripts, newest first. Kept on this phone only (history.ts). */
   history: CallRecord[];
+  /** Set while the multi-call view (2–3 parallel info calls) is on screen. */
+  multi: MultiRequest | null;
   /** Call through the Spoken server (real-call.ts); off = the on-phone scripted demos. */
   serverCalls: boolean;
   /** Demo passcode for real calls; empty = the server runs calls in mock mode. */
@@ -94,6 +106,8 @@ export interface State {
   terms: { version: string; at: string } | null;
   /** Call minutes on the account: dummy numbers for the showcase, nothing is charged. */
   minutes: Minutes;
+  /** Came from sign-up and a plan: Login says it's the last step. */
+  signupPending: boolean;
 }
 
 type Pending = { type: "repeat" } | { type: "thanks" } | { type: "text"; text: string };
@@ -118,6 +132,8 @@ const INITIAL: State = {
   transcript: [],
   elapsed: "0:00",
   callEnded: false,
+  holdSince: null,
+  chips: [],
   sheet: null,
   sheetOpen: false,
   flashTick: 0,
@@ -127,6 +143,7 @@ const INITIAL: State = {
   profile: { name: "", phone: "" },
   presets: DEFAULT_PRESETS,
   history: [],
+  multi: null,
   serverCalls: true,
   passcode: "",
   highContrast: false,
@@ -135,6 +152,7 @@ const INITIAL: State = {
   haptics: true,
   terms: null,
   minutes: DEMO_MINUTES,
+  signupPending: false,
 };
 
 const HANG = Symbol("hang");
@@ -143,7 +161,6 @@ const LANG_KEY = "spoken-lang";
 const PREFS_KEY = "spoken-prefs";
 /** This phone's id for the server (profile, contacts, call history). Made once, as on the web. */
 const DEVICE_KEY = "spoken-device";
-const DEMO_LOGIN = { user: "demo", pass: "demo" };
 type SavedPrefs = Pick<State, "themePref" | "profile" | "serverCalls" | "passcode" | "highContrast" | "haptics" | "terms" | "minutes">;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -254,6 +271,9 @@ export class SpokenStore {
       AccessibilityInfo.isReduceMotionEnabled().catch(() => false),
       AsyncStorage.getItem(DEVICE_KEY).catch(() => null),
     ]);
+    // The stored session token is the login: a restart keeps it, a 401 anywhere drops it.
+    this.set({ authed: await hasSession() });
+    onUnauthorized(() => this.sessionExpired());
     const deviceId = device || newDeviceId();
     if (!device) AsyncStorage.setItem(DEVICE_KEY, deviceId).catch(() => {});
     configureRealCalls({ deviceId });
@@ -287,6 +307,7 @@ export class SpokenStore {
   }
 
   stop() {
+    onUnauthorized(null);
     this.introId++;
     this.homeId++;
     this.callId++;
@@ -360,18 +381,14 @@ export class SpokenStore {
   }
 
   /**
-   * Placeholder sign-in: only demo / demo works until real accounts are added.
-   * `agreed` is the terms checkbox; without the current terms agreed there is no way in.
+   * The SMS code was accepted (account.verifyLogin stored the token): enter the app.
+   * `agreed` is the terms checkbox on the phone step; new or changed terms are recorded here.
    */
-  login(user: string, pass: string, agreed = false): boolean {
-    if (user.trim().toLowerCase() !== DEMO_LOGIN.user || pass !== DEMO_LOGIN.pass) return false;
-    if (!this.termsOk()) {
-      if (!agreed) return false;
-      this.acceptTerms();
-    }
+  signedIn(agreed = false) {
+    if (!this.termsOk() && agreed) this.acceptTerms();
+    this.set({ signupPending: false });
     this.set({ authed: true });
     this.goHome();
-    return true;
   }
 
   private acceptTerms() {
@@ -379,7 +396,10 @@ export class SpokenStore {
     this.savePrefs();
   }
 
-  /* Sign-up and plans: a showcase. Nothing is sent or charged; a plan logs in as the demo user. */
+  /*
+   * Sign-up and plans: a showcase. Nothing is sent or charged. Accounts are phone numbers
+   * (account.ts), so after a plan or a code the last step is the SMS login.
+   */
 
   openSignup() {
     this.set({ screen: "signup" });
@@ -395,12 +415,11 @@ export class SpokenStore {
     this.set({ screen: "plans" });
   }
 
-  /** After sign-up: a new plan, nothing used yet, then in as the demo user. */
+  /** After sign-up: a new plan, nothing used yet, then the phone number to finish. */
   choosePlan(id: PaidPlanId) {
     const plan = PLANS.find((p) => p.id === id) ?? PLANS[0]!;
-    this.set({ minutes: { plan: plan.id, used: 0, extra: 0 }, authed: true });
+    this.set({ minutes: { plan: plan.id, used: 0, extra: 0 }, signupPending: true, screen: "login" });
     this.savePrefs();
-    this.goHome();
   }
 
   /** Profile → Change plan. Minutes used this month and extra minutes stay. */
@@ -410,18 +429,17 @@ export class SpokenStore {
   }
 
   /**
-   * An organisation's code: its plan, paid by them. From the plans page it also logs in.
-   * Returns false for a code that doesn't have the right shape (any well-formed code works).
+   * An organisation's code: its plan, paid by them. From the plans page (`fromSignup`) the
+   * phone login follows. Returns false for a code without the right shape (any such code works).
    */
-  redeemCode(code: string, login = false): boolean {
+  redeemCode(code: string, fromSignup = false): boolean {
     const r = parseCode(code);
     if (!r.ok) return false;
-    this.set((s) => ({ minutes: { plan: "org", used: login ? 0 : s.minutes.used, extra: login ? 0 : s.minutes.extra, org: r.org } }));
+    this.set((s) => ({
+      minutes: { plan: "org", used: fromSignup ? 0 : s.minutes.used, extra: fromSignup ? 0 : s.minutes.extra, org: r.org },
+    }));
     this.savePrefs();
-    if (login) {
-      this.set({ authed: true });
-      this.goHome();
-    }
+    if (fromSignup) this.set({ signupPending: true, screen: "login" });
     return true;
   }
 
@@ -431,10 +449,20 @@ export class SpokenStore {
     this.savePrefs();
   }
 
-  logout() {
+  async logout() {
+    await logoutAccount(); // tells the server, then forgets the token whatever the answer
+    this.toLogin();
+  }
+
+  /** A request came back 401: the session is gone, so go back to Login. */
+  sessionExpired() {
+    this.toLogin();
+  }
+
+  private toLogin() {
     this.demo = false;
     this.goHome();
-    this.set({ authed: false, screen: "login" });
+    this.set({ authed: false, screen: "login", signupPending: false });
   }
 
   setThemePref(themePref: ThemePref) {
@@ -569,7 +597,7 @@ export class SpokenStore {
     this.callId++;
     this.askResolve = null;
     this.stopTimer();
-    this.set({ sheetOpen: false, threaded: false, thread: [], tab, screen: "home" });
+    this.set({ sheetOpen: false, threaded: false, thread: [], tab, screen: "home", multi: null });
   }
 
   newChat() {
@@ -752,7 +780,18 @@ export class SpokenStore {
     this.timer = undefined;
   }
 
+  /** The plan asked 2–3 places: open the multi-call view, which starts them through /api/compare. */
+  private startMulti(targets: { name: string; phone: string }[]) {
+    this.callId++;
+    this.homeId++;
+    this.stopTimer();
+    const request = SCENARIOS[this.state.scenario][this.state.lang].request;
+    this.set({ multi: { request, targets }, sheetOpen: false, screen: "call" });
+  }
+
   async startCall() {
+    const targets = planTargets(this.state.scenario);
+    if (targets) return this.startMulti(targets);
     const id = ++this.callId;
     this.homeId++;
     const lang = this.state.lang;
@@ -766,7 +805,7 @@ export class SpokenStore {
     this.stopTimer();
 
     this.set({
-      transcript: [], sheetOpen: false, elapsed: "0:00", callEnded: false,
+      transcript: [], sheetOpen: false, elapsed: "0:00", callEnded: false, holdSince: null, chips: [],
       pill: "ringing", speaker: null, speakerNote: "ringing", screen: "call",
     });
     this.sys(`${this.t.calling} ${L.contact} · ${sc.number}`);
@@ -901,6 +940,8 @@ export class SpokenStore {
         sayMore,
         ask,
         note: (text) => id === this.callId && this.sys(text),
+        hold: (since) => id === this.callId && this.set({ holdSince: since }),
+        chips: (items) => id === this.callId && this.set({ chips: items }),
         connected: () => id === this.callId && connected(),
         attach: (sink) => { this.realSink = sink; },
       };
@@ -931,7 +972,7 @@ export class SpokenStore {
     clearNeedsYou();
     this.stopTimer();
     const dur = this.state.elapsed;
-    this.set({ pill: "ended", speaker: null, speakerNote: "ended", callEnded: true });
+    this.set({ pill: "ended", speaker: null, speakerNote: "ended", callEnded: true, holdSince: null, chips: [] });
     this.sys(`${this.t.ended} · ${dur}`);
     await sleep(700);
     if (id !== this.callId) return;
@@ -977,6 +1018,7 @@ export class SpokenStore {
     const text = raw.trim();
     if (!text) return;
     this.noteYou(text);
+    this.set({ chips: [] });
     if (this.realSink) return this.realSink.instruction(text);
     this.pending.push({ type: "text", text });
   }

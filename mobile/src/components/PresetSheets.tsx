@@ -370,7 +370,7 @@ const useStyles = makeStyles((C) => ({
   previewLabel: { ...small(13), color: C.dim },
   previewText: { lineHeight: 23 },
   actions: { gap: 8, marginTop: 4 },
-  tall: { height: 50 },
+  tall: { minHeight: 50 },
   group: { gap: 8 },
   groupLabel: { fontFamily: F.medium, fontSize: 13, color: C.muted },
   icons: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
@@ -387,6 +387,6 @@ const useStyles = makeStyles((C) => ({
   tokenChip: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: 40, paddingHorizontal: 12, borderRadius: 999, borderWidth: 1, borderColor: C.accent },
   tokenText: { fontFamily: F.medium, fontSize: 13, color: C.accent2 },
   error: { ...small(13.5), color: C.danger },
-  deleteRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: 48 },
+  deleteRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, minHeight: 48 },
   deleteText: { fontFamily: F.medium, fontSize: 15, color: C.danger },
 }));

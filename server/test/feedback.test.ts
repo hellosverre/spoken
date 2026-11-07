@@ -29,8 +29,8 @@ describe("POST /api/feedback", () => {
     expect((await send({ source: "profile", comment: "Add Swedish" }, { "X-Spoken-Device": DEV, "cf-connecting-ip": "10.0.0.2" })).status).toBe(201);
   });
 
-  test("400 without a device", async () => {
-    expect((await send({ source: "call", rating: "up" }, { "cf-connecting-ip": "10.0.0.3" })).status).toBe(400);
+  test("401 without a login", async () => {
+    expect((await send({ source: "call", rating: "up" }, { "cf-connecting-ip": "10.0.0.3", "x-test-anonymous": "1" })).status).toBe(401);
   });
 
   test("400 when empty, bad rating, bad source or too long", async () => {

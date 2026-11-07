@@ -33,6 +33,8 @@ export interface Plan {
   needsApprovalFor: string[]; // e.g. ["price over 0 kr", "booking a time"]
   voiceId: string;
   callLang?: Lang; // language spoken on the call (missing = "no"); the user can switch it mid-call
+  /** 2–3 places to ask in parallel (info-only). Present only when the request names several places/numbers; the app then POSTs /api/compare instead of a single call. callee = targets[0]. */
+  targets?: { name: string; phone: string }[];
   blocked?: { reason: string; alternative?: string }; // e.g. emergency number
 }
 
@@ -50,6 +52,10 @@ export type LiveEvent =
   | { type: "approval_request"; id: string; question: string; options: string[]; at: number }
   | { type: "note"; text: string; level: "info" | "warn"; at: number }
   | { type: "level"; who: "callee" | "agent"; rms: number; at: number } // voice loudness 0..1, ~15 Hz, for the live visual
+  | { type: "facts"; items: FactItem[]; at: number } // the full list each time it changes
+  | { type: "on_hold"; since: number } // the shop put US on hold; agent stays silent
+  | { type: "hold_over"; at: number } // a person is back
+  | { type: "chips"; items: string[]; at: number } // 3 suggested next instructions
   | { type: "result"; result: CallResult };
 
 export type LiveCommand =
@@ -75,6 +81,7 @@ export interface CallResult {
   details: Record<string, string>; // time, price, reference…
   transcript: TranscriptLine[];
   durationSec: number;
+  receipt?: Receipt;
 }
 
 export interface Voice {
@@ -82,6 +89,10 @@ export interface Voice {
   name: string;
   description: string;
   preset: boolean;
+  gender?: "male" | "female";
+  lang?: "no" | "en";
+  /** ElevenLabs sample mp3, fetched once by the server; absent until known. */
+  previewUrl?: string;
 }
 
 export interface Profile {
@@ -132,4 +143,62 @@ export interface FeedbackInput {
   rating?: "up" | "down";
   comment?: string; // max 1000
   source: "call" | "profile";
+}
+
+// Compare: POST /api/compare {text, lang, callLang?, targets:[{name, phone}] (2–3)} (X-Spoken-Device, X-Spoken-Passcode)
+// → CompareStart. One info-only call per target (asks price / earliest time, never books). GET /api/compare/:id → CompareState.
+// Each leg's live socket is the normal /api/calls/:callId/live. "Book with X" = a normal POST /api/tasks for that business.
+export interface CompareTarget {
+  name: string;
+  phone: string;
+}
+export interface CompareInput {
+  text: string;
+  lang: Lang;
+  callLang?: Lang;
+  targets: CompareTarget[];
+}
+export interface CompareStart {
+  compareId: string;
+  mode: "real" | "mock";
+  legs: { name: string; callId: string }[];
+}
+export type CompareLegStatus = CallStatus | "queued";
+export interface CompareLeg {
+  name: string;
+  phone: string;
+  callId: string;
+  status: CompareLegStatus;
+  answer?: string; // one line, once the leg ended
+  outcome?: Outcome;
+  lastLine?: string; // latest thing said on the call, for the mini card
+}
+export interface CompareState {
+  compareId: string;
+  text: string;
+  mode: "real" | "mock";
+  done: boolean;
+  legs: CompareLeg[];
+}
+
+// Trust features. Fact strip: the price, time, address and reference number heard on the call, pinned above
+// the transcript. confirmed = a second source agrees (batch STT, the callee repeated it, or said yes to a read-back).
+export type FactKind = "price" | "time" | "address" | "ref";
+export interface FactItem {
+  kind: FactKind;
+  value: string; // display text: «250 kr», «kl. 18:00», «Storgata 5», «A-1234»
+  confirmed: boolean;
+}
+
+// Compliance receipt after the call: exactly what was disclosed, shared and agreed. No audio, no transcript is kept.
+export interface Receipt {
+  lang: Lang;
+  callee: string;
+  durationSec: number;
+  disclosedAsAi: boolean; // the first agent line says it is an AI
+  disclosure?: string; // that line, word for word
+  shared: string[]; // fields actually spoken: "name" | "phone" | "address" | "email" | "birthdate" | "fnr" | "allergies"
+  agreed: { question: string; choice: string }[]; // approval cards the user accepted
+  declined: { question: string; choice: string }[];
+  stored: string; // «Only the summary is kept. No audio, no transcript.»
 }

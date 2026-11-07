@@ -6,6 +6,9 @@ import { useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { HeroDuet } from "./Art";
 import { Icon, type IconName } from "./Icon";
 import { FeedbackSheet } from "./Feedback";
+import { AccountSection, useAccountCopy } from "./Account";
+import { ContactsSection, useContactCopy } from "./ContactPicker";
+import { VoicePicker } from "./VoicePicker";
 import { Field } from "./ui";
 
 const THEMES: { v: ThemePref; icon: IconName }[] = [
@@ -32,6 +35,8 @@ export function Profile() {
   const themePref = useSpoken((s) => s.themePref);
   const profile = useSpoken((s) => s.profile);
 
+  const cc = useContactCopy();
+  const ac = useAccountCopy();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // Local drafts, saved on blur. Re-sync when the stored profile changes.
@@ -110,6 +115,15 @@ export function Profile() {
             <p className="help">{m.phoneS}</p>
           </div>
         </div>
+
+        <SectionTitle icon="phone">{lang === "no" ? "Stemme" : "Voice"}</SectionTitle>
+        <VoicePicker />
+
+        <SectionTitle icon="lock">{ac.title}</SectionTitle>
+        <AccountSection />
+
+        <SectionTitle icon="person">{cc.saved}</SectionTitle>
+        <ContactsSection />
 
         <SectionTitle icon="sliders">{m.appearance}</SectionTitle>
         <div className="group">

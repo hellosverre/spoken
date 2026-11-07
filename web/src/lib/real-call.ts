@@ -1,5 +1,9 @@
+import { ApiError, authHeader, getToken, sessionLost } from "./account";
+import { beginLiveAudio, endLiveAudio } from "./live-audio";
 import type { Lang, Row } from "./i18n";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
+import { resetFacts, setFacts, type FactItem } from "@/components/FactStrip";
+import { setReceipt, type ReceiptData } from "@/components/Receipt";
 
 /* Real calls through the Spoken call server (server/ in this repo). The app keeps its UI:
    the server's clarify questions arrive as chat messages, the server's plan fills the plan
@@ -43,14 +47,15 @@ async function http<T>(method: string, path: string, body?: unknown, extra: Reco
     const device = deviceId();
     res = await fetch(base() + path, {
       method,
-      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(device ? { "X-Spoken-Device": device } : {}), ...extra },
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(device ? { "X-Spoken-Device": device } : {}), ...authHeader(), ...extra },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new Error("Får ikke kontakt med Spoken-serveren.");
+    throw new ApiError("Får ikke kontakt med Spoken-serveren.", 0);
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (res.status === 401) sessionLost(); // expired session → the store sends the app back to Login
+  if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
   return data;
 }
 
@@ -64,15 +69,20 @@ interface Plan {
   opening: string;
   willShare: string[];
   needsApprovalFor: string[];
+  targets?: { name: string; phone: string }[];
   blocked?: { reason: string; alternative?: string };
 }
-interface CallResult { outcome: string; summary: string; details: Record<string, string> }
+interface CallResult { outcome: string; summary: string; details: Record<string, string>; receipt?: ReceiptData }
 type LiveEvent =
   | { type: "status"; status: string }
   | { type: "transcript"; id: string; who: "callee" | "agent"; text: string; final: boolean }
   | { type: "approval_request"; id: string; question: string; options: string[] }
   | { type: "note"; text: string; level: "info" | "warn" }
+  | { type: "on_hold"; since: number }
+  | { type: "hold_over" }
+  | { type: "chips"; items: string[] }
   | { type: "result"; result: CallResult }
+  | { type: "facts"; items: FactItem[] }
   | { type: string };
 
 /** What the chat needs to run the clarify step. */
@@ -87,6 +97,10 @@ export interface LiveIO extends CallIO {
   /** Appends words to the speaker's last line (one agent turn arrives clause by clause). */
   sayMore(who: "ai" | "them", text: string): Promise<void>;
   note(text: string): void;
+  /** The shop put us on hold (since = epoch ms) or a person is back (null). */
+  hold?(since: number | null): void;
+  /** Suggested next instructions. */
+  chips?(items: string[]): void;
   connected(): void;
   /** Where the store sends the user's mid-call messages, chips and hang-up. */
   attach(sink: { instruction(text: string): void; hangup(): void } | null): void;
@@ -101,7 +115,7 @@ const NEGATIVE = /^(nei|no|avslå|decline|legg på)$/i;
    ?passcode=… in the URL sets it, ?passcode= clears it. */
 const PASS_KEY = "spoken-passcode";
 
-function passcode(): string {
+export function passcode(): string {
   try {
     const url = new URLSearchParams(window.location.search);
     if (url.has("passcode")) localStorage.setItem(PASS_KEY, url.get("passcode") ?? "");
@@ -176,15 +190,21 @@ function registerReal(plan: Plan, request: string) {
     checks: plan.needsApprovalFor.slice(0, 3),
     opening: plan.opening,
   };
-  const sc: Scenario & { live: true } = {
+  const sc: Scenario & { live: true; targets?: { name: string; phone: string }[] } = {
     live: true,
     init: initials(plan.callee.name),
     number: prettyPhone(plan.callee.phone),
     en: lines,
     no: lines,
+    ...(plan.targets && plan.targets.length > 1 ? { targets: plan.targets } : {}),
     run: (lang, io) => runRealCall(plan.taskId, lang, io as LiveIO),
   };
   (SCENARIOS as Record<string, Scenario>).real = sc;
+}
+
+/** 2–3 places when the plan asks them in parallel (info only); undefined for a normal single call. */
+export function planTargets(key: ScenarioKey): { name: string; phone: string }[] | undefined {
+  return (SCENARIOS as Record<string, { targets?: { name: string; phone: string }[] }>)[key]?.targets;
 }
 
 export function isLive(key: ScenarioKey): boolean {
@@ -203,7 +223,10 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   } else if (mode === "mock") {
     io.note(lang === "no" ? "Demosamtale: ingen ekte telefon ringer." : "Demo call: no real phone is ringing.");
   }
-  const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
+  resetFacts();
+  setReceipt(null);
+  if (mode !== "mock") beginLiveAudio(callId); // "Hear the call": refused by the server unless the profile allows it
+  const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(getToken())}`);
   const send = (cmd: object) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd)); };
   io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });
 
@@ -277,8 +300,24 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
         case "note":
           io.note((e as { text: string }).text);
           break;
+        case "facts": {
+          const items = (e as { items: FactItem[] }).items;
+          queue(async () => setFacts(items));
+          break;
+        }
+        case "on_hold":
+          io.hold?.((e as { since: number }).since);
+          break;
+        case "hold_over":
+          io.hold?.(null);
+          break;
+        case "chips":
+          io.chips?.((e as { items: string[] }).items);
+          break;
         case "result":
           finished = true;
+          endLiveAudio();
+          setReceipt((e as { result: CallResult }).result.receipt);
           resolve((e as { result: CallResult }).result);
           break;
       }
@@ -290,7 +329,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
       void (async () => {
         for (let i = 0; i < 30; i++) {
           const r = await http<CallResult & { inProgress?: boolean }>("GET", `/api/calls/${encodeURIComponent(callId)}`).catch(() => null);
-          if (r && !r.inProgress) return resolve(r);
+          if (r && !r.inProgress) { setReceipt(r.receipt); return resolve(r); }
           await new Promise((ok) => setTimeout(ok, 2000));
         }
         reject(new Error("Fikk ikke resultatet fra samtalen."));

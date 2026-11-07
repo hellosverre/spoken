@@ -9,8 +9,8 @@ afterAll(() => s.stop());
 const finals = (evs: LiveEvent[], who: "agent" | "callee") =>
   evs.filter((e): e is Extract<LiveEvent, { type: "transcript" }> => e.type === "transcript" && e.final && e.who === who).map((e) => e.text);
 
-async function planFor(text: string, phone?: string) {
-  const c = await s.post("/api/tasks", { text, lang: "no", ...(phone ? { phone } : {}) });
+async function planFor(text: string, phone?: string, lang: "no" | "en" = "no") {
+  const c = await s.post("/api/tasks", { text, lang, ...(phone ? { phone } : {}) });
   expect(c.status).toBe(200);
   const answers: Record<string, string> = {};
   for (const q of c.data.questions) answers[q.id] = q.options?.[0] ?? "ja";
@@ -26,7 +26,7 @@ describe("mock pizza order, end to end", () => {
     expect(clarify.questions.at(-1).id).toBe("confirm");
     expect(plan.callee.name).toBe("Domino's Storo");
     expect(plan.callee.phone).toMatch(/^\+47\d{8}$/);
-    expect(plan.opening).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av Sverre.");
+    expect(plan.opening).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av Sverre, som følger med på samtalen.");
     expect(plan.blocked).toBeUndefined();
 
     const noOk = await s.post(`/api/tasks/${plan.taskId}/call`, {});
@@ -42,7 +42,7 @@ describe("mock pizza order, end to end", () => {
 
     const agent = finals(evs, "agent");
     // Disclosure is the very first thing the callee hears.
-    expect(agent[0]).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av Sverre.");
+    expect(agent[0]).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av Sverre, som følger med på samtalen.");
     expect(agent[0]).toContain("si nei");
 
     // Exactly one approval, and the commitment comes only after it.
@@ -95,12 +95,12 @@ describe("English call", () => {
   test("an English task gets an English call, with the same safety rules", async () => {
     const { plan } = await planFor("Order a large pepperoni from Domino's Storo for 6pm");
     expect(plan.callee.name).toBe("Domino's Storo");
-    expect(plan.opening).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre.");
+    expect(plan.opening).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre, who is following the call.");
     const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true });
     const evs = await watchCall(s.base, call.data.callId).done;
     const agent = finals(evs, "agent");
     if (process.env.DUMP) console.log(evs.filter((e: any) => e.type === "transcript" && e.final || e.type === "note" || e.type === "approval_request").map((e: any) => `${e.who ?? e.type}: ${e.text ?? e.question}`).join("\n"));
-    expect(agent[0]).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre.");
+    expect(agent[0]).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre, who is following the call.");
     expect(agent[0]).toContain("say no");
     expect(agent).toContain("Just a moment, I'll check with Sverre.");
     const approvalIdx = evs.findIndex((e) => e.type === "approval_request");
@@ -122,6 +122,42 @@ describe("English call", () => {
     const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true, callLang: "en" });
     const evs = await watchCall(s.base, call.data.callId).done;
     expect(finals(evs, "agent")[0]).toStartWith("Hi, I'm an AI assistant");
+  });
+});
+
+describe("English app", () => {
+  const NORWEGIAN = /[æøå]|\b(jeg|ikke|deg|samtalen|bestilt|ferdig|pris over)\b/i;
+  const notes = (evs: LiveEvent[]) => evs.filter((e: any) => e.type === "note").map((e: any) => e.text as string);
+
+  test("plan, approvals, notes and result are in English", async () => {
+    const { clarify, plan } = await planFor("Order a large pepperoni from Domino's Storo for 6pm", undefined, "en");
+    expect(clarify.summary).not.toMatch(NORWEGIAN);
+    for (const q of clarify.questions) expect(q.text).not.toMatch(NORWEGIAN);
+    expect(plan.needsApprovalFor[0]).toMatch(/^(any price above 0 kr|price \(limit)/);
+    expect(plan.needsApprovalFor.join(" ")).not.toMatch(NORWEGIAN);
+    const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true });
+    const evs = await watchCall(s.base, call.data.callId).done;
+    const result = (evs.at(-1) as any).result;
+    expect(result.outcome).toBe("done");
+    expect(result.summary).toStartWith("Ordered:");
+    expect(notes(evs).length).toBeGreaterThan(0);
+    for (const n of notes(evs)) expect(n).not.toMatch(NORWEGIAN);
+  });
+
+  test("a Norwegian call still gets an English result", async () => {
+    const { plan } = await planFor("Bestill en stor pepperoni fra Domino's Storo til 18:00", undefined, "en");
+    expect(plan.opening).toStartWith("Hei, jeg er en KI-assistent");
+    expect(plan.needsApprovalFor[0]).toMatch(/^(any price above 0 kr|price \(limit)/);
+    const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true });
+    const evs = await watchCall(s.base, call.data.callId).done;
+    const result = (evs.at(-1) as any).result;
+    expect(result.summary).toMatch(/^(Ordered|Done|Not completed|Unclear|Not confirmed)/);
+    for (const n of notes(evs)) expect(n).not.toMatch(NORWEGIAN);
+  });
+
+  test("a missing number is asked for in English", async () => {
+    const { plan } = await planFor("Call my dentist", undefined, "en");
+    expect(plan.blocked?.reason ?? "").not.toMatch(NORWEGIAN);
   });
 });
 
@@ -149,11 +185,11 @@ describe("blocked numbers", () => {
 describe("REST basics", () => {
   test("voices and profile", async () => {
     const v = await s.get("/api/voices");
-    expect(v.data.filter((x: any) => x.preset).length).toBe(3);
+    expect(v.data.filter((x: any) => x.preset).length).toBe(8);
     const p = await fetch(`${s.base}/api/profile`, { method: "PUT", body: JSON.stringify({ name: "Ingvild", hearCall: false, personality: "short", lang: "no" }) });
     expect((await p.json() as any).name).toBe("Ingvild");
     const { plan } = await planFor("Bestill pizza fra Peppes til 19:00");
-    expect(plan.opening).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av Ingvild.");
+    expect(plan.opening).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av Ingvild, som følger med på samtalen.");
     await fetch(`${s.base}/api/profile`, { method: "PUT", body: JSON.stringify({ name: "Sverre", hearCall: true, personality: "warm", lang: "no" }) });
   });
 

@@ -6,17 +6,33 @@ import { SCENARIOS } from "@/lib/scenarios";
 import { CallFeedback } from "./Feedback";
 import type { Sheet as SheetContent } from "@/lib/store";
 import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
+import { MultiCall } from "./Compare";
 import { DoneArt, NothingAgreedArt } from "./Art";
 import { Composer } from "./Composer";
+import { FactStrip } from "./FactStrip";
+import { HoldBanner } from "./HoldBanner";
 import { Icon } from "./Icon";
+import { SpeakerToggle } from "./SpeakerToggle";
+import { Receipt } from "./Receipt";
+import { ReplyChips } from "./ReplyChips";
 
 export function Call({ on }: { on: boolean }) {
+  const multi = useSpoken((s) => s.multi);
+  if (multi) {
+    return (
+      <section className={cx("screen", on && "on")} id="call" aria-label="Live calls">
+        <MultiCall />
+      </section>
+    );
+  }
   return (
     <section className={cx("screen", on && "on")} id="call" aria-label="Live call">
       <CallHead />
       <div className="pad">
         <Speaker />
+        <HoldBanner />
       </div>
+      <FactStrip />
       <Transcript />
       <CallComposer />
       <Sheet />
@@ -44,12 +60,13 @@ function CallHead() {
   return (
     <header className="callhead pad">
       <div className="tx">
-        <b>{contact}</b>
+        <h1 className="callname">{contact}</h1>
         <span className="num">
           {number} · <span className="timer">{elapsed}</span>
           {status && <span className="status"> · {status}</span>}
         </span>
       </div>
+      <SpeakerToggle />
       <button className="endbtn" aria-label={t.endCall} disabled={callEnded} onClick={() => store.endCall()}>
         <Icon name="hang" />
       </button>
@@ -73,7 +90,7 @@ function Speaker() {
 
   return (
     <div className="speaker" data-who={who ?? ""}>
-      <div className="pods">
+      <div className="pods" aria-hidden="true">
         <div className="pod-wrap" data-on={who === "them" || undefined}>
           <PulseRings />
           <div className={cx("pod them", who === "them" && "active")}>{init}</div>
@@ -121,7 +138,7 @@ function Transcript() {
 
   return (
     <div className="scroll pad" ref={scrollRef}>
-      <div className="transcript" aria-live="polite">
+      <div className="transcript" role="log" aria-label={contact} aria-live="polite" aria-relevant="additions">
         {lines.map((line) => {
           if (line.kind === "sys") return <div key={line.id} className="sys">{line.text}</div>;
           if (line.kind === "you")
@@ -168,14 +185,7 @@ function CallComposer() {
 
   return (
     <div className="composer pad">
-      <div className="chips">
-        <button className="chip" onClick={() => store.chip("repeat")}>
-          {t.chipRepeat}
-        </button>
-        <button className="chip" onClick={() => store.chip("thanks")}>
-          {t.chipThanks}
-        </button>
-      </div>
+      <ReplyChips aria={t.instrAria} repeat={t.chipRepeat} thanks={t.chipThanks} />
       <Composer
         value={value}
         onChange={setValue}
@@ -207,13 +217,14 @@ function Sheet() {
 
   return (
     <>
-      <div className={cx("scrim", open && "on")} />
+      <div className={cx("scrim", open && "on")} aria-hidden="true" />
       <div
         ref={ref}
         className={cx("sheet pad", open && "open")}
         role="dialog"
         aria-modal="true"
         aria-labelledby="sheetTitle"
+        aria-describedby="sheetDesc"
         aria-hidden={!open}
         inert={!open}
       >
@@ -224,9 +235,9 @@ function Sheet() {
   );
 }
 
-function Rows({ rows }: { rows: Row[] }) {
+function Rows({ rows, id }: { rows: Row[]; id?: string }) {
   return (
-    <dl className="dl">
+    <dl className="dl" id={id}>
       {rows.map(([k, v]) => (
         <Fragment key={k}>
           <dt>{k}</dt>
@@ -247,7 +258,7 @@ function AskSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "ask" }> }) 
     <>
       <span className="flag">{t.waiting}</span>
       <h3 id="sheetTitle">{cfg.title}</h3>
-      <Rows rows={cfg.rows} />
+      <Rows rows={cfg.rows} id="sheetDesc" />
       <p className="hold">
         {t.holdSaid} <q>{cfg.hold}</q>
       </p>
@@ -281,7 +292,8 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
     <>
       {sheet.ok ? <DoneArt /> : <NothingAgreedArt />}
       <h3 id="sheetTitle">{sheet.title}</h3>
-      <Rows rows={sheet.rows} />
+      <Rows rows={sheet.rows} id="sheetDesc" />
+      <Receipt />
       <CallFeedback />
       <div className="acts">
         <button className="btn primary block" data-back onClick={() => store.goHome()}>

@@ -84,12 +84,13 @@ describe("routes", () => {
   test("profile per device", async () => {
     await fetch(`${s.base}/api/profile`, { method: "PUT", headers: H, body: JSON.stringify({ name: "Ingrid", hearCall: false, personality: "short", lang: "no" }) });
     expect(((await (await fetch(`${s.base}/api/profile`, { headers: H })).json()) as any).name).toBe("Ingrid");
-    // the default (no device) profile is untouched
+    // another account starts from the default profile, untouched
     expect(((await (await fetch(`${s.base}/api/profile`)).json()) as any).name).toBe("Sverre");
+    expect((await fetch(`${s.base}/api/profile`, { headers: { "x-test-anonymous": "1" } })).status).toBe(401);
   });
 
   test("contacts CRUD, numbers validated, device required", async () => {
-    expect((await fetch(`${s.base}/api/contacts`)).status).toBe(400);
+    expect((await fetch(`${s.base}/api/contacts`, { headers: { "x-test-anonymous": "1" } })).status).toBe(401);
     const bad = await fetch(`${s.base}/api/contacts`, { method: "POST", headers: H, body: JSON.stringify({ name: "Nød", phone: "112" }) });
     expect(bad.status).toBe(400);
     const c: any = await (await fetch(`${s.base}/api/contacts`, { method: "POST", headers: H, body: JSON.stringify({ name: "Legen", phone: "22 00 00 03" }) })).json();
