@@ -70,6 +70,7 @@ export class TelnyxLine implements CallLine {
   private inBatch: Uint8Array[] = [];
   private inboundAlaw = false;
   private lastVoicedAt = 0;
+  private lastPartialAt = 0;
 
   // latency
   private lastCommitAt = 0;
@@ -175,6 +176,7 @@ export class TelnyxLine implements CallLine {
     this.ws = ws;
     this.scribe = new ScribeStream({
       partial: (text) => {
+        this.lastPartialAt = Date.now();
         this.ev.calleeSpeech();
         this.ev.calleePartial(`c_${this.segId}`, text);
       },
@@ -183,7 +185,9 @@ export class TelnyxLine implements CallLine {
         this.lastCommitAt = Date.now();
         this.awaitingFirstAudio = true;
         this.committedIds.set(text.trim(), id);
-        this.ev.calleeFinal(id, text, undefined, { speechEndAt: this.lastVoicedAt || undefined });
+        // Quiet speech can stay under the energy threshold; the last partial is a later bound.
+        const speechEndAt = Math.max(this.lastVoicedAt, this.lastPartialAt) || undefined;
+        this.ev.calleeFinal(id, text, undefined, { speechEndAt });
       },
       words: (text, words) => {
         const id = this.committedIds.get(text.trim());
