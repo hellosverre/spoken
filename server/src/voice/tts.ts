@@ -28,6 +28,8 @@ export interface TtsOptions {
   cache?: boolean;
   /** Output format; the phone path uses µ-law 8 kHz. */
   format?: "ulaw_8000" | "pcm_16000";
+  /** Language spoken (default Norwegian). English text is sent as is, without number spelling. */
+  lang?: "no" | "en";
   /** Called with the billed character count when a real (uncached) request is made. */
   onBilled?: (chars: number) => void;
 }
@@ -36,9 +38,10 @@ export interface TtsOptions {
 export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<Uint8Array> {
   const voiceId = opts.voiceId || config.elevenlabs.defaultVoice;
   const model = opts.model || config.elevenlabs.ttsModel;
-  const speakable = toSpeakable(text);
+  const lang = opts.lang ?? "no";
+  const speakable = lang === "no" ? toSpeakable(text) : text;
   const format = opts.format ?? "ulaw_8000";
-  const key = cacheKey(speakable, voiceId, model) + (format === "ulaw_8000" ? "" : `-${format}`);
+  const key = cacheKey(speakable, voiceId, model) + (format === "ulaw_8000" ? "" : `-${format}`) + (lang === "no" ? "" : `-${lang}`);
   const cached = memCache.get(key) ?? (await readDisk(key));
   if (cached) { memCache.set(key, cached); yield cached; return; }
 
@@ -53,7 +56,7 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
     body: JSON.stringify({
       text: speakable,
       model_id: model,
-      language_code: "no",
+      language_code: lang,
       // A bit slow and clear for phone lines (SPEC).
       voice_settings: { stability: TTS_STABILITY, similarity_boost: 0.75, style: 0, speed: TTS_SPEED },
     }),

@@ -91,6 +91,40 @@ describe("mock pizza order, end to end", () => {
   });
 });
 
+describe("English call", () => {
+  test("an English task gets an English call, with the same safety rules", async () => {
+    const { plan } = await planFor("Order a large pepperoni from Domino's Storo for 6pm");
+    expect(plan.callee.name).toBe("Domino's Storo");
+    expect(plan.opening).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre.");
+    const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true });
+    const evs = await watchCall(s.base, call.data.callId).done;
+    const agent = finals(evs, "agent");
+    if (process.env.DUMP) console.log(evs.filter((e: any) => e.type === "transcript" && e.final || e.type === "note" || e.type === "approval_request").map((e: any) => `${e.who ?? e.type}: ${e.text ?? e.question}`).join("\n"));
+    expect(agent[0]).toStartWith("Hi, I'm an AI assistant calling on behalf of Sverre.");
+    expect(agent[0]).toContain("say no");
+    expect(agent).toContain("Just a moment, I'll check with Sverre.");
+    const approvalIdx = evs.findIndex((e) => e.type === "approval_request");
+    const commitIdx = evs.findIndex((e) => e.type === "transcript" && e.who === "agent" && /confirm/i.test(e.text));
+    expect(approvalIdx).toBeGreaterThan(-1);
+    expect(commitIdx).toBeGreaterThan(approvalIdx);
+    expect(agent.some((t) => /can't give card numbers/i.test(t))).toBe(true);
+    expect(agent.some((t) => /[æøå]|\bjeg\b/i.test(t))).toBe(false);
+    expect((evs.at(-1) as any).result.outcome).toBe("done");
+  });
+
+  test("«på norsk» in an English-looking task keeps the call Norwegian", async () => {
+    const { plan } = await planFor("Order a large pepperoni from Domino's Storo for 6pm, på norsk");
+    expect(plan.opening).toStartWith("Hei, jeg er en KI-assistent");
+  });
+
+  test("the start request can override the call language", async () => {
+    const { plan } = await planFor("Bestill en stor pepperoni fra Domino's Storo til 18:00");
+    const call = await s.post(`/api/tasks/${plan.taskId}/call`, { approved: true, callLang: "en" });
+    const evs = await watchCall(s.base, call.data.callId).done;
+    expect(finals(evs, "agent")[0]).toStartWith("Hi, I'm an AI assistant");
+  });
+});
+
 describe("blocked numbers", () => {
   for (const n of ["110", "112", "113", "+47 113", "1412", "1881"]) {
     test(`${n} is never called`, async () => {

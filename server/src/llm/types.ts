@@ -17,6 +17,10 @@ export interface AgentContext {
   profileFacts: Record<string, string>; // only facts the user allowed for this call
   tone: Tone;
   simpler: boolean;
+  /** Language spoken on the call; missing = Norwegian. */
+  lang?: Lang;
+  /** The app's language, for approval card questions. */
+  uiLang?: Lang;
   history: HistoryItem[];
 }
 
@@ -42,6 +46,8 @@ export interface SummaryOut {
 export interface TaskForLlm {
   text: string;
   lang: Lang;
+  /** Language spoken on the call: the plan's goal is written in it. */
+  callLang?: Lang;
   phone?: string;
   profile: Profile;
 }

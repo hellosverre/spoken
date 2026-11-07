@@ -1,7 +1,7 @@
-// ElevenLabs Scribe v2 Realtime: callee audio (µ-law 8 kHz) in, Norwegian partial and
-// committed transcripts out. VAD commits segments; word logprobs become confidences.
+// ElevenLabs Scribe v2 Realtime: callee audio (µ-law 8 kHz) in, partial and committed
+// transcripts out, in the call's language. VAD commits segments; word logprobs become confidences.
 
-import type { Word } from "../../../shared/contract.ts";
+import type { Lang, Word } from "../../../shared/contract.ts";
 import { elKey, elKeyFailed } from "./el-key.ts";
 
 export interface ScribeHandlers {
@@ -35,14 +35,28 @@ export class ScribeStream {
     private previousText = "",
     /** pcm_8000 = 16-bit linear decoded straight from the phone's G.711 (best accuracy). */
     private format: ScribeFormat = (process.env.STT_INPUT as ScribeFormat) || "pcm_8000",
+    private lang: Lang = "no",
   ) {}
+
+  /** The call switched language: reconnect with the new language_code (audio queues meanwhile). */
+  setLang(lang: Lang) {
+    if (lang === this.lang || this.closed) return;
+    this.lang = lang;
+    const old = this.ws;
+    this.ws = undefined;
+    this.open = false;
+    this.retries = 0;
+    this.sentFirst = false;
+    if (old) { old.onclose = null; try { old.close(); } catch { /* closed */ } }
+    this.connect();
+  }
 
   connect() {
     if (!elKey()) { this.h.error("ELEVENLABS_API_KEY missing"); return; }
     const q = new URLSearchParams({
       model_id: "scribe_v2_realtime",
       audio_format: this.format,
-      language_code: "no",
+      language_code: this.lang,
       commit_strategy: "vad",
       // Short window for fast turns; CallSession holds the turn if the text sounds unfinished.
       vad_silence_threshold_secs: process.env.SCRIBE_SILENCE_SECS ?? "0.5",

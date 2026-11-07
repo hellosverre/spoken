@@ -94,8 +94,8 @@ export function restatesErrand(text: string, e: Errand, lastCallee: string): boo
 }
 
 // Interjections that open almost every LLM reply (call #9: «Skjønner.», «Okei.», «Så bra.», «Takk.»).
-const FILLER_ONLY = /^(skjønner|okei|ok|så bra|takk|takk skal du ha|flott|supert|fint|perfekt|greit|javel|ja vel|ah|å|ja|aha|mhm|mm|forstått|den er grei|det er greit)[.!,]?$/i;
-const FILLER_PREFIX = /^(skjønner|okei|ok|så bra|flott|supert|perfekt|greit|javel|ah|aha|forstått)[,.!]\s+/i;
+const FILLER_ONLY = /^(skjønner|okei|ok|så bra|takk|takk skal du ha|flott|supert|fint|perfekt|greit|javel|ja vel|ah|å|ja|aha|mhm|mm|forstått|den er grei|det er greit|okay|i see|great|perfect|thanks|thank you|got it|alright|all right|sounds good|yes|understood)[.!,]?$/i;
+const FILLER_PREFIX = /^(skjønner|okei|ok|så bra|flott|supert|perfekt|greit|javel|ah|aha|forstått|okay|i see|great|perfect|got it|alright|understood)[,.!]\s+/i;
 
 /** A whole segment that is only an interjection. */
 export function isFillerOnly(text: string): boolean {

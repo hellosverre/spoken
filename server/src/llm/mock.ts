@@ -23,6 +23,15 @@ export function goalSentence(text: string): string {
   return g.charAt(0).toLowerCase() + g.slice(1);
 }
 
+/** "Order a large pepperoni from Domino's Storo for 6pm" → "order a large pepperoni for 6pm". */
+export function goalSentenceEn(text: string): string {
+  let g = text.trim().replace(/[.!]+$/, "");
+  g = g.replace(/\s+(from|at)\s+(domino'?s|peppes)[^,]*?(?=\s+(for|at|by|around)\b|$)/i, "");
+  g = g.replace(/^(can you |could you |please )/i, "").replace(/^call [^,]+? (and|to) /i, "");
+  g = g.replace(/\s+(in|speak|on) english\b/i, "");
+  return g.charAt(0).toLowerCase() + g.slice(1);
+}
+
 function isFood(text: string) {
   return /pizza|pepperoni|domino|peppes|kebab|burger|sushi|bestill.*mat/i.test(text);
 }
@@ -45,13 +54,17 @@ export function mockClarify(task: TaskForLlm): ClarifyOut {
 
 export function mockPlan(task: TaskForLlm, answers: Record<string, string>): PlanOut {
   const hit = lookup(task.text);
-  let goal = goalSentence(task.text);
-  if (answers.pickup && !/hent|lever/i.test(goal)) {
+  const en = task.callLang === "en";
+  let goal = en ? goalSentenceEn(task.text) : goalSentence(task.text);
+  if (en) {
+    if (answers.pickup && !/pick ?up|deliver/i.test(goal)) goal += answers.pickup === "Levering" ? " for delivery" : " for pickup";
+    if (answers.time && !/\d/.test(goal) && answers.time !== "Så fort som mulig") goal += ` at ${answers.time}`;
+  } else if (answers.pickup && !/hent|lever/i.test(goal)) {
     const how = answers.pickup === "Levering" ? "med levering" : "til henting";
     const t = /\s+(til|klokka|kl\.?)\s+(\d{1,2}[:.]\d{2})/i;
     goal = t.test(goal) ? goal.replace(t, ` ${how} klokka $2`) : `${goal} ${how}`;
   }
-  if (answers.time && !/\d{1,2}[:.]\d{2}/.test(goal) && answers.time !== "Så fort som mulig") goal += ` klokka ${answers.time}`;
+  if (!en && answers.time && !/\d{1,2}[:.]\d{2}/.test(goal) && answers.time !== "Så fort som mulig") goal += ` klokka ${answers.time}`;
   const willShare: Shareable[] = ["name"];
   if (answers.pickup === "Levering") willShare.push("address");
   if (task.profile.allergies) willShare.push("allergies");
@@ -66,8 +79,42 @@ export function mockPlan(task: TaskForLlm, answers: Record<string, string>): Pla
   };
 }
 
+/** English version of mockReplyText: same moves, fewer phrasings. */
+function mockReplyTextEn(ctx: AgentContext): string {
+  const last = ctx.history[ctx.history.length - 1];
+  const callee = lastOf(ctx, "callee");
+  const name = ctx.userName || "the user";
+  if (last?.role === "user") {
+    const t = last.text;
+    if (/^\[godkjent\].*\{\{ADDRESS\}\}/i.test(t)) return "The address is {{ADDRESS}}.";
+    if (/^\[avslått\].*adresse/i.test(t)) return "Sorry, I can't give the address. Could we do it another way?";
+    if (/^\[godkjent\]/i.test(t)) return "Yes please, I confirm that.";
+    if (/^\[avslått\]/i.test(t)) return "No thanks, let's leave it there. Thanks for your help, goodbye! [[END: partial | Brukeren takket nei.]]";
+    if (/^\[svar\]/i.test(t)) return t.replace(/^\[svar\]\s*/i, "") + ".";
+    if (/^\[avslutt\]/i.test(t)) return "I'm afraid I have to end the call now. Thank you, goodbye! [[END: partial | Brukeren avsluttet samtalen.]]";
+    return `One more thing from ${name}: ${t.replace(/^\[(instruks|enklere)\]\s*/i, "")}`;
+  }
+  const c = callee.toLowerCase();
+  if (/^no\b|don'?t want to talk|not talking to (a )?(robot|machine|ai)/.test(c)) {
+    return "That's completely fine. Have a nice day! [[END: refused | Mottakeren ville ikke snakke med en KI-assistent.]]";
+  }
+  if (/goodbye|\bbye\b|have a (nice|good)/.test(c)) {
+    const approved = ctx.history.some((h) => h.role === "user" && /^\[godkjent\]/i.test(h.text));
+    return `Thank you, goodbye! [[END: ${approved ? "done" : "partial"} | Samtalen er ferdig.]]`;
+  }
+  if (calleeProposesCommitment(callee)) return `[[ASK: Si ja til dette? «${callee.replace(/\s+/g, " ").trim()}» | JA | NEI]]`;
+  if (/\bname\b|who is it for/.test(c)) return `It's under ${name}.`;
+  if (/allerg/.test(c)) return ctx.profileFacts.allergies ? `Yes: ${ctx.profileFacts.allergies}.` : "No, no allergies.";
+  const goalSaid = ctx.history.some((h) => h.role === "agent" && h.text.startsWith("I'd like to"));
+  if (!goalSaid) return `I'd like to ${ctx.goal}.`;
+  if (/hold on|one (moment|second)|just a (moment|sec)/.test(c)) return "Sure, I'll wait.";
+  if (/say that again/.test(lastOf(ctx, "agent"))) return `Thanks. To sum up: I'd like to ${ctx.goal}. Is that possible?`;
+  return "Sorry, the line is a bit bad. Could you say that again?";
+}
+
 /** Decides the next agent line from the last thing that happened. */
 export function mockReplyText(ctx: AgentContext): string {
+  if (ctx.lang === "en") return mockReplyTextEn(ctx);
   const last = ctx.history[ctx.history.length - 1];
   const callee = lastOf(ctx, "callee");
   const name = ctx.userName || "brukeren";
