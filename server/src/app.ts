@@ -24,6 +24,7 @@ import type { LlmProvider, TaskForLlm } from "./llm/types.ts";
 import { EMERGENCY_ALTERNATIVE, checkGoal, checkNumber, disclosureLine, ensureDisclosure } from "./safety.ts";
 import { calls, profile as defaultProfile, purge, setProfile, takeCallSlot, tasks } from "./store.ts";
 import { FallbackDb, isDeviceId, type Db } from "./db.ts";
+import { createAuth, type Auth } from "./auth.ts";
 import { designVoice, listVoices } from "./voice/voices.ts";
 
 // Words that come up on service calls in Norwegian; boosted in Scribe on every call.
@@ -45,8 +46,8 @@ type WsData = { kind: "live"; callId: string; unsub?: () => void } | { kind: "me
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User, X-Spoken-Passcode, X-Spoken-Device",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-Spoken-User, X-Spoken-Passcode, X-Spoken-Device, Authorization",
 };
 
 const json = (data: unknown, status = 200) => Response.json(data, { status, headers: CORS });
@@ -94,8 +95,13 @@ function taskForLlm(input: TaskInput, profile: Profile): TaskForLlm {
   return { text: input.text, lang: input.lang, callLang: input.callLang ?? callLangFor(input.text, config.callLang), phone: input.phone, profile };
 }
 
+/** Requests carrying a valid Bearer token → the account's data key (set in fetch, read by deviceOf). */
+const accountKey = new WeakMap<Request, string>();
+
 /** The app's device id (header, or ?device= for GET /api/calls). */
 function deviceOf(req: Request): string | undefined {
+  const acct = accountKey.get(req); // logged in: the account's data key, whatever device this is
+  if (acct) return acct;
   const d = req.headers.get("x-spoken-device") ?? new URL(req.url).searchParams.get("device");
   return isDeviceId(d) ? d.toLowerCase() : undefined;
 }
@@ -140,7 +146,7 @@ function validProfile(b: any): Profile | string {
   };
 }
 
-export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackDb(null)) {
+export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackDb(null), auth: Auth = createAuth(db)) {
   /** The device's saved profile, or the default one (demo without a device id). */
   async function profileFor(device?: string): Promise<Profile> {
     if (!device) return defaultProfile;
@@ -449,6 +455,29 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       return json(s.result);
     }
 
+    if (path.startsWith("/api/auth/")) {
+      const authz = req.headers.get("authorization");
+      if (path === "/api/auth/start" && m === "POST") {
+        const b = await body(req);
+        const r = await auth.start(b?.phone, userKey(req, server));
+        return r.ok ? json(r.value) : err(r.status, r.error);
+      }
+      if (path === "/api/auth/verify" && m === "POST") {
+        const b = await body(req);
+        const r = await auth.verify(b?.phone, b?.code, b?.device ?? req.headers.get("x-spoken-device"));
+        return r.ok ? json({ token: r.value.token, phone: r.value.phone, expiresAt: r.value.expiresAt }) : err(r.status, r.error);
+      }
+      if (path === "/api/auth/me" && m === "GET") {
+        const me = await auth.resolve(authz);
+        return me ? json({ phone: me.phone }) : err(401, "not logged in");
+      }
+      if (path === "/api/auth/logout" && m === "POST") {
+        await auth.logout(authz);
+        return json({ ok: true });
+      }
+      return err(404, "not found");
+    }
+
     if (path === "/api/feedback" && m === "POST") {
       if (overLimit(`feedback:${userKey(req, server)}`, 20, 10 * 60_000)) return err(429, "For mange tilbakemeldinger. Prøv igjen senere.");
       const device = deviceOf(req);
@@ -517,6 +546,10 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
   return {
     async fetch(req: Request, server: Server<WsData>) {
       try {
+        if (req.headers.has("authorization") && !new URL(req.url).pathname.startsWith("/api/auth/")) {
+          const me = await auth.resolve(req.headers.get("authorization"));
+          if (me) accountKey.set(req, me.device);
+        }
         return await route(req, server);
       } catch (e) {
         console.error("[http]", req.method, new URL(req.url).pathname, (e as Error).message);

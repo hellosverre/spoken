@@ -53,3 +53,32 @@ create index if not exists feedback_created_idx on public.feedback (created_at d
 alter table public.feedback enable row level security;
 revoke all on public.feedback from anon, authenticated;
 grant select, insert on public.feedback to service_role;
+
+-- Accounts with SMS-code login (optional; anonymous devices keep working). Server-only, like the rest.
+-- An account's data lives under primary_device (the first device that logged in): other linked
+-- devices read and write that key, and their own rows are copied over on login.
+create table if not exists public.accounts (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null unique,
+  primary_device uuid not null,
+  created_at timestamptz not null default now()
+);
+create table if not exists public.account_devices (
+  account_id uuid not null references public.accounts(id) on delete cascade,
+  device_id uuid not null,
+  linked_at timestamptz not null default now(),
+  primary key (account_id, device_id)
+);
+-- Session tokens are random 32 bytes; only their sha256 is stored. 30 days.
+create table if not exists public.sessions (
+  token_hash text primary key,
+  account_id uuid not null references public.accounts(id) on delete cascade,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists sessions_account on public.sessions (account_id);
+alter table public.accounts enable row level security;
+alter table public.account_devices enable row level security;
+alter table public.sessions enable row level security;
+revoke all on public.accounts, public.account_devices, public.sessions from anon, authenticated;
+grant select, insert, update, delete on public.accounts, public.account_devices, public.sessions to service_role;

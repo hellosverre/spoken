@@ -16,6 +16,16 @@ export interface CallSummary {
   at: string; // ISO time
 }
 
+/** A phone-number account. Its data lives under `primaryDevice`: every linked device reads and writes that key. */
+export interface Account {
+  id: string;
+  phone: string;
+  primaryDevice: string;
+}
+export interface SessionRow extends Account {
+  expiresAt: string; // ISO time
+}
+
 export interface Db {
   readonly kind: "supabase" | "memory";
   getProfile(device: string): Promise<Profile | null>;
@@ -26,6 +36,14 @@ export interface Db {
   saveResult(device: string, r: CallResult, calleeName: string): Promise<void>;
   listResults(device: string, limit?: number): Promise<CallSummary[]>;
   saveFeedback(device: string, f: FeedbackInput): Promise<void>;
+  /** Find the account for a phone (or create it with `device` as its data key) and link `device` to it. */
+  upsertAccount(phone: string, device: string): Promise<Account>;
+  /** Sessions are stored by sha256 of the token, never the token. */
+  createSession(tokenHash: string, accountId: string, expiresAt: string): Promise<void>;
+  getSession(tokenHash: string): Promise<SessionRow | null>;
+  deleteSession(tokenHash: string): Promise<void>;
+  /** Copy what `from` has (contacts, profile if `to` has none, call history) onto `to`. */
+  mergeDevice(from: string, to: string): Promise<void>;
 }
 
 export const isDeviceId = (s: string | null | undefined): s is string =>
@@ -60,6 +78,34 @@ export class MemoryDb implements Db {
   }
   async listResults(d: string, limit = 20) { return (this.results.get(d) ?? []).slice(0, limit); }
   async saveFeedback(d: string, f: FeedbackInput) { this.feedback.push({ device: d, ...f, at: new Date().toISOString() }); }
+
+  private accounts = new Map<string, Account>(); // by phone
+  private links = new Set<string>(); // `${accountId}:${device}`
+  private sessions = new Map<string, { accountId: string; expiresAt: string }>();
+  /** Take an account made elsewhere (Supabase) so it survives an outage. */
+  adopt(a: Account, device: string) { this.accounts.set(a.phone, a); this.links.add(`${a.id}:${device}`); }
+  async upsertAccount(phone: string, device: string) {
+    const a = this.accounts.get(phone) ?? { id: crypto.randomUUID(), phone, primaryDevice: device };
+    this.adopt(a, device);
+    return a;
+  }
+  async createSession(h: string, accountId: string, expiresAt: string) { this.sessions.set(h, { accountId, expiresAt }); }
+  async getSession(h: string): Promise<SessionRow | null> {
+    const s = this.sessions.get(h);
+    const a = s && [...this.accounts.values()].find((x) => x.id === s.accountId);
+    return s && a ? { ...a, expiresAt: s.expiresAt } : null;
+  }
+  async deleteSession(h: string) { this.sessions.delete(h); }
+  async mergeDevice(from: string, to: string) {
+    if (from === to) return;
+    const have = new Set((this.contacts.get(to) ?? []).map((c) => c.phone));
+    const moved = (this.contacts.get(from) ?? []).filter((c) => !have.has(c.phone));
+    this.contacts.set(to, [...(this.contacts.get(to) ?? []), ...moved.map((c) => ({ ...c, id: crypto.randomUUID() }))]);
+    const mine = this.profiles.get(from);
+    if (mine && !this.profiles.get(to)?.name) this.profiles.set(to, mine);
+    const ids = new Set((this.results.get(to) ?? []).map((r) => r.callId));
+    this.results.set(to, [...(this.results.get(to) ?? []), ...(this.results.get(from) ?? []).filter((r) => !ids.has(r.callId))].sort((a, b) => b.at.localeCompare(a.at)));
+  }
 }
 
 // ---------- supabase (PostgREST) ----------
@@ -133,6 +179,38 @@ export class SupabaseDb implements Db {
       device_id: d, call_id: f.callId ?? null, rating: f.rating ?? null, comment: f.comment ?? null, source: f.source,
     }, "return=minimal");
   }
+
+  async upsertAccount(phone: string, device: string): Promise<Account> {
+    const q = encodeURIComponent(phone);
+    let row = (await this.rest("GET", `accounts?phone=eq.${q}&select=id,phone,primary_device`))?.[0];
+    if (!row) {
+      row = (await this.rest("POST", "accounts?select=id,phone,primary_device", { phone, primary_device: device }, "return=representation"))[0];
+    }
+    await this.rest("POST", "account_devices?on_conflict=account_id,device_id", { account_id: row.id, device_id: device }, "resolution=ignore-duplicates,return=minimal");
+    return { id: row.id, phone: row.phone, primaryDevice: row.primary_device };
+  }
+  async createSession(h: string, accountId: string, expiresAt: string) {
+    await this.rest("POST", "sessions", { token_hash: h, account_id: accountId, expires_at: expiresAt }, "return=minimal");
+  }
+  async getSession(h: string): Promise<SessionRow | null> {
+    if (!/^[0-9a-f]{64}$/.test(h)) return null;
+    const r = (await this.rest("GET", `sessions?token_hash=eq.${h}&select=expires_at,accounts(id,phone,primary_device)`))?.[0];
+    if (!r?.accounts) return null;
+    return { id: r.accounts.id, phone: r.accounts.phone, primaryDevice: r.accounts.primary_device, expiresAt: r.expires_at };
+  }
+  async deleteSession(h: string) {
+    if (/^[0-9a-f]{64}$/.test(h)) await this.rest("DELETE", `sessions?token_hash=eq.${h}`, undefined, "return=minimal");
+  }
+  async mergeDevice(from: string, to: string) {
+    if (from === to) return;
+    const have = new Set((await this.listContacts(to)).map((c) => c.phone));
+    for (const c of await this.listContacts(from)) {
+      if (!have.has(c.phone)) await this.addContact(to, { name: c.name, phone: c.phone, kind: c.kind });
+    }
+    const mine = await this.getProfile(from);
+    if (mine && !(await this.getProfile(to))?.name) await this.putProfile(to, mine);
+    await this.rest("PATCH", `call_results?device_id=eq.${from}`, { device_id: to }, "return=minimal");
+  }
 }
 
 // ---------- fallback wrapper ----------
@@ -173,6 +251,29 @@ export class FallbackDb implements Db {
   saveFeedback(d: string, f: FeedbackInput) {
     // Remote first; memory only when Supabase fails, so a note is never silently lost.
     return this.tryBoth("saveFeedback", (db) => db.saveFeedback(d, f), () => this.mem.saveFeedback(d, f));
+  }
+
+  // Accounts: Supabase is the source of truth; memory mirrors it so a login survives an outage.
+  async upsertAccount(phone: string, device: string) {
+    const a = await this.tryBoth("upsertAccount", (db) => db.upsertAccount(phone, device), () => this.mem.upsertAccount(phone, device));
+    this.mem.adopt(a, device);
+    return a;
+  }
+  async createSession(h: string, accountId: string, expiresAt: string) {
+    await this.mem.createSession(h, accountId, expiresAt);
+    await this.tryBoth("createSession", (db) => db.createSession(h, accountId, expiresAt), async () => {});
+  }
+  async getSession(h: string) {
+    const remote = await this.tryBoth("getSession", (db) => db.getSession(h), async () => null);
+    return remote ?? this.mem.getSession(h);
+  }
+  async deleteSession(h: string) {
+    await this.mem.deleteSession(h);
+    await this.tryBoth("deleteSession", (db) => db.deleteSession(h), async () => {});
+  }
+  async mergeDevice(from: string, to: string) {
+    await this.mem.mergeDevice(from, to);
+    await this.tryBoth("mergeDevice", (db) => db.mergeDevice(from, to), async () => {});
   }
 }
 
