@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto
 import { config } from "./config.ts";
 import { isDeviceId, type Db } from "./db.ts";
 import { normalizePhone } from "./safety.ts";
+import { vonageJwt } from "./call/vonage-line.ts";
 
 export const CODE_TTL_MS = 10 * 60_000;
 export const MAX_TRIES = 5;
@@ -20,6 +21,27 @@ export function vonageSms(f: typeof fetch = fetch): SmsSender {
   return async (e164, text) => {
     const key = process.env.VONAGE_API_KEY;
     const secret = process.env.VONAGE_API_SECRET;
+    const app = config.vonage;
+    // No API secret, but the voice app's key works: send through the Messages API (JWT).
+    // Needs the Messages capability turned on for the Vonage application.
+    if ((!key || !secret) && app.applicationId && app.privateKey && config.callProvider !== "mock") {
+      let r: Response;
+      try {
+        r = await f("https://api.nexmo.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${vonageJwt(app.applicationId, app.privateKey)}` },
+          body: JSON.stringify({ message_type: "text", channel: "sms", to: e164.slice(1), from: "Spoken", text }),
+          signal: AbortSignal.timeout(8000),
+        });
+      } catch {
+        throw new Error("Fikk ikke sendt SMS (ingen kontakt med SMS-tjenesten).");
+      }
+      if (!r.ok) {
+        console.warn(`[auth] Messages API SMS failed: HTTP ${r.status} ${(await r.text().catch(() => "")).slice(0, 200)}`);
+        throw new Error("Fikk ikke sendt SMS. Prøv igjen om litt.");
+      }
+      return "sms";
+    }
     if (!key || !secret || config.callProvider === "mock") {
       console.log(`[auth] dev mode, no SMS sent to ${e164}: ${text}`);
       return "dev";
