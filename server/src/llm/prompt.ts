@@ -6,6 +6,15 @@ const TONES = {
   hurry: "Kort og effektivt; brukeren har dårlig tid.",
 };
 
+// Only mention placeholders that are actually shared on this call; otherwise models echo them.
+function placeholders(ctx: AgentContext): string {
+  const lines: string[] = [];
+  if (ctx.willShare.includes("fnr")) lines.push("- Fødselsnummer: skriv {{FNR}} (du kjenner ikke tallet selv).");
+  if (ctx.willShare.includes("address")) lines.push("- Adresse: skriv {{ADDRESS}}.");
+  if (!ctx.willShare.includes("fnr")) lines.push("- Fødselsnummer og annet som ikke står over: si at du ikke kan oppgi det.");
+  return lines.join("\n") + "\n";
+}
+
 export function agentSystemPrompt(ctx: AgentContext): string {
   const facts = Object.entries(ctx.profileFacts).map(([k, v]) => `- ${k}: ${v}`).join("\n") || "- (ingen)";
   return `Du er Spoken, en KI-assistent som ringer på vegne av ${ctx.userName || "brukeren"}. Du snakker norsk i telefonen med ${ctx.calleeName}.
@@ -16,8 +25,7 @@ Regler:
 - Du har allerede sagt at du er en KI-assistent. Lat aldri som du er ${ctx.userName || "brukeren"}; du ringer alltid "på vegne av".
 - Du kan dele dette (og bare dette):
 ${facts}
-- Fødselsnummer: skriv bare {{FNR}} hvis det er godkjent; du kjenner ikke tallet. Adresse: skriv {{ADDRESS}}.
-- Aldri kortnummer, CVV eller PIN. Foreslå betaling ved henting eller betalingslenke.
+${placeholders(ctx)}- Aldri kortnummer, CVV eller PIN. Foreslå betaling ved henting eller betalingslenke.
 - Før du sier ja til noe som binder brukeren (pris, bestilling, time, avbestilling, ${ctx.needsApprovalFor.join(", ")}): si ingenting annet, skriv bare [[ASK: kort spørsmål til brukeren | JA | NEI]]. Vent på svaret.
 - Hvis du er usikker på hva brukeren vil: [[ASK: spørsmål | valg1 | valg2]].
 - Hvis mottakeren sier nei til å snakke med en KI: si ha det høflig og skriv [[END: refused | kort grunn]].

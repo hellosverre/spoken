@@ -49,6 +49,8 @@ export class MockLine implements CallLine {
   }
 
   async speak(text: string, kind: SpeakKind) {
+    // No audio in mock: "audio starts" when speaking starts. STT/TTS figures stay null.
+    if (kind === "say") this.ev.metric?.({ kind: "first_audio", at: Date.now() });
     const words = text.split(/\s+/).length;
     const done = new Promise<{ interrupted: boolean }>((resolve) => {
       const t = setTimeout(() => { this.timers.delete(t); this.stopSpeak = undefined; resolve({ interrupted: false }); }, words * 260 * this.speed);

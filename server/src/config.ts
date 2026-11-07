@@ -1,7 +1,7 @@
 // Runtime config from env. Secrets are read here and nowhere else; never log them.
 
 export type CallProvider = "mock" | "telnyx";
-export type LlmProviderName = "mock" | "mistral" | "openai";
+export type LlmProviderName = "mock" | "mistral" | "openai" | "openrouter";
 
 function env(name: string, fallback = ""): string {
   const v = process.env[name];
@@ -18,7 +18,7 @@ export const config = {
   publicUrl: env("PUBLIC_URL", "http://localhost:8787").replace(/\/$/, ""),
   callProvider: (env("CALL_PROVIDER", "mock") as CallProvider),
   llmProvider: (env("LLM_PROVIDER", "mock") as LlmProviderName),
-  llmApiKey: env("LLM_API_KEY"),
+  llmApiKey: env("LLM_API_KEY", env("OPENROUTER_API_KEY")),
   llmModel: env("LLM_MODEL"),
   telnyx: {
     apiKey: env("TELNYX_API_KEY"),

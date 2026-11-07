@@ -6,16 +6,39 @@ import type {
 } from "../../../shared/contract.ts";
 import { config } from "../config.ts";
 import { mockSummary } from "../llm/mock.ts";
-import type { AgentContext, HistoryItem, LlmProvider, Tone } from "../llm/types.ts";
+import type { AgentContext, HistoryItem, LlmProvider, Tone, Usage } from "../llm/types.ts";
 import {
   ADDRESS_REFUSAL, CARD_REFUSAL, FNR_REFUSAL, detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment,
 } from "../safety.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { CallLine } from "./line.ts";
+import type { CallLine, LineMetric } from "./line.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 
 export const WAIT_PHRASE = "Et øyeblikk…";
+
+/**
+ * Per-turn latency for the "Built with ElevenLabs" panel. Proposed for shared/contract.ts
+ * (LiveEvent union); emitted with a cast until the lead adds it there.
+ */
+export interface LatencyEvent {
+  type: "latency";
+  sttMs: number | null; // callee stopped talking → Scribe committed the transcript
+  llmMs: number | null; // LLM request → first token
+  ttsMs: number | null; // TTS request for the first sentence → first audio byte (0 = cached)
+  totalMs: number; // callee stopped talking (or commit, if unknown) → first agent audio on the line
+  models: { stt: string; llm: string; tts: string };
+  at: number;
+}
+
+interface TurnTiming {
+  commitAt: number;
+  speechEndAt?: number;
+  llmMs: number | null;
+  ttsMs: number | null;
+  awaitTts: boolean;
+  awaitAudio: boolean;
+}
 
 // Agent lines that mean "I didn't get that". Two turns of these in a row → change strategy.
 const CONFUSED = /(si det en gang til|kan du gjenta|forsto (deg )?ikke|hørte (deg )?ikke|linja er (litt )?dårlig|unnskyld,? hva sa du)/i;
@@ -87,6 +110,16 @@ export class CallSession {
   private recentConfused: boolean[] = []; // last 4 agent turns: was it a "didn't get that"?
   private confusedRun = 0; // confused turns within that window
   private lastFiller = "";
+  private timing?: TurnTiming;
+  private answeredAtHistory = -1; // history length when the user last answered an approval
+  private reasked = 0;
+  private usage = { promptTokens: 0, completionTokens: 0, costUsd: 0, requests: 0 };
+  private addUsage = (u: Usage) => {
+    this.usage.promptTokens += u.promptTokens;
+    this.usage.completionTokens += u.completionTokens;
+    this.usage.costUsd += u.costUsd ?? 0;
+    this.usage.requests++;
+  };
   private nudged = 0;
 
   constructor(private init: SessionInit) {
@@ -138,7 +171,11 @@ export class CallSession {
         status: (s, detail) => this.onLineStatus(s, detail),
         calleeSpeech: () => this.onCalleeSpeech(),
         calleePartial: (id, text) => this.emit({ type: "transcript", id, who: "callee", text, final: false, at: Date.now() }),
-        calleeFinal: (id, text, words) => this.onCalleeFinal(id, text, words),
+        calleeFinal: (id, text, words, meta) => {
+          this.timing = { commitAt: Date.now(), speechEndAt: meta?.speechEndAt, llmMs: null, ttsMs: null, awaitTts: false, awaitAudio: false };
+          this.onCalleeFinal(id, text, words);
+        },
+        metric: (m) => this.onMetric(m),
         calleeWords: (id, text, words) => this.emit({ type: "transcript", id, who: "callee", text, final: true, words, at: Date.now() }),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
@@ -250,7 +287,8 @@ export class CallSession {
       goal: this.init.plan.goal,
       calleeName: this.init.plan.callee.name,
       userName: p.name,
-      willShare: share,
+      // Only what this call may share AND the profile actually has (fnr comes from the call request).
+      willShare: share.filter((k) => k === "fnr" ? !!this.init.secrets?.fnr : k === "birthdate" ? false : k === "name" ? !!p.name : !!p[k as "phone" | "address" | "email" | "allergies"]),
       needsApprovalFor: this.init.plan.needsApprovalFor,
       profileFacts: facts,
       tone: this.tone,
@@ -313,13 +351,22 @@ export class CallSession {
           if (dup) { this.debug("skip_duplicate", { text: s.text }); return; }
         }
         spokeAnything = true;
+        if (firstAudio && this.timing && !this.timing.awaitAudio) { this.timing.awaitTts = true; this.timing.awaitAudio = true; }
         if (firstAudio) { firstAudio = false; this.latencies.push(Date.now() - t0); }
         said.push(s.text);
         const r = await this.say(s.text, "say", false, abort.signal);
         if (r.interrupted) stop = true;
       } else if (s.kind === "ask") {
         stop = true;
-        await this.requestApproval(s.question, s.options, /^(ja|nei)$/i.test(s.options[0] ?? "") ? "commit" : "choice");
+        // The model asking again right after the user answered, with nothing new from the
+        // callee in between, would loop the JA card. Treat it as already answered.
+        const calleeSince = this.history.slice(Math.max(0, this.answeredAtHistory)).some((h) => h.role === "callee");
+        if (this.answeredAtHistory >= 0 && !calleeSince) {
+          this.debug("suppressed_reask", { question: s.question });
+          if (this.reasked++ < 1) { this.wantTurn = true; this.history.push({ role: "user", text: "[instruks] Du har allerede fått svar på dette. Gi beskjed til mottakeren nå." }); }
+          return;
+        }
+        await this.requestApproval(this.withContext(s.question), s.options, /^(ja|nei)$/i.test(s.options[0] ?? "") ? "commit" : "choice");
       } else if (s.kind === "note") {
         this.note(s.text);
       } else if (s.kind === "end") {
@@ -330,8 +377,11 @@ export class CallSession {
     };
 
     try {
-      for await (const tok of this.init.llm.reply(this.ctx(), abort.signal)) {
+      const llmStart = Date.now();
+      const timing = this.timing;
+      for await (const tok of this.init.llm.reply(this.ctx(), abort.signal, this.addUsage)) {
         if (abort.signal.aborted || stop) break;
+        if (timing && timing.llmMs === null && tok.trim()) timing.llmMs = Date.now() - llmStart;
         for (const s of seg.push(tok)) await handle(s);
       }
       if (!abort.signal.aborted && !stop) for (const s of seg.end()) await handle(s);
@@ -416,6 +466,40 @@ export class CallSession {
     return r;
   }
 
+  /**
+   * An approval card must say what is being approved. If the model's question has no
+   * numbers (price, time) but the callee just said some, show the callee's words too.
+   */
+  private withContext(question: string): string {
+    const lastCallee = [...this.history].reverse().find((h) => h.role === "callee")?.text ?? "";
+    if (/\d/.test(question) || !/\d/.test(lastCallee)) return question;
+    return `${question} (${this.init.plan.callee.name || "Mottakeren"}: «${lastCallee}»)`;
+  }
+
+  private onMetric(m: LineMetric) {
+    const t = this.timing;
+    if (!t) return;
+    if (m.kind === "tts_first_byte" && t.awaitTts) { t.ttsMs = m.ms; t.awaitTts = false; return; }
+    if (m.kind === "first_audio" && t.awaitAudio) {
+      const from = t.speechEndAt && t.speechEndAt <= t.commitAt ? t.speechEndAt : t.commitAt;
+      const ev: LatencyEvent = {
+        type: "latency",
+        sttMs: t.speechEndAt && t.speechEndAt <= t.commitAt ? t.commitAt - t.speechEndAt : null,
+        llmMs: t.llmMs,
+        ttsMs: t.ttsMs,
+        totalMs: m.at - from,
+        models: {
+          stt: config.callProvider === "telnyx" ? "scribe_v2_realtime" : "mock",
+          llm: this.init.llm.model ? `${this.init.llm.name}:${this.init.llm.model}` : this.init.llm.name,
+          tts: config.callProvider === "telnyx" ? config.elevenlabs.ttsModel : "mock",
+        },
+        at: Date.now(),
+      };
+      this.timing = undefined;
+      this.emit(ev as unknown as LiveEvent);
+    }
+  }
+
   /** If the callee says nothing for 8 s after we spoke, check the line once. */
   private armSilenceNudge() {
     clearTimeout(this.silenceTimer);
@@ -452,6 +536,7 @@ export class CallSession {
     this.pending = undefined;
     this.init.line.stopWaitingSound();
     if (this.speaking) this.init.line.stopSpeaking(); // cut «Et øyeblikk…» if it is still playing
+    this.reasked = 0;
     const yes = /^(ja|yes|ok)$/i.test(choice.trim());
     const no = /^(nei|no)$/i.test(choice.trim());
     if (p.kind === "address") {
@@ -465,6 +550,7 @@ export class CallSession {
     } else {
       this.history.push({ role: "user", text: `[svar] ${choice}` });
     }
+    this.answeredAtHistory = this.history.length;
     this.requestTurn();
   }
 
@@ -531,7 +617,7 @@ export class CallSession {
     let s = mockSummary(ctx);
     if (this.connectedAt) {
       try {
-        s = await Promise.race([this.init.llm.summarize(ctx), Bun.sleep(8000).then(() => mockSummary(ctx))]);
+        s = await Promise.race([this.init.llm.summarize(ctx, this.addUsage), Bun.sleep(8000).then(() => mockSummary(ctx))]);
       } catch { /* mock summary stays */ }
     }
     const tagIn = tag ?? this.endTag;
@@ -554,7 +640,10 @@ export class CallSession {
       console.log(`[latency] call ${this.callId}: avg ${avg} ms over ${this.latencies.length} turns (${this.latencies.join(", ")})`);
     }
     console.log(`[session] ${this.callId} ended (${reason}): ${outcome}`);
-    this.debug("ended", { reason, outcome, latencies: this.latencies });
+    this.debug("ended", { reason, outcome, latencies: this.latencies, usage: this.usage });
+    if (this.usage.requests) {
+      console.log(`[llm-usage] call ${this.callId}: ${this.usage.requests} requests, ${this.usage.promptTokens} in / ${this.usage.completionTokens} out, $${this.usage.costUsd.toFixed(5)}`);
+    }
     this.status = "ended";
     this.emit({ type: "status", status: "ended", at: Date.now() });
     this.emit({ type: "result", result: this.result });

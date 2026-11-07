@@ -52,10 +52,18 @@ export interface TaskForLlm {
  *   [[END: outcome | summary]]           finish the call after speaking
  *   [[NOTE: text]]                       show a note to the user
  */
+export interface Usage {
+  promptTokens: number;
+  completionTokens: number;
+  costUsd?: number; // OpenRouter reports it per request
+}
+
 export interface LlmProvider {
   name: string;
+  /** Model id, for the latency panel. */
+  model?: string;
   clarify(task: TaskForLlm): Promise<ClarifyOut>;
   plan(task: TaskForLlm, answers: Record<string, string>): Promise<PlanOut>;
-  reply(ctx: AgentContext, signal: AbortSignal): AsyncIterable<string>;
-  summarize(ctx: AgentContext): Promise<SummaryOut>;
+  reply(ctx: AgentContext, signal: AbortSignal, onUsage?: (u: Usage) => void): AsyncIterable<string>;
+  summarize(ctx: AgentContext, onUsage?: (u: Usage) => void): Promise<SummaryOut>;
 }

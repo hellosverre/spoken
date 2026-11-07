@@ -104,7 +104,7 @@ export function createApp(llm: LlmProvider = createLlm()) {
       return json(t.plan);
     }
     const p = await llm.plan(taskForLlm(t.input), answers);
-    const rawPhone = t.input.phone ?? answers.phone ?? p.phone;
+    const rawPhone = t.input.phone || answers.phone || p.phone || lookup(t.input.text)?.phone;
     const source: Plan["callee"]["source"] = t.input.phone || answers.phone ? "user" : lookup(t.input.text) ? "lookup" : "user";
     let blocked: Plan["blocked"];
     let phone = "";

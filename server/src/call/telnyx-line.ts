@@ -12,6 +12,7 @@ const FRAME = 160; // 20 ms of µ-law at 8 kHz
 const LEAD_MS = 120; // how far ahead of real time we send, to ride out jitter
 const BARGE_RMS = Number(process.env.BARGE_RMS ?? 1100);
 const BARGE_FRAMES = 5; // 100 ms of loud audio while we talk = barge-in
+const VOICED_RMS = Number(process.env.VOICED_RMS ?? 600); // "callee is talking" for the STT timing
 
 const lines = new Map<string, TelnyxLine>(); // by callId
 const byControlId = new Map<string, TelnyxLine>();
@@ -68,6 +69,7 @@ export class TelnyxLine implements CallLine {
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
   private inboundAlaw = false;
+  private lastVoicedAt = 0;
 
   // latency
   private lastCommitAt = 0;
@@ -181,7 +183,7 @@ export class TelnyxLine implements CallLine {
         this.lastCommitAt = Date.now();
         this.awaitingFirstAudio = true;
         this.committedIds.set(text.trim(), id);
-        this.ev.calleeFinal(id, text);
+        this.ev.calleeFinal(id, text, undefined, { speechEndAt: this.lastVoicedAt || undefined });
       },
       words: (text, words) => {
         const id = this.committedIds.get(text.trim());
@@ -208,6 +210,7 @@ export class TelnyxLine implements CallLine {
         if (!m.media?.payload) return;
         const raw = new Uint8Array(Buffer.from(m.media.payload, "base64"));
         const buf = this.inboundAlaw ? alawToUlaw(raw) : raw;
+        if (ulawRms(buf) > VOICED_RMS) this.lastVoicedAt = Date.now();
         this.localVad(buf);
         this.inBatch.push(buf);
         if (this.inBatch.length >= 2) { // 40 ms per Scribe message
@@ -272,6 +275,7 @@ export class TelnyxLine implements CallLine {
         this.awaitingFirstAudio = false;
         console.log(`[latency] callee commit → agent audio: ${now - this.lastCommitAt} ms`);
         this.ev.debug?.("latency", { commitToAudioMs: now - this.lastCommitAt });
+        this.ev.metric?.({ kind: "first_audio", at: now });
       }
       if (!f && this.waiting && !this.speakResolve) {
         f = TYPING.subarray(this.typingOff, this.typingOff + FRAME);
@@ -311,6 +315,7 @@ export class TelnyxLine implements CallLine {
           first = false;
           console.log(`[latency] tts first byte: ${Date.now() - t0} ms (${text.length} chars)`);
           this.ev.debug?.("tts", { firstByteMs: Date.now() - t0, chars: text.length, kind });
+          if (kind === "say") this.ev.metric?.({ kind: "tts_first_byte", ms: Date.now() - t0 });
         }
         this.chunks.push(chunk);
       }
