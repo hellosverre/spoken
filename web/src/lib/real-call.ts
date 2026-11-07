@@ -1,4 +1,4 @@
-import { authHeader } from "./account";
+import { ApiError, authHeader, getToken, sessionLost } from "./account";
 import { beginLiveAudio, endLiveAudio } from "./live-audio";
 import type { Lang, Row } from "./i18n";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
@@ -51,10 +51,11 @@ async function http<T>(method: string, path: string, body?: unknown, extra: Reco
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new Error("Får ikke kontakt med Spoken-serveren.");
+    throw new ApiError("Får ikke kontakt med Spoken-serveren.", 0);
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (res.status === 401) sessionLost(); // expired session → the store sends the app back to Login
+  if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
   return data;
 }
 
@@ -225,7 +226,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   resetFacts();
   setReceipt(null);
   if (mode !== "mock") beginLiveAudio(callId); // "Hear the call": refused by the server unless the profile allows it
-  const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
+  const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(getToken())}`);
   const send = (cmd: object) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd)); };
   io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });
 

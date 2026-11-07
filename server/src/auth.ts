@@ -17,11 +17,17 @@ const PER_IP = { max: 10, windowMs: 3600_000 };
 /** Sends one SMS. Returns "sms" when sent, "dev" when only logged. Throws with a readable message on failure. */
 export type SmsSender = (e164: string, text: string) => Promise<"sms" | "dev">;
 
-export function vonageSms(f: typeof fetch = fetch): SmsSender {
+export function vonageSms(injected?: typeof fetch): SmsSender {
   return async (e164, text) => {
     const key = process.env.VONAGE_API_KEY;
     const secret = process.env.VONAGE_API_SECRET;
     const app = config.vonage;
+    const f = injected ?? fetch;
+    // Tests set SPOKEN_NO_SMS (test/helpers.ts): no real SMS (costs credit), whatever provider a test switches to.
+    if (!injected && process.env.SPOKEN_NO_SMS) {
+      console.log(`[auth] dev mode, no SMS sent to ${e164}: ${text}`);
+      return "dev";
+    }
     // No API secret, but the voice app's key works: send through the Messages API (JWT).
     // Needs the Messages capability turned on for the Vonage application.
     if ((!key || !secret) && app.applicationId && app.privateKey && config.callProvider !== "mock") {

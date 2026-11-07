@@ -124,8 +124,8 @@ test("callbacks older than 24 h are not matched", async () => {
   } finally { Date.now = real; }
 });
 
-test("/api/incoming needs a valid device id", async () => {
-  expect((await incoming("nope")).status).toBe(400);
+test("/api/incoming needs a login", async () => {
+  expect((await fetch(`${base}/api/incoming`, { headers: { "x-test-anonymous": "1" } })).status).toBe(401);
 });
 
 test("signed webhooks: HS256 Bearer is checked only when VONAGE_SIGNATURE_SECRET is set", () => {

@@ -1,4 +1,4 @@
-import { authHeader } from "./account";
+import { ApiError, authHeader, sessionLost } from "./account";
 import type { Lang, Row } from "./i18n";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
 import { resetFacts, setFacts, type FactItem } from "../components/FactStrip";
@@ -72,12 +72,13 @@ async function http<T>(method: string, path: string, body?: unknown, extra: Reco
       signal: ctrl.signal,
     });
   } catch {
-    throw new Error("Får ikke kontakt med Spoken-serveren.");
+    throw new ApiError("Får ikke kontakt med Spoken-serveren.", 0);
   } finally {
     clearTimeout(timer);
   }
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  if (res.status === 401) await sessionLost(); // expired session → the store sends the app back to Login
+  if (!res.ok) throw new ApiError(data.error || `HTTP ${res.status}`, res.status);
   return data;
 }
 
@@ -231,7 +232,9 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   }
   resetFacts();
   setReceipt(null);
-  const ws = new WebSocket(`${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
+  // The session rides in the query: a websocket can't carry headers everywhere.
+  const sessionToken = ((await authHeader()).Authorization ?? "").replace(/^Bearer /, "");
+  const ws = new WebSocket(`${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(sessionToken)}`);
   // Anything sent before the socket opens (a quick hang-up) goes out as soon as it does.
   const outbox: string[] = [];
   const send = (cmd: object) => {
