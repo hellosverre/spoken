@@ -6,6 +6,7 @@
 // from/to/uuid/conversation_uuid, or POST JSON), /en/getting-started/concepts/webhooks (signed
 // webhooks: Authorization: Bearer <HS256 JWT signed with the signature secret>).
 
+import { voiceForCall } from "../voice/voices.ts";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { Lang, Plan, Profile } from "../../../shared/contract.ts";
 import { config } from "../config.ts";
@@ -124,7 +125,7 @@ export function createInbound(llm: LlmProvider, db: Db) {
       opening: match ? greeting(lang, name, topic) : messageGreeting(lang, name),
       willShare: ["name"],
       needsApprovalFor: [],
-      voiceId: prof.voiceId || config.elevenlabs.defaultVoice,
+      voiceId: voiceForCall(prof.voiceId, lang),
       callLang: lang,
     };
     const line = new VonageLine({ callId, to: `+${digits(from)}`, voiceId: plan.voiceId, lang, keyterms: [name, callerName, "Spoken", "KI-assistent"].filter(Boolean), maxSec: 300, inbound: { uuid } });

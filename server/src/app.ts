@@ -26,7 +26,7 @@ import { calls, profile as defaultProfile, purge, setProfile, takeCallSlot, task
 import { FallbackDb, isDeviceId, type Db } from "./db.ts";
 import { createAuth, type Auth } from "./auth.ts";
 import { audioHub } from "./call/audio-hub.ts";
-import { designVoice, listVoices } from "./voice/voices.ts";
+import { designVoice, listVoices, voiceForCall } from "./voice/voices.ts";
 
 // Words that come up on service calls in Norwegian; boosted in Scribe on every call.
 // "sjefen" was heard as "rektor" on call #3.
@@ -293,11 +293,11 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     const callId = id("c");
     const keyt = keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang);
     const line = real && config.callProvider === "vonage"
-      ? new VonageLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
+      ? new VonageLine({ callId, to: num.e164, voiceId: voiceForCall(t.plan.voiceId, t.plan.callLang ?? "no"), lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
       : real && config.callProvider === "46elks"
-      ? new ElksLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
+      ? new ElksLine({ callId, to: num.e164, voiceId: voiceForCall(t.plan.voiceId, t.plan.callLang ?? "no"), lang: t.plan.callLang ?? "no", keyterms: keyt, maxSec })
       : real
-      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, lang: t.plan.callLang ?? "no", keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang), maxSec })
+      ? new TelnyxLine({ callId, to: num.e164, voiceId: voiceForCall(t.plan.voiceId, t.plan.callLang ?? "no"), lang: t.plan.callLang ?? "no", keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal, t.plan.callLang), maxSec })
       : new MockLine(realProvider ? 1 : config.mockSpeed, "pizza", t.plan.callLang ?? "no");
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
     const callLlm = realProvider && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
@@ -352,7 +352,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
 
     const profile = await profileFor(deviceOf(req));
     const callLang = v.callLang ?? callLangFor(v.text, config.callLang);
-    const voiceId = profile.voiceId || config.elevenlabs.defaultVoice;
+    const voiceId = voiceForCall(profile.voiceId, callLang);
     const maxSec = Math.min(90, config.maxCallSec); // info calls stay short
     const id_ = id("cmp");
     const legs = targets.map((t, i) => {
