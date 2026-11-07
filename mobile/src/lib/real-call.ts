@@ -170,13 +170,14 @@ export async function planRealCall(
     await chat.bot([plan.blocked.reason, plan.blocked.alternative].filter(Boolean).join(" "));
     return null;
   }
-  registerReal(plan, text);
+  registerReal(plan, text, opts.contact?.name);
   return REAL;
 }
 
-function registerReal(plan: Plan, request: string) {
+function registerReal(plan: Plan, request: string, contactName?: string) {
+  const name = contactName || plan.callee.name;
   const lines = {
-    contact: plan.callee.name || prettyPhone(plan.callee.phone),
+    contact: name || prettyPhone(plan.callee.phone),
     request,
     goal: plan.goal.charAt(0).toUpperCase() + plan.goal.slice(1),
     checks: plan.needsApprovalFor.slice(0, 3),
@@ -184,7 +185,7 @@ function registerReal(plan: Plan, request: string) {
   };
   const sc: Scenario & { live: true } = {
     live: true,
-    init: initials(plan.callee.name),
+    init: initials(name),
     number: prettyPhone(plan.callee.phone),
     en: lines,
     no: lines,
@@ -205,12 +206,21 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   );
   if (pc === "wrong") {
     settings.onWrongPasscode();
-    io.note(lang === "no" ? "Feil demo-kode, så dette er en demosamtale." : "Wrong demo code, so this is a demo call.");
+    io.note(lang === "no" ? "Feil demo-kode, så dette er en øvingssamtale: ingen telefon ringer, og svarene er skriptet." : "Wrong demo code, so this is a practice call: no phone is ringing and the replies are scripted.");
   } else if (mode === "mock") {
-    io.note(lang === "no" ? "Demosamtale: ingen ekte telefon ringer." : "Demo call: no real phone is ringing.");
+    io.note(lang === "no" ? "Øvingssamtale: ingen telefon ringer, og svarene er skriptet. Legg inn demo-koden under Profil for ekte samtaler." : "Practice call: no phone is ringing and the replies are scripted. Add the demo code in Profile for real calls.");
   }
   const ws = new WebSocket(`${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live`);
-  const send = (cmd: object) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd)); };
+  // Anything sent before the socket opens (a quick hang-up) goes out as soon as it does.
+  const outbox: string[] = [];
+  const send = (cmd: object) => {
+    const raw = JSON.stringify(cmd);
+    if (ws.readyState === WebSocket.OPEN) ws.send(raw);
+    else outbox.push(raw);
+  };
+  ws.onopen = () => {
+    while (outbox.length) ws.send(outbox.shift()!);
+  };
   io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });
 
   // Lines are shown one after another (say animates word by word); the approval sheet runs beside them.
@@ -280,16 +290,21 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
             .catch(() => { /* hung up while the sheet was open */ });
           break;
         }
-        case "note":
-          io.note((e as { text: string }).text);
+        case "note": {
+          // In line with the transcript, or a refusal shows up before what it refused.
+          const text = (e as { text: string }).text;
+          queue(async () => io.note(text));
           break;
+        }
         case "result":
           finished = true;
           resolve((e as { result: CallResult }).result);
           break;
       }
     };
-    ws.onerror = () => reject(new Error("Mistet forbindelsen til samtalen."));
+    // A dropped socket doesn't end the call on the server, so don't end it here: onclose always
+    // follows and keeps asking the server for the result.
+    ws.onerror = () => {};
     ws.onclose = () => {
       if (finished) return;
       // Socket gone before the result: ask the server (202 while the call is still running).

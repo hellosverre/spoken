@@ -1,6 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { AccessibilityInfo, Platform, Vibration } from "react-native";
+import { MOBILE_COPY } from "./copy-mobile";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
@@ -104,7 +105,8 @@ const INITIAL: State = {
   flashTick: 0,
   authed: false,
   themePref: "system",
-  profile: { name: "Ingrid", phone: "" },
+  // No default name: real calls say this name out loud, so it must never be a made-up one.
+  profile: { name: "", phone: "" },
   presets: DEFAULT_PRESETS,
   serverCalls: true,
   passcode: "",
@@ -155,6 +157,10 @@ export class SpokenStore {
   private askResolve: ((v: string) => void) | null = null;
   /** Real calls: the chat is waiting for an answer to a server question. */
   private chatAnswer: ((text: string) => void) | null = null;
+  /** That answer is a code, so its bubble is masked. */
+  private chatSecret = false;
+  /** The user chose practice calls instead of giving a demo code. Asked again next launch. */
+  private practiceOk = false;
   /** Real calls: where mid-call messages and hang-up go. */
   private realSink: { instruction(text: string): void; hangup(): void } | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -415,7 +421,7 @@ export class SpokenStore {
       const answer = this.chatAnswer;
       this.chatAnswer = null;
       this.set({ draft: "" });
-      this.pushThread({ id: this.uid++, kind: "me", text });
+      this.pushThread({ id: this.uid++, kind: "me", text: this.chatSecret ? "••••••" : text });
       answer(text);
       return;
     }
@@ -443,18 +449,28 @@ export class SpokenStore {
       this.pushThread({ id: b, kind: "bot", text: "" });
       await this.typeInto((t) => this.patchThread(b, { text: t }), line, 10, stop);
     };
+    const askUser = async (q: string, secret = false) => {
+      await bot(q);
+      this.chatSecret = secret;
+      this.set((s) => ({ focusTick: s.focusTick + 1 }));
+      const answer = await new Promise<string>((resolve) => { this.chatAnswer = resolve; });
+      this.pushThread({ id: dots, kind: "dots" }); // the server takes a few seconds to plan
+      return answer;
+    };
     try {
+      // Without a code the server runs a mock call with a scripted callee, whatever number you
+      // gave. That must be a choice, not what happens because a field in Profile was left empty.
+      if (!this.state.passcode && !this.practiceOk) {
+        const m = MOBILE_COPY[this.state.lang];
+        const typed = (await askUser(m.codeAsk, true)).trim();
+        if (stop()) return;
+        if (/^(skip|hopp over)$/i.test(typed)) this.practiceOk = true;
+        else this.setPasscode(typed);
+      }
       const key = await planRealCall(
         text,
         this.state.lang,
-        {
-          bot,
-          askUser: async (q) => {
-            await bot(q);
-            this.set((s) => ({ focusTick: s.focusTick + 1 }));
-            return new Promise<string>((resolve) => { this.chatAnswer = resolve; });
-          },
-        },
+        { bot, askUser: (q) => askUser(q) },
         // Your Profile name and phone go to the server (per device), so the call says your name.
         { profile: this.state.profile, contact },
       );
@@ -472,6 +488,7 @@ export class SpokenStore {
 
   editPlan(text: string) {
     this.homeId++;
+    this.chatAnswer = null;
     this.set((s) => ({ threaded: false, thread: [], draft: text, focusTick: s.focusTick + 1 }));
   }
 
@@ -579,6 +596,8 @@ export class SpokenStore {
       this.sys(this.t.connected);
     };
     if (!live) {
+      // A script must never pass for a real call.
+      this.sys(MOBILE_COPY[lang].scriptedNote);
       await sleep(2300);
       if (id !== this.callId) return;
       if (this.hangup) return this.finish(id, { hung: true });

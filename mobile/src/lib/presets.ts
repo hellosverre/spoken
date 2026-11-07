@@ -169,9 +169,10 @@ export function toRequest(p: Preset, values: Record<string, string>): PresetRequ
   const name = p.contactName.trim();
   const phone = p.contactPhone.trim();
   let text = fillTemplate(p, values);
-  // No number: the server finds one from the text, so make sure the text names who to call.
-  if (name && !phone && text && !text.toLowerCase().includes(name.toLowerCase())) text = `${text} (${name})`;
-  return { presetId: p.id, text, contact: name ? { name, phone } : null };
+  // Make sure the text names who to call: the agent needs it, and with no number the server looks it up.
+  if (name && text && !text.toLowerCase().includes(name.toLowerCase())) text = `${text} (${name})`;
+  // A number with no name still has to reach the call.
+  return { presetId: p.id, text, contact: name || phone ? { name, phone } : null };
 }
 
 /** Where presets are kept. Today the phone; later the server. */

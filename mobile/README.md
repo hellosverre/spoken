@@ -86,10 +86,10 @@ Every request carries `X-Spoken-Device` (a random id made once and kept on the p
 |---|---|---|
 | Server URL | `EXPO_PUBLIC_SPOKEN_API` at `npx expo start` | `https://spoken-api.hellosverre.com` |
 | Use the server | Profile → Calls | On |
-| Demo passcode | Profile → Calls (kept on the phone; cleared if the server says it's wrong) | Empty = mock calls, no phone rings |
-| Your name on calls | Profile → Your name | Ingrid |
+| Demo passcode | Asked in the chat before a call if it's empty, or Profile → Calls (kept on the phone; cleared if the server says it's wrong) | Empty, and `skip` = practice calls with a scripted callee, no phone rings, and the call screen says so |
+| Your name on calls | Profile → Your name | Empty: the call says «en bruker» |
 
-With the right passcode the server places a real Telnyx call, only to numbers on its `CALL_ALLOWLIST`.
+With the right passcode the server places a real Telnyx call, only to numbers on its `CALL_ALLOWLIST`. Built-in presets have no number and use the server's demo directory, whose numbers aren't real, so save a real number in a preset to call it.
 
 ## On your own iPhone (no paid Apple account)
 

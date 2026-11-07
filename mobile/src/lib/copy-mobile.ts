@@ -42,7 +42,7 @@ const en = {
   showLess: "Show less",
   restore: "Restore built-in presets",
   demoH: "Watch a demo",
-  noContact: "Spoken looks up the number",
+  noContact: "No number saved yet",
   useSend: "Send to Spoken",
   usePreview: "Spoken will be asked to",
   editPreset: "Edit preset",
@@ -56,7 +56,7 @@ const en = {
   contactName: "Name",
   contactNamePh: "Mom",
   contactPhone: "Phone number",
-  contactPhoneHint: "Leave empty and Spoken looks it up",
+  contactPhoneHint: "Spoken calls this number. Without one, it only knows a few demo places, and those aren't real numbers",
   fieldsL: "Fields",
   fieldsS: "Things you fill in each time you use it.",
   fieldLabel: "Field name",
@@ -80,6 +80,8 @@ const en = {
   passcodeL: "Demo code for real calls",
   passcodeS: "Without it, calls are demo calls: no phone rings.",
   passcodeSet: "Saved. Calls can ring real phones.",
+  codeAsk: "Real calls need the demo code from the team. Type it here, or type skip for a practice call where no phone rings.",
+  scriptedNote: "Scripted demo: no phone is ringing.",
 };
 
 export type MobileCopy = typeof en;
@@ -121,7 +123,7 @@ const no: MobileCopy = {
   showLess: "Vis færre",
   restore: "Hent tilbake innebygde snarveier",
   demoH: "Se en demo",
-  noContact: "Spoken slår opp nummeret",
+  noContact: "Ingen nummer lagret ennå",
   useSend: "Send til Spoken",
   usePreview: "Spoken blir bedt om å",
   editPreset: "Rediger snarvei",
@@ -135,7 +137,7 @@ const no: MobileCopy = {
   contactName: "Navn",
   contactNamePh: "Mamma",
   contactPhone: "Telefonnummer",
-  contactPhoneHint: "La det stå tomt, så slår Spoken det opp",
+  contactPhoneHint: "Spoken ringer dette nummeret. Uten nummer kjenner den bare noen få demosteder, og de numrene er ikke ekte",
   fieldsL: "Felt",
   fieldsS: "Det du fyller inn hver gang du bruker den.",
   fieldLabel: "Feltnavn",
@@ -158,6 +160,8 @@ const no: MobileCopy = {
   passcodeL: "Demo-kode for ekte samtaler",
   passcodeS: "Uten den er samtalene demoer: ingen telefon ringer.",
   passcodeSet: "Lagret. Samtaler kan ringe ekte telefoner.",
+  codeAsk: "Ekte samtaler krever demo-koden fra teamet. Skriv den her, eller skriv hopp over for en øvingssamtale der ingen telefon ringer.",
+  scriptedNote: "Innspilt demo: ingen telefon ringer.",
 };
 
 export const MOBILE_COPY: Record<Lang, MobileCopy> = { en, no };
