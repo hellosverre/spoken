@@ -5,6 +5,7 @@ import type { ServerWebSocket } from "bun";
 import { config } from "../config.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { createDenoiser } from "../voice/denoise.ts";
 import { ScribeStream } from "../voice/scribe.ts";
 import { toSpeakable } from "../voice/speakable.ts";
 import { batchVerdict, meanConf } from "./batch-verdict.ts";
@@ -117,6 +118,8 @@ export class TelnyxLine implements CallLine {
   private inBatch: Uint8Array[] = [];
   private rtConf = new Map<string, number>(); // segment id → mean realtime word confidence
   private inboundAlaw = false;
+  /** RNNoise + adaptive gate on the callee audio (null when DENOISE=0). */
+  private dn = createDenoiser();
   private lastVoicedAt = 0;
   private lastPartialAt = 0;
   private voicedSinceCommit = false;
@@ -331,16 +334,17 @@ export class TelnyxLine implements CallLine {
       case "media": {
         if (!m.media?.payload) return;
         const raw = new Uint8Array(Buffer.from(m.media.payload, "base64"));
-        const pcm = g711ToPcm16(raw, this.inboundAlaw);
+        const pcm = this.dn ? this.dn.process(g711ToPcm16(raw, this.inboundAlaw), 8000) : g711ToPcm16(raw, this.inboundAlaw);
         const rms = pcmRms(pcm);
-        if (rms > VOICED_RMS) {
+        const vrms = this.dn && !this.dn.voiced ? 0 : rms; // gated frames (noise / distant voices) count as silence
+        if (vrms > VOICED_RMS) {
           this.voicedSinceCommit = true;
           // Voice onset of the current segment = first voiced frame after the last commit.
           if (!this.segOnsetAt) this.segOnsetAt = Date.now();
           this.lastVoicedAt = Date.now();
           if (rms > this.speaker.floor()) this.lastLoudAt = this.lastVoicedAt;
         }
-        this.localVad(rms);
+        this.localVad(vrms);
         this.emitLevel("callee", rms);
         this.sttSamples += pcm.length;
         const now = Date.now();
@@ -558,6 +562,7 @@ export class TelnyxLine implements CallLine {
   }
 
   private cleanup() {
+    this.dn?.destroy();
     if (!this.costReported) {
       this.costReported = true;
       this.ev?.cost?.({ ttsChars: this.ttsChars, sttSec: Math.round(this.sttSamples / 8000) });

@@ -12,6 +12,7 @@ import { audioHub, WHO_AGENT, WHO_CALLEE } from "./audio-hub.ts";
 import type { ServerWebSocket } from "bun";
 import { createSign } from "node:crypto";
 import { config } from "../config.ts";
+import { createDenoiser } from "../voice/denoise.ts";
 import { ScribeStream } from "../voice/scribe.ts";
 import { batchVerdict, meanConf } from "./batch-verdict.ts";
 import { peakLevel, SpeakerLevel } from "./loudness.ts";
@@ -134,6 +135,8 @@ export class VonageLine implements CallLine {
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
   private rtConf = new Map<string, number>();
+  /** RNNoise + adaptive gate on the callee audio (null when DENOISE=0). */
+  private dn = createDenoiser();
   private lastVoicedAt = 0;
   private lastPartialAt = 0;
   private voicedSinceCommit = false;
@@ -358,18 +361,27 @@ export class VonageLine implements CallLine {
     if (!this.streaming) { this.streaming = true; this.maybeConnected(); } // audio before the JSON hello
     if (raw.length < 4) return;
     audioHub.publish(this.o.callId, WHO_CALLEE, raw);
-    this.onFrame(down16to8(raw));
+    let voiced = true, audio = raw;
+    if (this.dn) { // denoise at 16 kHz, then down to the 8 kHz Scribe gets
+      const even = raw.length & ~1, pcm = new Int16Array(even >> 1);
+      new Uint8Array(pcm.buffer).set(raw.subarray(0, even));
+      const clean = this.dn.process(pcm, 16000);
+      voiced = this.dn.voiced;
+      audio = new Uint8Array(clean.buffer);
+    }
+    this.onFrame(down16to8(audio), voiced);
   }
 
-  private onFrame(pcm: Int16Array) {
+  private onFrame(pcm: Int16Array, voiced = true) {
     const rms = pcmRms(pcm);
-    if (rms > VOICED_RMS) {
+    const vrms = voiced ? rms : 0; // gated frames (noise / distant voices) count as silence for VAD and barge-in
+    if (vrms > VOICED_RMS) {
       this.voicedSinceCommit = true;
       if (!this.segOnsetAt) this.segOnsetAt = Date.now();
       this.lastVoicedAt = Date.now();
       if (rms > this.speaker.floor()) this.lastLoudAt = this.lastVoicedAt;
     }
-    this.localVad(rms);
+    this.localVad(vrms);
     this.emitLevel("callee", rms);
     this.sttSamples += pcm.length;
     this.recent.push({ at: Date.now(), pcm, rms });
@@ -574,6 +586,7 @@ export class VonageLine implements CallLine {
   }
 
   private cleanup() {
+    this.dn?.destroy();
     clearTimeout(this.ringTimer);
     if (!this.costReported) {
       this.costReported = true;
