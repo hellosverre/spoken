@@ -36,7 +36,8 @@ export interface CallLine {
   /** Resolves when playback finished, or early with interrupted=true after stopSpeaking(). */
   speak(text: string, kind: SpeakKind): Promise<{ interrupted: boolean }>;
   stopSpeaking(): void;
-  startWaitingSound(): void;
+  /** typing = soft keyboard while the user decides; music = hold music while the callee holds. */
+  startWaitingSound(kind?: "typing" | "music"): void;
   stopWaitingSound(): void;
   hangup(): Promise<void>;
   /** Optional: warm the TTS cache for lines we know we will say (while it rings). */

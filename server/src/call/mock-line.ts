@@ -24,7 +24,7 @@ export class MockLine implements CallLine {
   private stage: keyof typeof SCRIPT | "start" = "start";
   private seg = 0;
   private closed = false;
-  waitingSound = false;
+  waitingSound: false | "typing" | "music" = false;
 
   /** speed 1 ≈ real time; tests use ~0.02. */
   constructor(private speed = 1) {}
@@ -75,7 +75,7 @@ export class MockLine implements CallLine {
   }
 
   stopSpeaking() { this.stopSpeak?.(); }
-  startWaitingSound() { this.waitingSound = true; }
+  startWaitingSound(kind: "typing" | "music" = "typing") { this.waitingSound = kind; }
   stopWaitingSound() { this.waitingSound = false; }
 
   async hangup() {

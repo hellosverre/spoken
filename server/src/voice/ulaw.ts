@@ -107,3 +107,24 @@ export function linearToAlaw(sample: number): number {
 export function levelOf(rms: number): number {
   return Math.min(1, Math.sqrt(rms / 9000));
 }
+
+/**
+ * Soft hold music: an 8 s loop of slow sine chords (Am–F–C–G) about 20 dB below speech, each chord
+ * fading in and out so the loop is seamless. Generated once in memory; no audio file or licence.
+ */
+export function holdMusic(seconds = 8): Uint8Array {
+  const rate = 8000;
+  const chords = [[220, 261.63, 329.63], [174.61, 220, 261.63], [130.81, 196, 261.63, 329.63], [196, 246.94, 293.66]];
+  const per = (seconds / chords.length) * rate;
+  const out = new Uint8Array(seconds * rate);
+  for (let i = 0; i < out.length; i++) {
+    const c = Math.floor(i / per);
+    const t = (i % per) / per; // 0..1 within the chord
+    const env = Math.sin(Math.PI * t) ** 1.5; // fade in/out
+    const f = chords[c]!;
+    let v = 0;
+    for (const hz of f) v += Math.sin((2 * Math.PI * hz * i) / rate) + 0.25 * Math.sin((4 * Math.PI * hz * i) / rate);
+    out[i] = linearToUlaw((v / f.length) * 3600 * env * (0.9 + 0.1 * Math.sin((2 * Math.PI * 0.5 * i) / rate)));
+  }
+  return out;
+}

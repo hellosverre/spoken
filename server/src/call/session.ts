@@ -13,6 +13,7 @@ import {
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLine, LineMetric } from "./line.ts";
+import { HoldFlow } from "./hold.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 
 export const WAIT_PHRASE = "Et øyeblikk…";
@@ -81,7 +82,7 @@ interface PendingApproval {
   question: string;
   options: string[];
   kind: "commit" | "address" | "choice";
-  timer: ReturnType<typeof setTimeout>;
+  timer?: ReturnType<typeof setTimeout>;
 }
 
 export interface SessionInit {
@@ -149,9 +150,22 @@ export class CallSession {
   };
   private nudged = 0;
 
+  private hold: HoldFlow;
+
   constructor(private init: SessionInit) {
     this.callId = init.callId;
     this.taskId = init.taskId;
+    this.hold = new HoldFlow({
+      userName: init.profile.name,
+      say: (t) => this.say(t, "filler"),
+      note: (t, level) => this.note(t, level),
+      sound: (k) => (k === "off" ? this.init.line.stopWaitingSound() : this.init.line.startWaitingSound(k)),
+      giveUp: async (summary) => {
+        if (this.pending) { clearTimeout(this.pending.timer); this.pending = undefined; }
+        await this.finish("approval timeout", { outcome: "partial", summary });
+      },
+      debug: (k, d) => this.debug(k, d),
+    });
   }
 
   // ---------- events ----------
@@ -280,6 +294,7 @@ export class CallSession {
     if (this.speaking) this.onCalleeSpeech();
 
     if (this.pending) {
+      if (this.hold.onCallee(clean)) return;
       // Keep the line warm while the user decides; say it once so they know we're there.
       if (!this.waitingNoticeSaid) {
         this.waitingNoticeSaid = true;
@@ -699,14 +714,10 @@ export class CallSession {
   private async requestApproval(question: string, options: string[], kind: PendingApproval["kind"], spoken = WAIT_PHRASE) {
     if (this.pending || this.ended) return;
     const id = nid("ap");
-    const timer = setTimeout(() => {
-      if (this.pending?.id !== id) return;
-      this.note("Fikk ikke svar fra deg i tide; sa nei.", "warn");
-      this.answer(id, "NEI");
-    }, config.approvalTimeoutSec * 1000);
-    this.pending = { id, question, options, kind, timer };
+    this.pending = { id, question, options, kind };
     this.waitingNoticeSaid = false;
     this.emit({ type: "approval_request", id, question, options, at: Date.now() });
+    this.hold.arm(); // 30 s: ask the callee to hold; 2 min: offer a callback
     await this.say(spoken, "filler");
     if (this.pending?.id === id) this.init.line.startWaitingSound();
   }
@@ -733,7 +744,8 @@ export class CallSession {
       this.history.push({ role: "user", text: `[svar] ${choice}` });
     }
     this.answeredAtHistory = this.history.length;
-    this.requestTurn();
+    // If the callee was asked to hold, thank them first («Takk for at du ventet!»), then go on.
+    void this.hold.resume().then(() => this.requestTurn());
   }
 
   // ---------- client commands ----------
@@ -770,6 +782,7 @@ export class CallSession {
 
   private async userHangup() {
     this.turnAbort?.abort();
+    this.hold.cancel();
     if (this.pending) { clearTimeout(this.pending.timer); this.pending = undefined; this.init.line.stopWaitingSound(); }
     if (this.status === "connected") {
       if (this.speaking) this.init.line.stopSpeaking();
@@ -789,6 +802,7 @@ export class CallSession {
     if (this.ended) return;
     this.ended = true;
     clearTimeout(this.maxTimer);
+    this.hold.cancel();
     clearTimeout(this.holdTimer);
     clearTimeout(this.gate?.timer);
     this.dropSpec("call ended");
