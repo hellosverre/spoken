@@ -68,7 +68,7 @@ const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
 // Callee text that sounds cut off mid-sentence: wait this long for more before answering.
 const HOLD_MS = 450;
 // Word confidences arrive ~20 ms after the commit; batch revisions ~0.7 s.
-const WORDS_WAIT_MS = 120;
+const WORDS_WAIT_MS = 250; // call #6: confidences came 130 ms after the commit
 const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
 // Questions and normal sentences are finished even if they end in «det»/«den» («vi har ikke det.»).
 const CONNECTOR_END = /\b(og|eller|men|fordi|at|som|hvis|altså|eh|ehm|øh|liksom|til|med|for|om)[.…]?$/i;
@@ -164,6 +164,7 @@ export class CallSession {
   private lastBackchannel = "";
   private turnNo = 0;
   private rephrased = false;
+  private turnSpoke = false; // the running turn has started speaking
   private goalAsks = 0; // agent questions about the goal since the last progress
   private lastProgressAt = 0;
   private messages = new Map<string, string>(); // callee segment id → message for the user
@@ -405,6 +406,11 @@ export class CallSession {
       item.text = [clean, hint, unsure.length ? `⟨usikre ord: ${unsure.join(", ")}⟩` : ""].filter(Boolean).join(" ");
     }
     this.debug("stt_revised", { id, text: clean });
+    // Batch changed the line we're answering and nothing has been said yet: answer the corrected text.
+    if (this.turnRunning && !this.turnSpoke && item && this.history.at(-1) === item && !this.pending) {
+      this.debug("turn_restart_on_revision", { id });
+      this.requestTurn();
+    }
     if (this.messages.has(id)) this.checkMessage(id, clean);
     if (this.gate?.id === id) this.gate.go();
   }
@@ -568,6 +574,7 @@ export class CallSession {
     }, FILLER_AFTER_MS);
 
     let waited = false;
+    this.turnSpoke = false;
     const handle = async (s: Segment) => {
       if (stop || abort.signal.aborted) return;
       // Nothing is said until the callee has really stopped (no half-sentences from cancelled turns).
@@ -639,6 +646,7 @@ export class CallSession {
           if (dup) { this.debug("skip_duplicate", { text: s.text }); return; }
         }
         spokeAnything = true;
+        this.turnSpoke = true;
         if (firstAudio && this.timing && !this.timing.awaitAudio) { this.timing.awaitTts = true; this.timing.awaitAudio = true; }
         if (firstAudio) { firstAudio = false; this.latencies.push(Date.now() - t0); }
         said.push(s.text);
@@ -847,6 +855,7 @@ export class CallSession {
       t = t.replace(new RegExp(`,?\\s*på vegne av ${name}`, "gi"), "");
     }
     t = t.replace(/\s{2,}/g, " ").trim();
+    if (t === text) return text; // untouched: keep the model's casing («…pizza, så jeg …»)
     return t ? t.charAt(0).toUpperCase() + t.slice(1) : "";
   }
 

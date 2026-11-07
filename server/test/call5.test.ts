@@ -189,3 +189,28 @@ describe("7: messages for the user", () => {
     expect((evs.at(-1) as any).result.details.beskjed).toContain("dette funka helt greit");
   });
 });
+
+describe("call #6: batch correction arriving after the turn started", () => {
+  test("restarts the turn with the corrected text if nothing was said yet", async () => {
+    const seen: string[] = [];
+    const line = Object.assign(new Line(), { revises: true });
+    line.quiet = 0; // callee still audible → agent waits before speaking
+    const l: LlmProvider = {
+      name: "fake",
+      clarify: async () => ({ summary: "", questions: [] }),
+      plan: async () => ({ calleeName: "", goal: "", willShare: [], needsApprovalFor: [] }),
+      summarize: async () => ({ outcome: "partial", summary: "x", details: {} }),
+      async *reply(ctx) { const last = ctx.history.at(-1)!.text; seen.push(last); yield /ikke/.test(last) ? "Å, da ringer jeg et annet sted." : "Så fint!"; },
+    };
+    const s = new CallSession({ callId: "r6", taskId: "t", plan: { ...plan }, profile: { name: "Sverre", hearCall: true, personality: "warm", lang: "no" }, line, llm: l });
+    await s.start();
+    await Bun.sleep(30);
+    line.ev.calleeFinal("c1", "Vi selger ekte pizza.");
+    await Bun.sleep(300);
+    line.ev.calleeRevised!("c1", "Vi selger ikke pizza", []);
+    line.quiet = Infinity;
+    await Bun.sleep(200);
+    expect(line.spoken.slice(1)).toEqual(["Å, da ringer jeg et annet sted."]);
+    await s.finish("test");
+  });
+});
