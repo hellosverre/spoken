@@ -1,6 +1,7 @@
 // REST + live WebSocket per CONTRACT.md, plus the Telnyx webhook and media socket.
 
 import type { Server, ServerWebSocket } from "bun";
+import { join, resolve } from "node:path";
 import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
 import { MockLine } from "./call/mock-line.ts";
 import { CallSession } from "./call/session.ts";
@@ -235,6 +236,12 @@ export function createApp(llm: LlmProvider = createLlm()) {
       return json(v);
     }
 
+    // The built web app (web/dist) is served from here, so the phone uses one origin for
+    // the page, REST and the live socket.
+    if (m === "GET" && !path.startsWith("/api/") && !path.startsWith("/telnyx/")) {
+      const page = await webFile(path);
+      if (page) return page;
+    }
     if (path === "/") return json({ name: "spoken-server", disclosure: disclosureLine(profile.name) });
     return err(404, "not found");
   }
@@ -272,6 +279,23 @@ export function createApp(llm: LlmProvider = createLlm()) {
       },
     },
   };
+}
+
+const WEB_DIST = resolve(process.env.WEB_DIST ?? join(import.meta.dir, "../../web/dist"));
+
+/** Static file from web/dist; unknown paths get index.html (hash routes, deep links). */
+async function webFile(path: string): Promise<Response | undefined> {
+  const index = Bun.file(join(WEB_DIST, "index.html"));
+  if (!(await index.exists())) return undefined;
+  const target = resolve(WEB_DIST, "." + decodeURIComponent(path));
+  if (target.startsWith(WEB_DIST + "/") && !target.endsWith("/")) {
+    const f = Bun.file(target);
+    if (await f.exists()) {
+      const immutable = target.includes("/assets/");
+      return new Response(f, { headers: { "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache" } });
+    }
+  }
+  return new Response(index, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" } });
 }
 
 export function parseCommand(raw: string): LiveCommand | null {

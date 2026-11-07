@@ -2,7 +2,9 @@
 // in-browser mock, so the full flow works with no server at all.
 const env = import.meta.env;
 
-export const API_URL: string = (env.VITE_API_URL ?? "").replace(/\/$/, "");
+// "/" = the server that serves this page (the Bun call server hosts the built app).
+const rawApi = env.VITE_API_URL === "/" ? window.location.origin : (env.VITE_API_URL ?? "");
+export const API_URL: string = rawApi.replace(/\/$/, "");
 export const WS_URL: string = (env.VITE_WS_URL ?? deriveWs(API_URL)).replace(/\/$/, "");
 export const IS_MOCK: boolean = env.VITE_MOCK === "1" || API_URL === "";
 

@@ -74,6 +74,9 @@ function reduce(s: LiveCallState, a: Act): LiveCallState {
       return s;
     case "result":
       return { ...s, result: e.result, status: "ended", approval: undefined, agentTyping: false };
+    default:
+      // Events this screen doesn't render (e.g. the server's "latency") must not wipe the state.
+      return s;
   }
 }
 
