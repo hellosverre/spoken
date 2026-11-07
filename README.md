@@ -97,3 +97,7 @@ Real calls need Telnyx, ElevenLabs and OpenRouter keys. See `server/.env.example
 ## Team
 
 Sverre, Jakob
+
+## Accessibility planning
+
+See [ACCESSIBILITY.md](ACCESSIBILITY.md) for proposed core-flow requirements, research caveats and a user-validation plan. These are targets to test, not claims of verified support.
