@@ -157,7 +157,8 @@ export const mockApi: Api = {
   live(callId, handlers) {
     const taskId = calls.get(callId) ?? "";
     const lang = tasks.get(taskId)?.input.lang ?? profile.lang;
-    const speed = Number(new URLSearchParams(location.search).get("mockSpeed")) || 1;
+    const params = new URLSearchParams(location.search);
+    const speed = Number(params.get("mockSpeed")) || 1;
     return startMockCall(
       {
         callId,
@@ -165,6 +166,7 @@ export const mockApi: Api = {
         name: profile.name || (lang === "en" ? "the user" : "brukeren"),
         lang,
         speed,
+        levels: params.get("mockLevels") === "1",
         onResult: (r) => results.set(callId, r),
       },
       handlers,

@@ -1,12 +1,17 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 import { useCalm } from "../../motion/useCalm.ts";
+import type { VoiceLevel } from "../../state/useLiveCall.ts";
+
+// A level older than this means the server stopped sending; fall back to word pulses.
+const LEVEL_STALE_MS = 400;
 
 // A dot grid that shows the call's voice, for people who can't hear it.
 // Energy comes from the side that is talking (callee left, Spoken right) and
 // swells with every word that arrives, rippling outward and decaying between
 // words. When the speaker changes, the energy's origin springs across the grid
-// like a wave. The contract has no audio level yet, so arriving words stand in
-// for amplitude. Drawn on a canvas so 210 dots cost one paint per frame.
+// like a wave. Loudness comes from the server's `level` events (~15 Hz RMS);
+// when none have arrived recently (mock mode, older server) arriving words stand
+// in for amplitude. Drawn on a canvas so 210 dots cost one paint per frame.
 
 const COLS = 30;
 const ROWS = 7;
@@ -30,18 +35,30 @@ const DOTS: Dot[] = Array.from({ length: COLS * ROWS }, (_, i) => {
   };
 });
 
-export function VoiceField({ speaking, pulse }: { speaking: "callee" | "agent" | "none"; pulse: number }) {
+export function VoiceField({
+  speaking,
+  pulse,
+  level,
+}: {
+  speaking: "callee" | "agent" | "none";
+  pulse: number;
+  level?: RefObject<VoiceLevel | null>;
+}) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const calm = useCalm();
   // Mutable animation state lives in a ref: the loop must not re-render React.
-  // In calm mode there is no loop, so redraw a still frame when the speaker changes.
-  const redrawKey = calm ? speaking : "live";
+  // The draw loop reads the speaker through a ref, so the canvas effect never
+  // restarts (a restart resets the canvas and would flash one blank frame).
+  const speakingRef = useRef(speaking);
+  speakingRef.current = speaking;
+  const redrawRef = useRef<(() => void) | null>(null);
   const sim = useRef({ level: 0, origin: 0, velocity: 0, target: 0, lastPulse: pulse, kick: 0 });
 
-  // A new word: kick the envelope. Longer gaps between words land harder.
+  // A new word: kick the envelope, unless real loudness is driving it.
   useEffect(() => {
     const s = sim.current;
-    if (pulse > s.lastPulse) {
+    const live = level?.current && performance.now() - level.current.receivedAt < LEVEL_STALE_MS;
+    if (pulse > s.lastPulse && !live) {
       s.level = Math.min(1, s.level + 0.42 + Math.random() * 0.2);
       s.kick = performance.now();
     }
@@ -70,8 +87,10 @@ export function VoiceField({ speaking, pulse }: { speaking: "callee" | "agent" |
       ink = cs.getPropertyValue("--color-text").trim() || "#fff";
       idle = Number(cs.getPropertyValue("--dot-idle")) || 0.13;
     };
-    const resize = () => {
+    // Returns true when the backing store was reset (which also clears it).
+    const resize = (): boolean => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (el.clientWidth === w && el.width === Math.round(w * dpr)) return false;
       w = el.clientWidth;
       size = w / (COLS + (COLS - 1) * GAP_RATIO);
       gap = size * GAP_RATIO;
@@ -81,6 +100,7 @@ export function VoiceField({ speaking, pulse }: { speaking: "callee" | "agent" |
       el.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       readTheme();
+      return true;
     };
 
     let last = performance.now();
@@ -88,15 +108,25 @@ export function VoiceField({ speaking, pulse }: { speaking: "callee" | "agent" |
       const s = sim.current;
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      if (!calm) {
+      const real = level?.current && now - level.current.receivedAt < LEVEL_STALE_MS ? level.current : null;
+      if (real) {
+        // Real loudness: follow the side that is talking, rise fast, fall slower.
+        s.target = real.who === "callee" ? 0 : 1;
+        const goal = Math.min(1, real.rms * 2.2);
+        const rate = goal > s.level ? 18 : 5;
+        s.level += (goal - s.level) * (1 - Math.exp(-dt * rate));
+        // Rings leave the origin on loud onsets, like word kicks do in fallback.
+        if (goal - s.level > 0.25 && now - s.kick > 180) s.kick = now;
+      }
+      if (calm) {
+        s.origin = s.target;
+        s.level = real ? Math.min(1, real.rms * 2.2) : speakingRef.current === "none" ? 0 : 0.55;
+      } else {
         // Envelope decays between words; a critically-damped-ish spring moves the origin.
-        s.level *= Math.exp(-dt * 2.6);
+        if (!real) s.level *= Math.exp(-dt * 2.6);
         const force = (s.target - s.origin) * 90 - s.velocity * 14;
         s.velocity += force * dt;
         s.origin += s.velocity * dt;
-      } else {
-        s.origin = s.target;
-        s.level = speaking === "none" ? 0 : 0.55;
       }
       const t = now / 1000;
       const sinceKick = (now - s.kick) / 1000;
@@ -124,21 +154,31 @@ export function VoiceField({ speaking, pulse }: { speaking: "callee" | "agent" |
     };
 
     resize();
+    // Calm mode has no loop: speaker changes ask for a single still frame.
+    redrawRef.current = () => draw(performance.now());
+    // Only a real size change resets the canvas, and it is redrawn in the same
+    // frame so it never paints blank.
     const ro = new ResizeObserver(() => {
-      resize();
-      if (calm) draw(performance.now());
+      if (!resize()) return;
+      cancelAnimationFrame(raf);
+      draw(performance.now());
     });
     ro.observe(el);
     // Theme switches change --color-text on <html>.
     const mo = new MutationObserver(readTheme);
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-contrast"] });
-    raf = requestAnimationFrame(draw);
+    draw(performance.now());
     return () => {
+      redrawRef.current = null;
       cancelAnimationFrame(raf);
       ro.disconnect();
       mo.disconnect();
     };
-  }, [calm, redrawKey, speaking]);
+  }, [calm]);
+
+  useEffect(() => {
+    if (calm) redrawRef.current?.();
+  }, [calm, speaking]);
 
   return <canvas ref={canvas} className="sp-voice" data-speaking={speaking} aria-hidden="true" />;
 }
