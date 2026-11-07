@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { KeyboardAvoidingView, ScrollView, Text, View, type TextInputInstance } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, Text, View, type TextInputInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { TERMS_VERSION } from "../lib/terms";
 import { em, F, HEADING_SCALE, makeStyles, PAD, small } from "../lib/theme";
@@ -108,6 +108,12 @@ export function Login() {
           )}
           <Btn block label={m.loginBtn} onPress={submit} disabled={!user || !pass} style={styles.btn} />
           <Text style={styles.hint}>{m.loginHint}</Text>
+          <View style={styles.switch}>
+            <Text style={styles.switchText}>{m.newHere}</Text>
+            <Pressable accessibilityRole="button" onPress={() => store.openSignup()} hitSlop={8} style={styles.link}>
+              <Text style={styles.linkText}>{m.createAccount}</Text>
+            </Pressable>
+          </View>
           {termsOk ? (
             <Btn kind="ghost" label={m.termsL} onPress={() => setReading(true)} style={styles.termsBtn} />
           ) : null}
@@ -129,4 +135,8 @@ const useStyles = makeStyles((C) => ({
   btn: { marginTop: 4, height: 48 },
   hint: { ...small(13), color: C.dim, textAlign: "center", marginTop: 4 },
   termsBtn: { alignSelf: "center" },
+  switch: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "center", columnGap: 6 },
+  switchText: { ...small(14), color: C.muted },
+  link: { minHeight: 44, justifyContent: "center" },
+  linkText: { fontFamily: F.medium, fontSize: 14, color: C.accent, textDecorationLine: "underline" },
 }));

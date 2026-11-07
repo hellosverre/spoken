@@ -5,6 +5,8 @@ import { Call, confirmEndCall } from "../components/Call";
 import { Home } from "../components/Home";
 import { Intro } from "../components/Intro";
 import { Login } from "../components/Login";
+import { Plans } from "../components/Plans";
+import { Signup } from "../components/Signup";
 import type { Screen } from "../lib/store";
 import { ease, makeStyles } from "../lib/theme";
 import { MOBILE_COPY } from "../lib/copy-mobile";
@@ -37,6 +39,8 @@ export default function Device() {
         if (!s.sheetOpen) confirmEndCall(store, MOBILE_COPY[s.lang]);
       } else if (s.screen === "home" && s.tab !== "home") store.setTab("home");
       else if (s.screen === "intro") store.skipIntro();
+      else if (s.screen === "signup") store.openLogin();
+      else if (s.screen === "plans") store.openSignup();
       else return false;
       return true;
     });
@@ -50,6 +54,12 @@ export default function Device() {
       </Layer>
       <Layer name="login" screen={screen}>
         <Login />
+      </Layer>
+      <Layer name="signup" screen={screen}>
+        <Signup />
+      </Layer>
+      <Layer name="plans" screen={screen}>
+        <Plans />
       </Layer>
       <Layer name="home" screen={screen}>
         <Home />

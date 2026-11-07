@@ -8,9 +8,10 @@ import { HISTORY_MAX, historyRepo, type CallRecord } from "./history";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 import { configureRealCalls, isLive, newDeviceId, planRealCall, realEnabled, type LiveIO } from "./real-call";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
+import { DEMO_MINUTES, PLANS, type Minutes, type PlanId } from "./plans";
 import { TERMS_VERSION } from "./terms";
 
-export type Screen = "intro" | "login" | "home" | "call";
+export type Screen = "intro" | "login" | "signup" | "plans" | "home" | "call";
 export type ThemePref = "system" | "dark" | "light";
 
 /** Mobile only: who is using the app. Kept on this device; not sent anywhere yet. */
@@ -91,6 +92,8 @@ export interface State {
   haptics: boolean;
   /** The terms of use this phone agreed to, and when. Login asks again when TERMS_VERSION changes. */
   terms: { version: string; at: string } | null;
+  /** Call minutes on the account: dummy numbers for the showcase, nothing is charged. */
+  minutes: Minutes;
 }
 
 type Pending = { type: "repeat" } | { type: "thanks" } | { type: "text"; text: string };
@@ -131,6 +134,7 @@ const INITIAL: State = {
   boldText: false,
   haptics: true,
   terms: null,
+  minutes: DEMO_MINUTES,
 };
 
 const HANG = Symbol("hang");
@@ -140,7 +144,7 @@ const PREFS_KEY = "spoken-prefs";
 /** This phone's id for the server (profile, contacts, call history). Made once, as on the web. */
 const DEVICE_KEY = "spoken-device";
 const DEMO_LOGIN = { user: "demo", pass: "demo" };
-type SavedPrefs = Pick<State, "themePref" | "profile" | "serverCalls" | "passcode" | "highContrast" | "haptics" | "terms">;
+type SavedPrefs = Pick<State, "themePref" | "profile" | "serverCalls" | "passcode" | "highContrast" | "haptics" | "terms" | "minutes">;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Wait two frames so a reset state is drawn before the next one is set. */
@@ -272,6 +276,7 @@ export class SpokenStore {
           highContrast: p.highContrast === true,
           haptics: p.haptics ?? s.haptics,
           terms: p.terms ?? s.terms,
+          minutes: p.minutes ?? s.minutes,
         }));
     } catch {}
     this.syncRealCalls();
@@ -362,12 +367,45 @@ export class SpokenStore {
     if (user.trim().toLowerCase() !== DEMO_LOGIN.user || pass !== DEMO_LOGIN.pass) return false;
     if (!this.termsOk()) {
       if (!agreed) return false;
-      this.set({ terms: { version: TERMS_VERSION, at: new Date().toISOString() } });
-      this.savePrefs();
+      this.acceptTerms();
     }
     this.set({ authed: true });
     this.goHome();
     return true;
+  }
+
+  private acceptTerms() {
+    this.set({ terms: { version: TERMS_VERSION, at: new Date().toISOString() } });
+    this.savePrefs();
+  }
+
+  /* Sign-up and plans: a showcase. Nothing is sent or charged; a plan logs in as the demo user. */
+
+  openSignup() {
+    this.set({ screen: "signup" });
+  }
+
+  openLogin() {
+    this.set({ screen: "login" });
+  }
+
+  /** The form was filled in (checked in Signup.tsx) and the terms agreed: on to the plans. */
+  signup() {
+    this.acceptTerms();
+    this.set({ screen: "plans" });
+  }
+
+  choosePlan(id: PlanId) {
+    const plan = PLANS.find((p) => p.id === id) ?? PLANS[0];
+    this.set({ minutes: { plan: plan.id, total: plan.minutes, used: 0 }, authed: true });
+    this.savePrefs();
+    this.goHome();
+  }
+
+  /** Profile → Add minutes. No payment: the minutes are just added. */
+  addMinutes(n: number) {
+    this.set((s) => ({ minutes: { ...s.minutes, total: s.minutes.total + n } }));
+    this.savePrefs();
   }
 
   logout() {
@@ -483,9 +521,9 @@ export class SpokenStore {
   }
 
   private savePrefs() {
-    const { themePref, profile, serverCalls, passcode, highContrast, haptics, terms } = this.state;
+    const { themePref, profile, serverCalls, passcode, highContrast, haptics, terms, minutes } = this.state;
     this.syncRealCalls();
-    const saved: SavedPrefs = { themePref, profile, serverCalls, passcode, highContrast, haptics, terms };
+    const saved: SavedPrefs = { themePref, profile, serverCalls, passcode, highContrast, haptics, terms, minutes };
     AsyncStorage.setItem(PREFS_KEY, JSON.stringify(saved)).catch(() => {});
   }
 

@@ -6,6 +6,7 @@ import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { FeedbackSheet } from "./Feedback";
 import { historyCount, HistorySheet } from "./History";
+import { MinutesCard } from "./Minutes";
 import { TermsSheet } from "./Terms";
 import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
@@ -95,6 +96,9 @@ export function Profile() {
         </List>
       </View>
       <HistorySheet open={historyOpen} onClose={() => setHistoryOpen(false)} />
+
+      <SectionTitle icon="phone" title={m.minutesH} />
+      <MinutesCard />
 
       <SectionTitle icon="person" title={m.you} />
       <View style={styles.group}>
