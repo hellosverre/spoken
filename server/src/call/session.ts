@@ -1026,8 +1026,10 @@ export class CallSession {
     }, 8000);
   }
 
-  private async requestApproval(question: string, options: string[], kind: PendingApproval["kind"], spoken?: string) {
+  private async requestApproval(rawQuestion: string, options: string[], kind: PendingApproval["kind"], spoken?: string) {
     if (this.pending || this.ended) return;
+    // Internal LLM hints («⟨tid: 18:00⟩», «⟨usikre ord: …⟩») never reach the user's card.
+    const question = rawQuestion.replace(/\s*⟨[^⟩]*⟩/g, "").replace(/\s+»/g, "»").trim();
     // One natural wait line per call, a shorter one the second time, then silence (+ typing sound).
     const name = this.init.profile.name || "brukeren";
     if (spoken === undefined) {
