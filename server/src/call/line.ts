@@ -20,6 +20,8 @@ export interface LineEvents {
   calleeWords?(segmentId: string, text: string, words: Word[]): void;
   /** A slower, more accurate transcript of the same segment (batch STT). */
   calleeRevised?(segmentId: string, text: string, words: Word[]): void;
+  /** Batch STT heard only background noise in this segment: the realtime line was made up. */
+  calleeNoise?(segmentId: string): void;
   ended(reason: string): void;
   /** Line-level facts for the per-call debug log (latency, webhooks, media format). */
   debug?(kind: string, data: Record<string, unknown>): void;
@@ -46,4 +48,6 @@ export interface CallLine {
   silenceMs?(): number;
   /** True if this line sends calleeRevised for segments. */
   readonly revises?: boolean;
+  /** True on a real phone line: the person answering speaks first, so we wait for their greeting. */
+  readonly answersFirst?: boolean;
 }

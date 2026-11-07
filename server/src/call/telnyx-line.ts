@@ -7,14 +7,13 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ScribeStream } from "../voice/scribe.ts";
 import { toSpeakable } from "../voice/speakable.ts";
+import { batchVerdict, meanConf } from "./batch-verdict.ts";
 import { transcribeSegment } from "../voice/scribe-batch.ts";
 import { tts } from "../voice/tts.ts";
 import { alawToUlaw, g711ToPcm16, holdMusic, levelOf, pcmRms, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
 import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
 
 const FRAME = 160; // 20 ms of µ-law at 8 kHz
-// Number words after toSpeakable(): what the batch second opinion is allowed to correct.
-const NUMBERISH = /^(\d+|null|en|ett|én|to|tre|fire|fem|seks|sju|syv|åtte|ni|ti|elleve|tolv|tretten|fjorten|femten|seksten|sytten|atten|nitten|tjue\p{L}*|tretti\p{L}*|førti\p{L}*|femti\p{L}*|seksti\p{L}*|sytti\p{L}*|åtti\p{L}*|nitti\p{L}*|hundre\p{L}*|tusen|halv|kvart|kroner|krone|kr)$/iu;
 const LEAD_MS = 120; // how far ahead of real time we send, to ride out jitter
 // Call #5: 35 barge-ins, ~10 were laughs/noise. Now 200 ms of loud audio, and partials must be
 // real words, not «mm»/«ja».
@@ -85,6 +84,7 @@ export interface TelnyxLineOpts {
 
 export class TelnyxLine implements CallLine {
   readonly revises = STT_BATCH;
+  readonly answersFirst = true;
   private ev!: LineEvents;
   private controlId = "";
   private readonly token = crypto.randomUUID().replace(/-/g, "");
@@ -110,6 +110,7 @@ export class TelnyxLine implements CallLine {
   private waitKind: "typing" | "music" = "typing";
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
+  private rtConf = new Map<string, number>(); // segment id → mean realtime word confidence
   private inboundAlaw = false;
   private lastVoicedAt = 0;
   private lastPartialAt = 0;
@@ -281,7 +282,7 @@ export class TelnyxLine implements CallLine {
       },
       words: (text, words) => {
         const id = this.committedIds.get(text.trim());
-        if (id) this.ev.calleeWords?.(id, text, words);
+        if (id) { const c = meanConf(words); if (c !== undefined) this.rtConf.set(id, c); this.ev.calleeWords?.(id, text, words); }
       },
       error: (msg) => console.error(`[scribe] ${msg}`),
     }, this.o.keyterms);
@@ -355,23 +356,14 @@ export class TelnyxLine implements CallLine {
     const t0 = Date.now();
     transcribeSegment(pcm, this.o.keyterms)
       .then((r) => {
-        // Numbers spelled out first, so «110 krona» and «hundre og åttini kroner» can be compared.
-        const norm = (t: string) => toSpeakable(t).toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
-        this.ev.debug?.("stt_batch", { id, realtime, batch: r.text, ms: Date.now() - t0 });
-        this.saveSegment({ ...seg, batch: r.text, batchMs: Date.now() - t0 });
-        // Only replace realtime when batch looks like the same utterance (guards bad windows).
-        const n = (t: string) => norm(t).split(" ").filter(Boolean).length;
-        // and must share at least one word ("I Storo." → "Bestill levering" on call #4 was the wrong window).
-        // Same stem counts («krona»/«kroner»): first 4 letters.
-        const stem = (w: string) => w.slice(0, 4);
-        const rw = new Set(norm(realtime).split(" ").map(stem));
-        const overlap = norm(r.text).split(" ").some((w) => w && rw.has(stem(w)));
-        const plausible = overlap && n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
-        // Batch is only better at numbers (prices, times); elsewhere it made lines worse on call
-        // c_ba0df20d («hvor skal vi ha adressen» → «hvor så var adressen»). Keep realtime otherwise.
-        const nums = (t: string) => norm(t).split(" ").filter((w) => NUMBERISH.test(w)).join(" ");
-        const numbersDiffer = !!nums(r.text) && nums(r.text) !== nums(realtime);
-        if (r.text && plausible && numbersDiffer && norm(r.text) !== norm(realtime)) this.ev.calleeRevised?.(id, r.text, r.words);
+        const rtConf = this.rtConf.get(id);
+        const batchConf = meanConf(r.words);
+        const round = (n?: number) => n === undefined ? undefined : Math.round(n * 100) / 100;
+        this.ev.debug?.("stt_batch", { id, realtime, batch: r.text, rtConf: round(rtConf), batchConf: round(batchConf), ms: Date.now() - t0 });
+        this.saveSegment({ ...seg, batch: r.text, rtConf: round(rtConf), batchConf: round(batchConf), batchMs: Date.now() - t0 });
+        const v = batchVerdict(realtime, r.text, rtConf, batchConf);
+        if (v === "noise") this.ev.calleeNoise?.(id);
+        else if (v === "revise") this.ev.calleeRevised?.(id, r.text, r.words);
       })
       .catch((e) => console.warn("[scribe-batch]", (e as Error).message));
   }

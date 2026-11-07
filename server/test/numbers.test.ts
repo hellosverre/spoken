@@ -63,3 +63,33 @@ test("the LLM sees «15 eller 50» for an unsure 15", async () => {
   expect(seen.some((a) => a.includes("uklart tall: 15 eller 50"))).toBe(true);
   await s.finish("test");
 });
+
+test("a line batch calls noise is taken back and not answered", async () => {
+  let replies = 0;
+  const llm: LlmProvider = {
+    name: "fake",
+    clarify: async () => ({ summary: "", questions: [] }),
+    plan: async () => ({ calleeName: "", goal: "", willShare: [], needsApprovalFor: [] }),
+    summarize: async () => ({ outcome: "partial", summary: "", details: {} }),
+    async *reply() { replies++; await Bun.sleep(300); yield "Beklager, hva sa du?"; },
+  };
+  const plan: Plan = {
+    taskId: "t", callee: { name: "Domino's", phone: "+4722000001", source: "lookup" },
+    goal: "bestille pizza", opening: "", willShare: ["name"], needsApprovalFor: [], voiceId: "v",
+  };
+  const line = new Line();
+  const s = new CallSession({ callId: `z_${Math.random()}`, taskId: "t", plan, profile: { name: "Sverre", hearCall: true, personality: "warm", lang: "no" }, line, llm });
+  const events: { type: string; id?: string; text?: string }[] = [];
+  s.subscribe((e) => events.push(e as { type: string; id?: string; text?: string }));
+  await s.start();
+  await Bun.sleep(30);
+  const spokenBefore = line.spoken.length;
+  line.ev.calleeFinal("c9", "Jeg vet ikke hva jeg skal gjøre.");
+  line.ev.calleeWords?.("c9", "Jeg vet ikke hva jeg skal gjøre.", [{ text: "Jeg", confidence: 0.4 }]);
+  await Bun.sleep(100);
+  line.ev.calleeNoise?.("c9");
+  await Bun.sleep(1500);
+  expect(line.spoken.length).toBe(spokenBefore); // nothing said in answer to the made-up line
+  expect(events.some((e) => e.type === "transcript" && e.id === "c9" && e.text === "")).toBe(true); // UI drops it
+  await s.finish("test");
+});

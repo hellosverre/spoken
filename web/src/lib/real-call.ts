@@ -92,6 +92,8 @@ export interface LiveIO extends CallIO {
   attach(sink: { instruction(text: string): void; hangup(): void } | null): void;
 }
 
+// Batch STT second opinion lands ~0.5–0.9 s after a callee line; wait this long for it.
+const REVISION_WAIT_MS = 1200;
 const NEGATIVE = /^(nei|no|avslå|decline|legg på)$/i;
 
 /* Demo passcode for real calls. Asked once (a tiny browser prompt) and kept in localStorage;
@@ -209,6 +211,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   let chain: Promise<void> = Promise.resolve();
   const queue = (fn: () => Promise<void>) => { chain = chain.then(fn).catch(() => {}); };
   const shown = new Map<string, string>(); // transcript id → text shown so far
+  const them = new Map<string, { first: string; text: string; revised: boolean }>(); // callee lines
   let connected = false;
 
   let finished = false;
@@ -224,8 +227,13 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
         }
         case "transcript": {
           const t = e as Extract<LiveEvent, { type: "transcript" }>;
-          // Agent: show when it starts speaking. Callee: the first final version (later STT
-          // corrections reuse the id; this UI appends lines, so they are skipped).
+          // Agent: show when it starts speaking. Callee: the first final, held briefly in queue
+          // order so the batch STT correction (same id, ~0.5–0.9 s later) can replace it; "" = noise.
+          if (t.who === "callee" && t.final && them.has(t.id)) {
+            const h = them.get(t.id)!;
+            if (t.text.trim() !== h.first) { h.text = t.text.trim(); h.revised = true; }
+            break;
+          }
           if (!t.text.trim()) break;
           if (t.who === "agent") {
             // One id per agent turn: the first clause opens the bubble, later clauses extend it.
@@ -240,7 +248,13 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           }
           if (!t.final || shown.has(t.id)) break;
           shown.set(t.id, t.text);
-          queue(() => io.say("them", t.text));
+          const h = { first: t.text.trim(), text: t.text.trim(), revised: false };
+          them.set(t.id, h);
+          const until = Date.now() + REVISION_WAIT_MS;
+          queue(async () => {
+            while (!h.revised && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
+            if (h.text) await io.say("them", h.text);
+          });
           break;
         }
         case "approval_request": {

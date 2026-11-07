@@ -71,6 +71,15 @@ const SPEAK_AFTER_QUESTION_MS = Number(process.env.SPEAK_AFTER_QUESTION_MS ?? 50
 const SPEAK_AFTER_SILENCE_MS = Number(process.env.SPEAK_AFTER_SILENCE_MS ?? 800);
 // A one- or two-word line waits this long for the rest of the sentence before we answer.
 const HOLD_SHORT_MS = Number(process.env.HOLD_SHORT_MS ?? 700);
+// Opening. In Norway the person answering speaks first («Domino's, du snakker med Vil»); our
+// disclosure used to start on connect and get cut by that greeting (c_28dd2d9a6285).
+// Wait for the greeting to end (GREETING_GAP_MS of quiet), or GREETING_WAIT_MS if nobody speaks,
+// never longer than GREETING_MAX_MS. The disclosure itself can't be interrupted: they must hear it.
+const GREETING_WAIT_MS = Number(process.env.GREETING_WAIT_MS ?? 3000);
+const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
+const GREETING_MAX_MS = Number(process.env.GREETING_MAX_MS ?? 8000);
+// After the disclosure: give them a moment to answer («ja?», «nei takk») before stating the errand.
+const AFTER_OPENING_MS = Number(process.env.AFTER_OPENING_MS ?? 2000);
 // Speculative LLM on partials: 0 of 62 matched on call #5, so off unless SPECULATE=1.
 const SPECULATE = process.env.SPECULATE === "1";
 // Callee says only «ja»/«mm» while we're mid-turn: listening noise, not a new turn.
@@ -185,6 +194,10 @@ export class CallSession {
   private approvalCredit = 0;
   private startedAt = 0;
   private connectedAt = 0;
+  private openingPending = false; // from connect until the disclosure has been said
+  private openingSpeaking = false; // the disclosure is playing: no barge-in
+  private heardDuringOpening = false;
+  private lastGreeting = "";
   private ended = false;
   private endTag?: { outcome: Outcome; summary: string };
   private maxTimer?: ReturnType<typeof setTimeout>;
@@ -328,6 +341,7 @@ export class CallSession {
           this.onWords(id, words);
         },
         calleeRevised: (id, text, words) => this.onRevised(id, text, words),
+        calleeNoise: (id) => this.onNoise(id),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
       });
@@ -359,12 +373,50 @@ export class CallSession {
   private async sayOpening() {
     // The disclosure is generated here, not by the model, and always goes first.
     const opening = ensureDisclosure(this.init.plan.opening, this.init.profile.name);
-    await this.say(opening);
+    const line = this.init.line;
+    if (!line.answersFirst) { await this.say(opening); return; }
+    this.openingPending = true;
+    const greeted = await this.waitForGreeting();
+    if (this.ended) return;
+    this.debug("opening_start", { greeted, waitedMs: Date.now() - this.connectedAt });
+    this.openingSpeaking = true;
+    try { await this.say(opening); } finally { this.openingSpeaking = false; this.openingPending = false; }
+    if (this.ended) return;
+    // They spoke over the disclosure («nei», «hvem er det?»): answer that now.
+    if (this.heardDuringOpening) { this.requestTurn(); return; }
+    // Otherwise give them a moment, then state the errand ourselves.
+    const at = this.lastCalleeAt;
+    setTimeout(() => {
+      if (this.ended || this.lastCalleeAt !== at || this.turnRunning || this.speaking || this.pending) return;
+      if ((line.silenceMs?.() ?? Infinity) < 300) return; // they're talking; their final will start the turn
+      this.debug("after_opening_silence", {});
+      this.requestTurn();
+    }, AFTER_OPENING_MS);
+  }
+
+  /** Resolves when the callee's greeting is over (true), or nobody greeted in time (false). */
+  private waitForGreeting(): Promise<boolean> {
+    const start = Date.now();
+    return new Promise((resolve) => {
+      const tick = setInterval(() => {
+        const waited = Date.now() - start;
+        const quiet = this.init.line.silenceMs?.() ?? Infinity;
+        const greeted = this.lastCalleeAt >= start;
+        // «Hei, dette er …» stops mid-sentence: give them twice the gap to finish it.
+        const gap = greeted && soundsUnfinished(this.lastGreeting) ? 2 * GREETING_GAP_MS : GREETING_GAP_MS;
+        const done = this.ended
+          || (greeted && quiet >= gap)
+          || (!greeted && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
+          || waited >= GREETING_MAX_MS;
+        if (done) { clearInterval(tick); resolve(greeted); }
+      }, 50);
+    });
   }
 
   // ---------- callee side ----------
 
   private onCalleeSpeech() {
+    if (this.openingSpeaking) return; // the disclosure always plays to the end
     // Barge-in: the callee talks over us → stop audio at once and drop the rest of the turn.
     if (this.speaking) {
       console.log(`[barge-in] callee spoke over the agent; TTS stopped (call ${this.callId})`);
@@ -388,6 +440,13 @@ export class CallSession {
     this.history.push(item);
     this.segItems.set(id, item);
     this.checkMessage(id, clean);
+    // Greeting, or talk over the disclosure: it's in the history; sayOpening decides what's next.
+    if (this.openingPending) {
+      if (this.openingSpeaking) this.heardDuringOpening = true;
+      else this.lastGreeting = clean;
+      this.debug("held_for_opening", { text: clean, speaking: this.openingSpeaking });
+      return;
+    }
     if ((this.turnRunning || this.speaking) && CALLEE_BACKCHANNEL.test(clean)) {
       this.debug("callee_backchannel_ignored", { text: clean });
       return;
@@ -520,6 +579,24 @@ export class CallSession {
     if (this.gate?.id === id) this.gate.go();
   }
 
+  /** Batch STT heard only noise: the line never happened. Take it back out and don't answer it. */
+  private onNoise(id: string) {
+    const item = this.segItems.get(id);
+    if (!item || this.ended) return;
+    const before = item.text.replace(/\s*⟨.*?⟩/g, "");
+    const answering = this.turnRunning && !this.turnSpoke && this.history.at(-1) === item;
+    const i = this.history.indexOf(item);
+    if (i >= 0) this.history.splice(i, 1);
+    const t = this.transcript.findIndex((l) => l.who === "callee" && l.text === before);
+    if (t >= 0) this.transcript.splice(t, 1);
+    this.segItems.delete(id);
+    this.emit({ type: "transcript", id, who: "callee", text: "", final: true, at: Date.now() });
+    this.debug("stt_noise", { id, text: before });
+    if (this.gate?.id === id) { clearTimeout(this.gate.timer); this.gate = undefined; }
+    if (this.spec) this.dropSpec("noise");
+    if (answering) { this.turnAbort?.abort(); this.wantTurn = false; }
+  }
+
   /** Wait briefly for word confidences (and, if unsure, the batch revision) before answering. */
   private startGate(id: string) {
     if (!this.init.line.revises) { this.requestTurn(); return; }
@@ -537,7 +614,7 @@ export class CallSession {
   // ---------- speculative turn ----------
 
   private canSpeculate() {
-    return this.status === "connected" && !this.pending && !this.turnRunning && !this.speaking && !this.ended;
+    return this.status === "connected" && !this.openingPending && !this.pending && !this.turnRunning && !this.speaking && !this.ended;
   }
 
   private dropSpec(why: string) {
