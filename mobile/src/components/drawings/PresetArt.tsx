@@ -10,16 +10,14 @@ import { Drawing, STROKE } from "./base";
 type Art = (t: Tint) => ReactNode;
 
 const ART: Partial<Record<PresetIcon, Art>> = {
-  // A whole pizza, one slice pulled out, with pepperoni and the cut lines.
+  // One slice: crust along the top, cheese body, pepperoni.
   pizza: (t) => (
     <>
-      <Path d="M29 35V13a22 22 0 1 0 19.05 11z" fill={t.fg} fillOpacity={0.14} stroke={t.fg} {...STROKE} />
-      <Path d="M29 35L10 46M29 35L22 56" fill="none" stroke={t.fg} strokeOpacity={0.45} {...STROKE} />
-      <Path d="M34 30V9a21 21 0 0 1 18.19 10.5z" fill={t.fg} fillOpacity={0.24} stroke={t.fg} {...STROKE} />
-      <Circle cx={18} cy={30} r={3} fill={t.fg} />
-      <Circle cx={31} cy={46} r={3} fill={t.fg} />
-      <Circle cx={18} cy={45} r={2.4} fill={t.fg} />
-      <Circle cx={40} cy={19} r={2.4} fill={t.fg} />
+      <Path d="M32 57L10.5 18.5A25 25 0 0 1 53.5 18.5z" fill={t.fg} fillOpacity={0.14} stroke={t.fg} {...STROKE} />
+      <Path d="M13.8 24.4A19 19 0 0 1 50.2 24.4" fill="none" stroke={t.fg} strokeOpacity={0.55} {...STROKE} />
+      <Circle cx={25} cy={31} r={3.6} fill={t.fg} fillOpacity={0.85} />
+      <Circle cx={38.5} cy={33} r={3.2} fill={t.fg} fillOpacity={0.85} />
+      <Circle cx={31.5} cy={45} r={2.8} fill={t.fg} fillOpacity={0.85} />
     </>
   ),
   // A clipboard with a cross and a few lines.
@@ -45,14 +43,14 @@ const ART: Partial<Record<PresetIcon, Art>> = {
       <Path d="M52 12c3 3 3 8 0 11M57 8c5 5 5 14 0 19" fill="none" stroke={t.fg} strokeOpacity={0.6} {...STROKE} />
     </>
   ),
-  // Scissors crossing a comb.
+  // Open scissors: two finger rings, blades crossing at the pivot.
   scissors: (t) => (
     <>
-      <Rect x={30} y={10} width={10} height={44} rx={3} fill={t.fg} fillOpacity={0.12} stroke={t.fg} {...STROKE} transform="rotate(28 35 32)" />
-      <Path d="M27 19h-6M26 25h-6M25 31h-6M24 37h-6" stroke={t.fg} strokeOpacity={0.55} {...STROKE} transform="rotate(28 35 32) translate(14 0)" />
-      <Circle cx={18} cy={46} r={6} fill={t.bg} stroke={t.fg} {...STROKE} />
-      <Circle cx={30} cy={52} r={6} fill={t.bg} stroke={t.fg} {...STROKE} />
-      <Path d="M22 41l26-28M34 47l12-32" stroke={t.fg} {...STROKE} strokeWidth={2.4} />
+      <Path d="M25 43L42.5 8L45.5 10.5L29.5 44.5z" fill={t.fg} fillOpacity={0.16} stroke={t.fg} {...STROKE} />
+      <Path d="M39 43L21.5 8L18.5 10.5L34.5 44.5z" fill={t.fg} fillOpacity={0.16} stroke={t.fg} {...STROKE} />
+      <Circle cx={20} cy={50} r={7} fill={t.bg} stroke={t.fg} {...STROKE} />
+      <Circle cx={44} cy={50} r={7} fill={t.bg} stroke={t.fg} {...STROKE} />
+      <Circle cx={32} cy={32.5} r={2.2} fill={t.fg} />
     </>
   ),
 };
