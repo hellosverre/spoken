@@ -1,8 +1,14 @@
 // Fact strip: the price, time, address and reference number heard on the call, pinned above the
 // transcript. Extraction is plain code (no LLM). A fact is «confirmed» only when a second source
 // agrees: the batch STT heard the same, the callee said it twice, or said yes to our read-back.
-import type { FactItem, FactKind } from "../../../shared/contract.ts";
+import type { FactItem as ContractFactItem, FactKind as ContractFactKind } from "../../../shared/contract.ts";
 import { parseTimes } from "../time.ts";
+
+export type FactKind = ContractFactKind;
+export type FactItem = ContractFactItem;
+
+/** One item of Scribe's committed_transcript_entities. */
+export interface ScribeEntity { text: string; entity_type: string; start_char?: number; end_char?: number }
 
 export interface FactCandidate { kind: FactKind; value: string }
 
@@ -98,6 +104,18 @@ function refs(text: string): string[] {
   return out;
 }
 
+const PHONE_LABEL = "(?:ring|ringe|telefon(?:nummer)?|tlf\\.?|mobil(?:nummer)?|nummer|nummeret|number|phone|call|\\+47|0047)";
+
+function phones(text: string): string[] {
+  const out: string[] = [];
+  // Eight digits (22 33 44 55) only next to a phone word: a bare 8-digit run could be anything.
+  for (const m of text.matchAll(new RegExp(`\\b${PHONE_LABEL}(?:\\s+\\p{L}{1,6}){0,2}[^\\p{L}\\d+]{0,6}(?:\\+47\\s?|0047\\s?)?(\\d{2}[ -]?\\d{2}[ -]?\\d{2}[ -]?\\d{2}|\\d{3}[ -]?\\d{2}[ -]?\\d{3})(?![\\d]|\\s?(?:kr|kroner))`, "giu"))) {
+    const v = normalizePhone(m[1]!);
+    if (v) out.push(v);
+  }
+  return out;
+}
+
 /** Every price, time, address and reference number in one sentence, in the order they appear per kind. */
 export function extractFacts(text: string): FactCandidate[] {
   const clean = text.replace(/\s*⟨[^⟩]*⟩/g, "");
@@ -106,15 +124,62 @@ export function extractFacts(text: string): FactCandidate[] {
     ...times(clean).map((value) => ({ kind: "time" as const, value })),
     ...addresses(clean).map((value) => ({ kind: "address" as const, value })),
     ...refs(clean).map((value) => ({ kind: "ref" as const, value })),
+    ...phones(clean).map((value) => ({ kind: "phone" as const, value })),
   ];
   const seen = new Set<string>();
   return found.filter((f) => { const k = `${f.kind}|${f.value}`; return seen.has(k) ? false : (seen.add(k), true); });
 }
 
+/** Scribe entity_type → fact kind. Unlisted types (credit_card, dob, medical…) never reach the strip. */
+export function entityKind(type: string): FactKind | undefined {
+  const t = type.toLowerCase();
+  if (/phone|telephone/.test(t)) return "phone";
+  if (/^(time|time_of_day|clock_time)$/.test(t)) return "time";
+  if (/^(date|day|date_interval)$/.test(t)) return "date";
+  if (/address|street|location_(street|address|zip)|postal|zip/.test(t)) return "address";
+  if (/money|currency|price|amount|cost/.test(t)) return "price";
+  if (/^(name|name_given|name_family|person|person_name|full_name)$/.test(t)) return "name";
+  if (/document_reference|generic_id|order|booking|reference|confirmation/.test(t)) return "ref";
+  return undefined;
+}
+
+/** «22334455» / «+47 22 33 44 55» → «22 33 44 55» / «+47 22 33 44 55»; undefined if it isn't a phone number. */
+export function normalizePhone(raw: string): string | undefined {
+  const plus = /^\s*(\+|00)/.test(raw);
+  let d = raw.replace(/\D/g, "");
+  if (plus) d = d.replace(/^(?:00)/, "");
+  const cc = plus && d.startsWith("47") && d.length === 10 ? "+47 " : "";
+  if (cc) d = d.slice(2);
+  if (d.length === 8) return cc + d.replace(/(\d\d)(?=\d)/g, "$1 ").trim();
+  if (d.length >= 6 && d.length <= 15) return (plus ? "+" : "") + d;
+  return undefined;
+}
+
+/** Entities → candidates, normalised so they dedupe against the regex facts («250 kr», «kl. 18:00»). */
+export function entitiesToFacts(entities: ScribeEntity[]): FactCandidate[] {
+  const out: FactCandidate[] = [];
+  for (const e of entities) {
+    const kind = entityKind(e.entity_type);
+    const text = e.text?.trim();
+    if (!kind || !text) continue;
+    let value: string | undefined;
+    switch (kind) {
+      case "phone": value = normalizePhone(text); break;
+      case "price": value = prices(text)[0] ?? (/\d/.test(text) ? text : undefined); break;
+      case "time": value = times(text)[0] ?? (/\d/.test(text) ? text : undefined); break;
+      case "address": value = text.replace(/\s+/g, " "); break;
+      case "ref": value = refs(`ref ${text}`)[0] ?? (/\d{3}/.test(text) ? text.replace(/\s+/g, "").toUpperCase() : undefined); break;
+      default: value = text.replace(/\s+/g, " ");
+    }
+    if (value) out.push({ kind, value });
+  }
+  return out;
+}
+
 const YES = /^\W*(ja|jo|jepp|stemmer|det stemmer|riktig|korrekt|nettopp|helt riktig|yes|yeah|correct|that's right|right|exactly)\b/i;
 export const isYes = (t: string) => YES.test(t.trim());
 
-const MAX_ITEMS = 6;
+const MAX_ITEMS = 8;
 const key = (f: FactCandidate) => `${f.kind}|${f.value.toLowerCase().replace(/\s/g, "")}`;
 
 interface Entry { kind: FactKind; value: string; confirmed: boolean; segs: Set<string> }
@@ -130,6 +195,7 @@ export class FactTracker {
   private text = new Map<string, string>(); // callee segment id → last text
   private readBack: string[] = []; // entry keys the agent just repeated
   private snapshot = "";
+  private pendingEntities = new Map<string, ScribeEntity[]>(); // entities that arrived before their line
 
   /** Feed one final transcript line. Returns the new item list if it changed, else undefined. */
   observe(who: "callee" | "agent", id: string, text: string): FactItem[] | undefined {
@@ -139,9 +205,55 @@ export class FactTracker {
     if (prev !== undefined) { this.revisedSegs.add(id); this.dropSeg(id); } // revised or re-emitted with new words
     this.text.set(id, text);
     const facts = extractFacts(text);
+    const pending = this.pendingEntities.get(text.trim());
+    if (pending) { this.pendingEntities.delete(text.trim()); facts.push(...entitiesToFacts(pending)); }
+    const keys = this.addFacts(id, facts);
+    this.segFacts.set(id, keys);
+    // A bare «ja» after our read-back confirms what we read back.
+    if (!facts.length && isYes(text)) for (const k of this.readBack) { const e = this.entries.get(k); if (e) e.confirmed = true; }
+    if (text.trim()) this.readBack = [];
+    return this.changed();
+  }
+
+  /** Scribe's committed_transcript_entities for a callee line (matched to its segment by text). */
+  observeEntities(text: string, entities: ScribeEntity[]): FactItem[] | undefined {
+    const facts = entitiesToFacts(entities);
+    if (!facts.length) return undefined;
+    const t = text.trim();
+    let id: string | undefined;
+    for (const [sid, st] of this.text) if (st.trim() === t) id = sid; // latest match wins
+    if (id === undefined) {
+      if (this.pendingEntities.size >= 10) this.pendingEntities.delete(this.pendingEntities.keys().next().value!);
+      this.pendingEntities.set(t, entities);
+      return undefined;
+    }
+    const keys = this.addFacts(id, facts);
+    this.segFacts.set(id, [...(this.segFacts.get(id) ?? []), ...keys]);
+    return this.changed();
+  }
+
+  /**
+   * Adds candidates for segment `id`. A candidate that is a part of an existing fact of the same kind
+   * («kl. 14:30» inside «i morgen kl. 14:30») folds into it; a richer one swallows the poorer ones.
+   */
+  private addFacts(id: string, facts: FactCandidate[]): string[] {
     const keys: string[] = [];
     for (const f of facts) {
-      const k = key(f);
+      let k = key(f);
+      if (!this.entries.has(k)) {
+        const norm = (v: string) => v.toLowerCase().replace(/\s/g, "");
+        const nf = norm(f.value);
+        const rich = [...this.entries.entries()].find(([, e]) => e.kind === f.kind && norm(e.value).length > nf.length && norm(e.value).includes(nf));
+        if (rich) k = rich[0];
+        else for (const [ok, e] of [...this.entries]) {
+          if (e.kind === f.kind && nf.length > norm(e.value).length && nf.includes(norm(e.value))) {
+            // Fold the poorer entry into the richer one, keeping its segments and confirmation.
+            this.entries.delete(ok);
+            this.entries.set(k, { kind: f.kind, value: f.value, confirmed: e.confirmed, segs: e.segs });
+            for (const keysOf of this.segFacts.values()) { const i = keysOf.indexOf(ok); if (i >= 0) keysOf[i] = k; }
+          }
+        }
+      }
       let e = this.entries.get(k);
       if (!e) { e = { kind: f.kind, value: f.value, confirmed: false, segs: new Set() }; this.entries.set(k, e); }
       // The callee said it in a second, separate segment: that is a repeat.
@@ -149,11 +261,7 @@ export class FactTracker {
       e.segs.add(id);
       keys.push(k);
     }
-    this.segFacts.set(id, keys);
-    // A bare «ja» after our read-back confirms what we read back.
-    if (!facts.length && isYes(text)) for (const k of this.readBack) { const e = this.entries.get(k); if (e) e.confirmed = true; }
-    if (text.trim()) this.readBack = [];
-    return this.changed();
+    return keys.filter((k) => this.entries.has(k));
   }
 
   /** Batch STT finished segment `id` and agreed with realtime (no revision came): second source. */

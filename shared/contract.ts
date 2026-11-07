@@ -191,7 +191,7 @@ export interface CompareState {
 
 // Trust features. Fact strip: the price, time, address and reference number heard on the call, pinned above
 // the transcript. confirmed = a second source agrees (batch STT, the callee repeated it, or said yes to a read-back).
-export type FactKind = "price" | "time" | "address" | "ref";
+export type FactKind = "price" | "time" | "address" | "ref" | "phone" | "date" | "name"; // phone/date/name: Scribe entity detection
 export interface FactItem {
   kind: FactKind;
   value: string; // display text: «250 kr», «kl. 18:00», «Storgata 5», «A-1234»
