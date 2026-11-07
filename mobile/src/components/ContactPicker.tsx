@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, FlatList, Linking, Modal, Platform, Pressable, Text, TextInput, View } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Contacts from "expo-contacts/legacy";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { em, F, makeStyles, PAD, useTheme } from "../lib/theme";
-import { serverUrl } from "../lib/real-call";
+import { api } from "../lib/account";
 import { useSpoken } from "../lib/use-spoken";
 import { Icon } from "./Icon";
 import { e164List } from "./phone";
@@ -75,26 +74,7 @@ function useCopy() {
   return COPY[useSpoken((s) => s.lang)];
 }
 
-/* ---- server ---- */
-
-async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const device = (await AsyncStorage.getItem("spoken-device").catch(() => null)) ?? "";
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 15_000);
-  try {
-    const res = await fetch(serverUrl() + path, {
-      method,
-      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(device ? { "X-Spoken-Device": device } : {}) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/* ---- server (device + account token headers live in lib/account.ts) ---- */
 
 const listSaved = () => api<SavedContact[]>("GET", "/api/contacts");
 const removeSaved = (id: string) => api<{ ok: true }>("DELETE", `/api/contacts/${id}`);
