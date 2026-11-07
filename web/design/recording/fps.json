@@ -1,7 +1,0 @@
-{
-  "throttle": "4x CPU",
-  "avgFps": 60,
-  "p95FrameMs": 16.8,
-  "longFrames": 0,
-  "frames": 240
-}

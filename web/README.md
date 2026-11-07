@@ -1,84 +1,56 @@
-# Spoken web
+# Spoken
 
-Vite + React + TypeScript. Phone first, works at 390 px and 1440 px. Builds with no server: the in-browser mock plays a scripted Domino's call.
+**Du skriver, vi snakker.** You type what you need, and an AI makes the phone call for you. It says it's an AI, shows every word live, and asks you before it agrees to a price, a time or a booking. You can send it new instructions mid-call.
+
+Built for Deaf and nonspeaking people. English and Norwegian.
+
+This is the app UI with two scripted calls (pizza pickup, doctor's appointment). No real call is placed yet.
+
+## Run it
 
 ```bash
-bun install
-bun run dev          # http://localhost:5173, mock mode
-bun run build        # tsc + vite build
-node design/shoot-screens.mjs   # clicks the whole flow headless, screenshots to design/screens/
+npm install
+npm run dev
 ```
 
-`?mockSpeed=3` in the URL speeds the mock call up.
+Open http://localhost:3000. On a wide screen you get the pitch panel next to the phone. On a phone you get just the app.
 
-## Server or mock
+Keys for the projector demo (ignored while typing):
 
-| Env | Effect |
-|---|---|
-| none | In-browser mock (`src/api/mock.ts`, `src/api/mockCall.ts`) |
-| `VITE_API_URL` (+ `VITE_WS_URL`, otherwise derived from it) | Real server over REST + `/api/calls/:id/live` |
-| `VITE_MOCK=1` | Force the mock even with URLs set |
+| Key | Does |
+| --- | --- |
+| D | Play the pizza demo, hands-free |
+| R | Replay the intro |
+| L | Switch English / Norwegian |
 
-Every type comes from `../shared/contract.ts`. The mock emits the same `LiveEvent`s as the server: partial transcript events word by word, a confidence per word, `approval_request`, `note` and `result`.
+The language choice is saved in the browser (`spoken-lang`).
 
-## Where the design goes
+## How it is built
 
-All the visual work happens in `src/theme/`. Nothing in `src/screens` or `src/components` sets a colour, font or size. A theme is a token file plus a skin, layered over a shared structure. `src/main.tsx` picks which theme is active.
+Next.js (App Router) and React, plain CSS, no UI library.
 
-| File | Role |
-|---|---|
-| `src/theme/base.css` | Keep: reset, focus ring, visually-hidden, skip link, reduced-motion override |
-| `src/theme/plain/components.css` | Shared structure: layout and states for every `sp-*` class, using tokens only |
-| `src/theme/plain/tokens.css` | Neutral baseline tokens (not imported by default) |
-| `src/theme/signal/tokens.css` + `skin.css` | **Active:** direction C "Signal". Monochrome, Sora, dot voice field, and the full-screen inverted approval. |
-| `src/components/ui.tsx` → `ICONS` | Custom glyphs. Redraw them in place and keep the names. |
+```
+src/
+  app/            layout (fonts, metadata), page, globals.css, icon
+  components/     Intro, Pitch, Home (chat, demo, settings tabs), Call (transcript, approval sheet)
+  lib/
+    store.ts      all state and the timed flows (intro, chat, call)
+    scenarios.ts  the scripted calls
+    i18n.ts       every string, EN and NO
+    use-spoken.tsx  React hooks over the store
+```
 
-To apply another design (Sverre's mockup), add `src/theme/<name>/tokens.css` + `skin.css` and point the two imports in `main.tsx` at them. Use `[data-theme=light]`, `[data-contrast=high]`, `[data-text=big]` and `[data-motion=reduce]` on `<html>` for the modes.
+The store is a small class read through `useSyncExternalStore`. Each flow carries a run id, so starting a new flow (replay, new chat, hang up) cleanly stops the old one.
 
-The contract between the code and the design is the class names and data attributes:
+## Plugging in real calls
 
-- **Screens:** `.sp-screen[data-screen=onboarding-1|onboarding-2|onboarding-3|home|clarify|plan|plan-blocked|call|result|settings|privacy]`. The call screen also gets `data-status`, `data-approval` and `data-connection`.
-- **Buttons:** `.sp-btn[data-variant=primary|secondary|ghost|danger|yes|no][data-size=sm|md|lg|xl]`, with `data-busy` while loading.
-- **Transcript:** `.sp-line[data-who=callee|agent][data-final][data-recent]` › `.sp-word[data-unsure]`, plus `.sp-caret` while a line is still arriving and `.sp-typing` before the AI speaks.
-- **Approval:** `.sp-approval` (role `alertdialog`) › `.sp-approval__options[data-count]` › `.sp-btn[data-variant=yes|no][data-size=xl]`.
-- **Alerts:** `.sp-flash[data-active=connected|approval|ended]`, the full-screen flash.
+A scenario talks to the call only through two functions (`CallIO` in `src/lib/scenarios.ts`):
 
-Hooks for Glimt (motion and sound): `useAlerts().notify(kind, message)` in `src/lib/alerts.tsx` fires on connected, approval and ended. Add sound there. Each new word mounts a fresh `.sp-word`, so a CSS entrance animation runs once per word.
+- `say(who, text)` puts a line in the transcript, word by word
+- `ask(config)` opens the approval sheet and resolves with your choice
 
-## Motion
+To make real calls, replace the scripted `run()` with one that streams from a call server: call `say` for each transcribed line and `ask` whenever the AI needs your OK. The UI does not need to change.
 
-| Layer | Where | What |
-|---|---|---|
-| Springs | `src/motion/presets.ts` | All spring constants (press, pop, page, drama) in one place |
-| Pages | `App.tsx` `Stage` / `Page` | Routes cross over in one grid cell. A leaving page is `inert`. |
-| Shared morphs | `layoutId="task-box"` (home box → clarify → plan goal), `layoutId="call-surface"` (plan button → `CallSurface` curtain) | Motion layout animations |
-| Lists, result | `motion/Stagger.tsx`, `RevealWords.tsx`, `CountUp.tsx` | Staggered springs, masked word reveal, number count-up |
-| Approval | `components/call/ApprovalCard.tsx` | A spring circle reveal from the bottom, then the question, then JA and NEI, each in turn |
-| Voice field | `components/call/VoiceField.tsx` | Canvas. Each arriving word kicks the energy, rings ripple out, and the origin springs between speakers. |
-| Per-word / ambient CSS | bottom of `theme/signal/skin.css` | Word pop, typing hop and «Et øyeblikk…» pulse, using real springs sampled into CSS `linear()` (`--spring-pop`, `--spring-soft`) |
+## Secrets
 
-**Calm mode** (the app setting or the OS reduced-motion setting, via `useCalm()`): motion is set to `reducedMotion="always"` (fades only), the approval just fades, the canvas draws still frames, numbers don't count, and the CSS animations are cut by `base.css`.
-
-**Performance:** only transform, opacity and clip-path are animated, and the voice field is one canvas paint per frame. `node design/record.mjs` measures the live call at 60 fps average with the CPU throttled 4× (p95 frame 16.8 ms, no frames over 25 ms) and writes `design/recording/` (webm, GIF, frame strips, `fps.json`).
-
-## Structure
-
-| Path | What |
-|---|---|
-| `src/App.tsx` | Providers and the route switch. Anything except onboarding and privacy redirects to onboarding until it's done. |
-| `src/lib/router.tsx` | Hash router, so any static host works without rewrites |
-| `src/state/store.tsx` | One reducer. Settings, profile and places go to localStorage, the current task flow to sessionStorage. |
-| `src/state/useLiveCall.ts` | Turns the live events into what the call screen renders |
-| `src/api/` | `http.ts` (REST + WebSocket that reconnects up to 6 times), `mock.ts`, `config.ts` |
-| `src/i18n/` | `en.ts` holds the keys, `nb.ts` is type-checked against it. Access text with `const { d } = useT(); d.home.title`. |
-| `src/lib/alerts.tsx` | Vibration, screen flash and an assertive screen-reader announcement |
-| `src/lib/stack.ts` | Content for the "Built with ElevenLabs" panel (model per step and latency) |
-
-## Accessibility
-
-- Each screen moves focus to its `h1` when it opens.
-- The transcript is a `role=log`. Only finished sentences are announced, so partial words don't flood the screen reader.
-- The JA button gets focus when an approval appears.
-- Settings has toggles for bigger text, high contrast and reduced motion. The OS settings for contrast and motion are respected too.
-- Touch targets are at least 48 px (56 px with big text), and JA / NEI are 96 px.
-- Hanging up takes two taps.
+Nothing here needs a key. When the call server is added, keep API keys in `.env.local` (already git-ignored) or on the server, never in the repo.
