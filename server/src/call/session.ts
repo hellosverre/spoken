@@ -215,6 +215,7 @@ export class CallSession {
   private lastGreeting = "";
   private ended = false;
   private endTag?: { outcome: Outcome; summary: string };
+  private voicemail = false;
   private maxTimer?: ReturnType<typeof setTimeout>;
   private lastCalleeAt = 0;
   private waitingNoticeSaid = false;
@@ -363,6 +364,7 @@ export class CallSession {
         calleeRevised: (id, text, words) => this.onRevised(id, text, words),
         calleeNoise: (id) => this.onNoise(id),
         calleeBatchDone: (id) => this.releaseSpeech(id),
+        voicemail: () => this.onVoicemail(),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
       });
@@ -389,6 +391,24 @@ export class CallSession {
       return;
     }
     this.setStatus(s);
+  }
+
+  /** Telnyx (or the model) says a machine answered: hang up without leaving a message. */
+  private onVoicemail() {
+    if (this.ended || this.voicemail) return;
+    // A machine verdict after a real exchange is a false positive (long business greeting): ignore it.
+    if (this.errandStated) {
+      this.debug("voicemail_ignored", {});
+      return;
+    }
+    this.voicemail = true;
+    this.debug("voicemail", {});
+    this.note(this.voicemailText(), "info");
+    void this.finish("voicemail", { outcome: "no_answer", summary: this.voicemailText() });
+  }
+
+  private voicemailText() {
+    return this.init.profile.lang === "en" ? "Nobody answered (voicemail). Try again later?" : "Ingen svarte (telefonsvarer). Prøv igjen senere?";
   }
 
   private async sayOpening() {
@@ -856,7 +876,7 @@ export class CallSession {
     const handle = async (s: Segment) => {
       if (stop || abort.signal.aborted) return;
       // Nothing is said until the callee has really stopped (no half-sentences from cancelled turns).
-      if (!waited && answeringCallee && (s.kind === "speech" || s.kind === "ask")) {
+      if (!waited && answeringCallee && (s.kind === "speech" || s.kind === "ask" || s.kind === "dtmf")) {
         waited = true;
         await this.waitForSilence(abort.signal);
         if (stop || abort.signal.aborted) return;
@@ -1010,6 +1030,15 @@ export class CallSession {
         const agentLines = this.history.filter((h) => h.role === "agent").map((h) => h.text);
         const question = priceWarning(s.question, agentLines) + this.withContext(s.question);
         await this.requestApproval(question, options, /^(ja|nei)$/i.test(options[0] ?? "") ? "commit" : "choice");
+      } else if (s.kind === "dtmf") {
+        // Phone menu: press the key, then wait for the next prompt (the history line tells the model).
+        spokeAnything = true;
+        stop = true;
+        this.debug("dtmf", { digits: s.digits });
+        this.note(`Trykker ${s.digits} i telefonmenyen.`);
+        this.history.push({ role: "system", text: `Du trykket ${s.digits} på telefonen. Ikke si noe; vent på neste beskjed fra menyen.` });
+        try { await this.init.line.sendDtmf?.(s.digits); }
+        catch (e) { this.note(`Kunne ikke trykke ${s.digits}: ${(e as Error).message}`, "warn"); }
       } else if (s.kind === "note") {
         this.note(s.text);
       } else if (s.kind === "end") {
@@ -1024,7 +1053,11 @@ export class CallSession {
           await this.say("Beklager, jeg hørte deg ikke helt. Er det greit at jeg spør om noe kort?", "say", false, abort.signal, turnLine);
           return;
         }
-        this.endTag = { outcome, summary: s.summary };
+        if (outcome === "no_answer" && !this.errandStated) {
+          // The model heard a voicemail greeting: same result as line-level detection.
+          this.voicemail = true;
+          this.endTag = { outcome, summary: this.voicemailText() };
+        } else this.endTag = { outcome, summary: s.summary };
         stop = true;
       }
     };
@@ -1463,8 +1496,9 @@ export class CallSession {
       honestSummary = this.approvedCommit ? "Uklart om de bekreftet bestillingen." : "Ikke bekreftet: ingen godkjent avtale.";
       this.debug("done_downgraded", { approvedCommit: this.approvedCommit, confirmedByCallee: this.confirmedByCallee });
     }
+    if (this.voicemail) outcome = "no_answer";
     if (!this.connectedAt) outcome = this.status === "failed" ? "failed" : "no_answer";
-    const summary = !this.connectedAt
+    const summary = this.voicemail ? this.voicemailText() : !this.connectedAt
       ? (outcome === "no_answer" ? "Ingen svarte." : "Samtalen kunne ikke kobles opp.")
       : honestSummary ? `${honestSummary} ${s.summary || ""}`.trim() : tag ? tag.summary : (s.summary || tagIn?.summary || "Samtalen er ferdig.");
     this.result = {

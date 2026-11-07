@@ -11,6 +11,7 @@ import { Composer } from "./Composer";
 import { Chip } from "./Home";
 import { Glow, PulseRings } from "./Art";
 import { DoneArt, NothingAgreedArt } from "./drawings/ResultArt";
+import { CallFeedback } from "./Feedback";
 import { Icon, Mark } from "./Icon";
 import { Btn, Press, T } from "./ui";
 
@@ -369,6 +370,7 @@ function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" 
         {sheet.title}
       </Text>
       <Rows rows={sheet.rows} />
+      <CallFeedback />
       <View style={styles.acts}>
         <Btn block label={t.back} onPress={() => store.goHome()} />
         <Btn kind="ghost" block label={t.readT} onPress={() => store.closeSheet()} />

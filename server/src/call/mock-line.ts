@@ -12,7 +12,13 @@ const SCRIPT = {
   bye: "Supert, den er klar klokka 18:00. Ha det bra!",
   declined: "Den er grei. Ha det!",
   repeat: "Hæ? Unnskyld, hva sa du?",
+  menu: "Velkommen til Domino's. For kundeservice, trykk 2. For bestilling, trykk 1.",
+  human: "Kan jeg få snakke med personen selv, ikke en robot?",
+  voicemail: "Du har kommet til telefonsvareren til Domino's Storo. Legg igjen en beskjed etter pipetonen.",
 };
+
+/** What the fake callee does: the normal pizza shop, a phone menu, a human demanding the person, or a machine. */
+export type MockScenario = "pizza" | "ivr" | "human" | "voicemail";
 
 // Words the fake STT is "unsure" about, so the UI can grey them out.
 const UNSURE = new Set(["Storo.", "Storo", "pepperoni", "189"]);
@@ -25,9 +31,20 @@ export class MockLine implements CallLine {
   private seg = 0;
   private closed = false;
   waitingSound: false | "typing" | "music" = false;
+  /** Keys the agent pressed, for tests. */
+  readonly dtmf: string[] = [];
 
   /** speed 1 ≈ real time; tests use ~0.02. */
-  constructor(private speed = 1) {}
+  constructor(private speed = 1, private scenario: MockScenario = "pizza") {}
+
+  async sendDtmf(digits: string) {
+    this.dtmf.push(digits);
+    // Key 1 = ordering: the menu hands over to the shop; anything else loops the menu once.
+    if (this.scenario === "ivr" && !this.closed) {
+      this.scenario = "pizza";
+      void (async () => { await this.wait(700); if (!this.closed) { this.stage = "greet"; await this.talk(digits === "1" ? SCRIPT.greet : "Det valget finnes ikke."); } })();
+    }
+  }
 
   private wait(ms: number) {
     return new Promise<void>((resolve) => {
@@ -45,6 +62,11 @@ export class MockLine implements CallLine {
       await this.wait(1800);
       if (this.closed) return;
       events.status("connected");
+      if (this.scenario === "voicemail") {
+        await this.wait(400);
+        await this.talk(SCRIPT.voicemail);
+        events.voicemail?.();
+      }
     })();
   }
 
@@ -90,7 +112,9 @@ export class MockLine implements CallLine {
     const a = agentText.toLowerCase();
     if (/nei takk|lar vi det være|avslutte/.test(a)) return "declined";
     if (/ha det/.test(a)) return null;
-    if (/ki-assistent/.test(a) && this.stage === "start") return "greet";
+    if (/ki-assistent/.test(a) && this.stage === "start") return this.scenario === "ivr" ? "menu" : this.scenario === "voicemail" ? null : "greet";
+    if (this.scenario === "human" && /jeg vil gjerne|bestille/.test(a) && this.stage === "greet") { this.scenario = "pizza"; return "human"; }
+    if (this.stage === "human" && /døv|tekst/.test(a)) return null;
     if (/jeg vil gjerne|bestille/.test(a) && (this.stage === "greet" || this.stage === "repeat")) return "price";
     if (/bekrefter|ja takk/.test(a) && this.stage === "price") return "card";
     if (/kortnummer|betale ved henting|betalingslenke/.test(a) && this.stage === "card") return "name";

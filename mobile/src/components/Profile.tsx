@@ -4,6 +4,7 @@ import type { ThemePref } from "../lib/store";
 import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
+import { FeedbackSheet } from "./Feedback";
 import { historyCount, HistorySheet } from "./History";
 import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
@@ -27,6 +28,7 @@ export function Profile() {
   const savedCode = useSpoken((s) => s.passcode);
   const calls = useSpoken((s) => s.history.length);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [code, setCode] = useState(savedCode);
   useEffect(() => setCode(savedCode), [savedCode]);
 
@@ -214,10 +216,12 @@ export function Profile() {
           }
         />
         <Row icon="replay" title={t.replay} sub={t.replayS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => store.replay()} />
+        <Row icon="bubble" title={m.fbRowT} sub={m.fbRowS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setFeedbackOpen(true)} />
         <Row title={m.logout} icon="logout" tone="danger" onPress={() => store.logout()} />
       </List>
 
       <Text style={styles.about}>{t.foot}</Text>
+      {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
     </ScrollView>
   );
 }

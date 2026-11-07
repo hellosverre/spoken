@@ -1,10 +1,11 @@
+import nodeCrypto from "node:crypto";
 // REST + live WebSocket per CONTRACT.md, plus the Telnyx webhook and media socket.
 
 import type { Server, ServerWebSocket } from "bun";
 import { parseErrand } from "./call/style.ts";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
+import type { Clarify, FeedbackInput, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
 import { timingSafeEqual } from "node:crypto";
 import { MockLine } from "./call/mock-line.ts";
 import { MockLlm } from "./llm/mock.ts";
@@ -45,8 +46,36 @@ async function body(req: Request): Promise<any> {
 
 const id = (p: string) => `${p}_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 
+/** Who is calling, for limits: the real client IP (Cloudflare's header), never a client-chosen value. */
 function userKey(req: Request, server: Server<WsData>): string {
-  return req.headers.get("x-spoken-user") || req.headers.get("cf-connecting-ip") || server.requestIP(req)?.address || "local";
+  return req.headers.get("cf-connecting-ip") || server.requestIP(req)?.address || "local";
+}
+
+/** Requests through the public tunnel carry cf-connecting-ip; local tools and tests don't. */
+const isPublic = (req: Request) => req.headers.has("cf-connecting-ip");
+
+// Per-IP limits on the routes that spend LLM or ElevenLabs credit.
+const hits = new Map<string, number[]>();
+function overLimit(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
+  if (recent.length >= max) { hits.set(key, recent); return true; }
+  recent.push(now);
+  hits.set(key, recent);
+  return false;
+}
+
+/** Telnyx signs each webhook with ed25519 over "timestamp|body". Checked when TELNYX_PUBLIC_KEY is set. */
+function telnyxSigned(req: Request, raw: string): boolean {
+  const key = process.env.TELNYX_PUBLIC_KEY;
+  if (!key) return true;
+  const sig = req.headers.get("telnyx-signature-ed25519");
+  const ts = req.headers.get("telnyx-timestamp");
+  if (!sig || !ts || Math.abs(Date.now() / 1000 - Number(ts)) > 300) return false;
+  try {
+    const pub = nodeCrypto.createPublicKey({ key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), Buffer.from(key, "base64")]), format: "der", type: "spki" });
+    return nodeCrypto.verify(null, Buffer.from(`${ts}|${raw}`), pub, Buffer.from(sig, "base64"));
+  } catch { return false; }
 }
 
 function taskForLlm(input: TaskInput, profile: Profile): TaskForLlm {
@@ -65,6 +94,19 @@ function validTask(b: any): TaskInput | string {
   if (b.lang !== undefined && b.lang !== "no" && b.lang !== "en") return "lang must be no or en";
   if (b.phone !== undefined && typeof b.phone !== "string") return "phone must be a string";
   return { text: b.text.trim(), lang: b.lang ?? "no", phone: b.phone?.trim() || undefined, contactId: b.contactId };
+}
+
+function validFeedback(b: any): FeedbackInput | string {
+  if (!b || typeof b !== "object") return "body is required";
+  if (b.source !== "call" && b.source !== "profile") return "source must be call or profile";
+  if (b.rating !== undefined && b.rating !== null && b.rating !== "up" && b.rating !== "down") return "rating must be up or down";
+  if (b.comment !== undefined && b.comment !== null && typeof b.comment !== "string") return "comment must be a string";
+  if (b.callId !== undefined && b.callId !== null && (typeof b.callId !== "string" || !/^[\w-]{1,64}$/.test(b.callId))) return "callId is invalid";
+  const comment = typeof b.comment === "string" ? b.comment.trim() : "";
+  if (comment.length > 1000) return "comment is too long (max 1000)";
+  const rating = b.rating ?? undefined;
+  if (!rating && !comment) return "rating or comment is required";
+  return { source: b.source, ...(rating ? { rating } : {}), ...(comment ? { comment } : {}), ...(b.callId ? { callId: b.callId } : {}) };
 }
 
 function validProfile(b: any): Profile | string {
@@ -244,12 +286,18 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     }
 
     if (path === "/telnyx/webhook" && m === "POST") {
-      const b = await body(req);
+      const raw = await req.text();
+      if (!telnyxSigned(req, raw)) return new Response("bad signature", { status: 401 });
+      let b: any = null;
+      try { b = JSON.parse(raw); } catch { /* ignored below */ }
       try { TelnyxLine.handleWebhook(b); } catch (e) { console.error("[telnyx] webhook failed:", (e as Error).message); }
       return new Response("ok");
     }
 
-    if (path === "/api/tasks" && m === "POST") return createTask(req);
+    if (path === "/api/tasks" && m === "POST") {
+      if (overLimit(`task:${userKey(req, server)}`, 30, 10 * 60_000)) return err(429, "For mange forespørsler. Vent litt og prøv igjen.");
+      return createTask(req);
+    }
     let r = path.match(/^\/api\/tasks\/([\w-]+)\/answers$/);
     if (r && m === "POST") return answerTask(r[1]!, req);
     r = path.match(/^\/api\/tasks\/([\w-]+)\/call$/);
@@ -270,8 +318,19 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       return json(s.result);
     }
 
+    if (path === "/api/feedback" && m === "POST") {
+      if (overLimit(`feedback:${userKey(req, server)}`, 20, 10 * 60_000)) return err(429, "For mange tilbakemeldinger. Prøv igjen senere.");
+      const device = deviceOf(req);
+      if (!device) return err(400, "X-Spoken-Device header (a UUID) is required");
+      const v = validFeedback(await body(req));
+      if (typeof v === "string") return err(400, v);
+      try { await db.saveFeedback(device, v); } catch (e) { console.warn("[db] saveFeedback:", (e as Error).message); return err(500, "Kunne ikke lagre tilbakemeldingen."); }
+      return json({ ok: true }, 201);
+    }
+
     if (path === "/api/voices" && m === "GET") return json(listVoices());
     if (path === "/api/voices/design" && m === "POST") {
+      if (overLimit(`voice:${userKey(req, server)}`, 5, 60 * 60_000)) return err(429, "For mange stemmer laget. Prøv igjen om en time.");
       const b = await body(req);
       if (typeof b?.description !== "string" || b.description.trim().length < 5) return err(400, "description is required");
       return json(await designVoice(b.description));
@@ -286,6 +345,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       if (typeof v === "string") return err(400, v);
       const device = deviceOf(req);
       if (device) await db.putProfile(device, v);
+      else if (isPublic(req)) return err(400, "X-Spoken-Device is required");
       else setProfile(v);
       return json(v);
     }
