@@ -4,15 +4,9 @@
 // at any point stops the music and the call continues.
 
 import { config } from "../config.ts";
+import { LINES, type Lines } from "./lines.ts";
 
-export const HOLD_LINES = {
-  ask: (name: string) => `Beklager ventetiden. Jeg får ikke helt kontakt med ${name} akkurat nå. Har du mulighet til å vente litt?`,
-  thanks: "Tusen takk!",
-  remind: "Takk for at du venter, jeg er straks tilbake.",
-  stillHere: "Jeg er her fortsatt. Takk for at du venter.",
-  back: "Takk for at du ventet!",
-  callback: "Beklager at det tar tid. Jeg ringer heller tilbake senere. Tusen takk for tålmodigheten, ha det bra!",
-};
+export const HOLD_LINES = LINES.no.hold;
 
 // Note texts the web app matches on (agreed with Form): countdown via /(\d+)\s*s/.
 export const HOLD_NOTES = {
@@ -23,10 +17,12 @@ export const HOLD_NOTES = {
   callback: "Personen kunne ikke vente – tilbød å ringe tilbake senere.",
 };
 
-const NO = /^(nei|nope)\b|kan ikke|har ikke tid|ikke mulighet|dessverre|må gå|må stikke|travelt|ring(e)? (meg )?(tilbake|senere|igjen)/i;
+const NO = /^(nei|nope|no)\b|kan ikke|har ikke tid|ikke mulighet|dessverre|må gå|må stikke|travelt|ring(e)? (meg )?(tilbake|senere|igjen)|can't|cannot|don't have time|no time|have to go|gotta go|too busy|call (me )?(back|later|again)/i;
 
 export interface HoldDeps {
   userName: string;
+  /** The hold lines in the call's current language (default Norwegian). */
+  lines?: () => Lines["hold"];
   say(text: string): Promise<unknown>;
   note(text: string, level?: "info" | "warn"): void;
   sound(kind: "typing" | "music" | "off"): void;
@@ -44,6 +40,8 @@ export class HoldFlow {
   private remindTimer?: ReturnType<typeof setInterval>;
 
   constructor(private d: HoldDeps) {}
+
+  private get L() { return this.d.lines?.() ?? HOLD_LINES; }
 
   get active() { return this.state === "asking" || this.state === "holding"; }
 
@@ -73,7 +71,7 @@ export class HoldFlow {
     this.d.debug("hold_ask");
     this.d.sound("off");
     this.d.note(HOLD_NOTES.asking);
-    await this.d.say(HOLD_LINES.ask(this.d.userName || "brukeren"));
+    await this.d.say(this.L.ask(this.d.userName || (this.L === LINES.en.hold ? LINES.en.user : LINES.no.user)));
     // No answer from the callee within 10 s: they're still there, so start the hold.
     this.timers.push(setTimeout(() => { if (this.state === "asking") void this.startHold(); }, 10_000));
   }
@@ -88,7 +86,7 @@ export class HoldFlow {
     if (this.state === "holding") {
       void (async () => {
         this.d.sound("off");
-        await this.d.say(HOLD_LINES.stillHere);
+        await this.d.say(this.L.stillHere);
         if (this.state === "holding") this.d.sound("music");
       })();
       return true;
@@ -100,7 +98,7 @@ export class HoldFlow {
     if (this.state !== "asking") return;
     this.state = "holding";
     this.d.debug("hold_start");
-    await this.d.say(HOLD_LINES.thanks);
+    await this.d.say(this.L.thanks);
     if (this.state !== "holding") return;
     this.d.sound("music");
     this.d.note(HOLD_NOTES.holding(this.secondsLeft()));
@@ -110,7 +108,7 @@ export class HoldFlow {
   private async remind() {
     if (this.state !== "holding") return;
     this.d.sound("off");
-    await this.d.say(HOLD_LINES.remind);
+    await this.d.say(this.L.remind);
     if (this.state !== "holding") return;
     this.d.sound("music");
     this.d.note(HOLD_NOTES.remind(this.secondsLeft()));
@@ -123,7 +121,7 @@ export class HoldFlow {
     this.d.debug("hold_callback", { why });
     this.d.sound("off");
     this.d.note(HOLD_NOTES.callback, "warn");
-    await this.d.say(HOLD_LINES.callback);
+    await this.d.say(this.L.callback);
     await this.d.giveUp("Personen kunne ikke vente på svaret ditt; Spoken tilbød å ringe tilbake senere.");
   }
 
@@ -136,7 +134,7 @@ export class HoldFlow {
     this.d.debug("hold_resume");
     this.d.sound("off");
     this.d.note(HOLD_NOTES.resumed);
-    await this.d.say(HOLD_LINES.back);
+    await this.d.say(this.L.back);
   }
 
   cancel() {

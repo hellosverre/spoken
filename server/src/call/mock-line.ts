@@ -1,7 +1,7 @@
-// Fake phone line with a scripted Norwegian pizza-shop callee. No keys, no audio:
+// Fake phone line with a scripted pizza-shop callee (Norwegian or English). No keys, no audio:
 // it reacts to what the agent says and paces itself like a real call.
 
-import type { Word } from "../../../shared/contract.ts";
+import type { Lang, Word } from "../../../shared/contract.ts";
 import type { CallLine, LineEvents, SpeakKind } from "./line.ts";
 
 const SCRIPT = {
@@ -15,6 +15,31 @@ const SCRIPT = {
   menu: "Velkommen til Domino's. For kundeservice, trykk 2. For bestilling, trykk 1.",
   human: "Kan jeg få snakke med personen selv, ikke en robot?",
   voicemail: "Du har kommet til telefonsvareren til Domino's Storo. Legg igjen en beskjed etter pipetonen.",
+};
+
+const SCRIPT_EN: typeof SCRIPT = {
+  greet: "Hi, you've reached Domino's Storo. That's fine. How can I help you?",
+  price: "One large pepperoni for pickup at 6 pm, that comes to 189 kroner. Shall I put the order in?",
+  card: "Great! Can I have your card number, so we can pay right away?",
+  name: "Sure, you can pay when you pick it up. What name should the order be under?",
+  bye: "Lovely, it'll be ready at 6 pm. Goodbye!",
+  declined: "No problem. Bye!",
+  repeat: "Sorry, what did you say?",
+  menu: "Welcome to Domino's. For customer service, press 2. For orders, press 1.",
+  human: "Can I talk to the person themselves, not a robot?",
+  voicemail: "You've reached the voicemail of Domino's Storo. Please leave a message after the tone.",
+};
+
+// What the agent said → the callee's next line, per language.
+const NEXT: Record<Lang, Record<string, RegExp>> = {
+  no: {
+    declined: /nei takk|lar vi det være|avslutte/, bye: /ha det/, greet: /ki-assistent/, price: /jeg vil gjerne|bestille/,
+    card: /bekrefter|ja takk/, name: /kortnummer|betale ved henting|betalingslenke/, done: /står på|navnet er/, repeat: /si det en gang til|gjenta/, deaf: /døv|tekst/,
+  },
+  en: {
+    declined: /no thanks|leave it|end the call/, bye: /goodbye|\bbye\b/, greet: /ai assistant/, price: /i'd like|order/,
+    card: /confirm|yes please/, name: /card number|pay at pickup|payment link/, done: /under|name is/, repeat: /say that again|repeat/, deaf: /deaf|text|typ/,
+  },
 };
 
 /** What the fake callee does: the normal pizza shop, a phone menu, a human demanding the person, or a machine. */
@@ -35,14 +60,19 @@ export class MockLine implements CallLine {
   readonly dtmf: string[] = [];
 
   /** speed 1 ≈ real time; tests use ~0.02. */
-  constructor(private speed = 1, private scenario: MockScenario = "pizza") {}
+  private script: typeof SCRIPT;
+  private re: Record<string, RegExp>;
+  constructor(private speed = 1, private scenario: MockScenario = "pizza", lang: Lang = "no") {
+    this.script = lang === "en" ? SCRIPT_EN : SCRIPT;
+    this.re = NEXT[lang];
+  }
 
   async sendDtmf(digits: string) {
     this.dtmf.push(digits);
     // Key 1 = ordering: the menu hands over to the shop; anything else loops the menu once.
     if (this.scenario === "ivr" && !this.closed) {
       this.scenario = "pizza";
-      void (async () => { await this.wait(700); if (!this.closed) { this.stage = "greet"; await this.talk(digits === "1" ? SCRIPT.greet : "Det valget finnes ikke."); } })();
+      void (async () => { await this.wait(700); if (!this.closed) { this.stage = "greet"; await this.talk(digits === "1" ? this.script.greet : this.script === SCRIPT ? "Det valget finnes ikke." : "That option doesn't exist."); } })();
     }
   }
 
@@ -64,7 +94,7 @@ export class MockLine implements CallLine {
       events.status("connected");
       if (this.scenario === "voicemail") {
         await this.wait(400);
-        await this.talk(SCRIPT.voicemail);
+        await this.talk(this.script.voicemail);
         events.voicemail?.();
       }
     })();
@@ -110,16 +140,17 @@ export class MockLine implements CallLine {
 
   private next(agentText: string): keyof typeof SCRIPT | null {
     const a = agentText.toLowerCase();
-    if (/nei takk|lar vi det være|avslutte/.test(a)) return "declined";
-    if (/ha det/.test(a)) return null;
-    if (/ki-assistent/.test(a) && this.stage === "start") return this.scenario === "ivr" ? "menu" : this.scenario === "voicemail" ? null : "greet";
-    if (this.scenario === "human" && /jeg vil gjerne|bestille/.test(a) && this.stage === "greet") { this.scenario = "pizza"; return "human"; }
-    if (this.stage === "human" && /døv|tekst/.test(a)) return null;
-    if (/jeg vil gjerne|bestille/.test(a) && (this.stage === "greet" || this.stage === "repeat")) return "price";
-    if (/bekrefter|ja takk/.test(a) && this.stage === "price") return "card";
-    if (/kortnummer|betale ved henting|betalingslenke/.test(a) && this.stage === "card") return "name";
-    if (/står på|navnet er/.test(a) && this.stage === "name") return "bye";
-    if (/si det en gang til|gjenta/.test(a)) return this.stage === "start" ? "greet" : (this.stage as keyof typeof SCRIPT);
+    const r = this.re;
+    if (r.declined!.test(a)) return "declined";
+    if (r.bye!.test(a)) return null;
+    if (r.greet!.test(a) && this.stage === "start") return this.scenario === "ivr" ? "menu" : this.scenario === "voicemail" ? null : "greet";
+    if (this.scenario === "human" && r.price!.test(a) && this.stage === "greet") { this.scenario = "pizza"; return "human"; }
+    if (this.stage === "human" && r.deaf!.test(a)) return null;
+    if (r.price!.test(a) && (this.stage === "greet" || this.stage === "repeat")) return "price";
+    if (r.card!.test(a) && this.stage === "price") return "card";
+    if (r.name!.test(a) && this.stage === "card") return "name";
+    if (r.done!.test(a) && this.stage === "name") return "bye";
+    if (r.repeat!.test(a)) return this.stage === "start" ? "greet" : (this.stage as keyof typeof SCRIPT);
     return null;
   }
 
@@ -129,7 +160,7 @@ export class MockLine implements CallLine {
     this.stage = step;
     await this.wait(700);
     if (this.closed) return;
-    await this.talk(SCRIPT[step]);
+    await this.talk(this.script[step]);
   }
 
   /** Streams a callee line as partials, then a final with word confidences. */

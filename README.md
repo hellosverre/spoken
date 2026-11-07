@@ -2,7 +2,7 @@
 
 **Du skriver, vi snakker. You type, we talk.**
 
-Spoken makes phone calls for you. You type what you need ("order a large pepperoni for pickup at six"), and an AI calls the place, talks to the person who answers in Norwegian, and shows you every word live on screen. It says it's an AI in its first sentence, and it asks you before it agrees to any price, time or booking.
+Spoken makes phone calls for you. You type what you need ("order a large pepperoni for pickup at six"), and an AI calls the place, talks to the person who answers in English or Norwegian, and shows you every word live on screen. It says it's an AI in its first sentence, and it asks you before it agrees to any price, time or booking.
 
 Built for Deaf and nonspeaking people, and useful for anyone who would rather not call.
 
@@ -20,11 +20,15 @@ Oslo Sprint 2026. This repo was created Sat 7 Nov 09:01, and everything in it wa
 
 ## Safety
 
-- Every call opens with «Hei, jeg er en KI-assistent som ringer på vegne av …». If the callee doesn't want to talk to an AI, it ends the call politely.
+- Every call opens with «Hi, I'm an AI assistant calling on behalf of …» (in Norwegian: «Hei, jeg er en KI-assistent som ringer på vegne av …»). If the callee doesn't want to talk to an AI, it ends the call politely.
 - It never commits to paying, booking or cancelling without a tap from you.
 - It never calls emergency numbers (110, 112, 113). It shows you the right number to call yourself.
 - It refuses abusive goals and is capped at a set number of calls per user per day.
 - Your account stores your profile, contacts and call summaries, but not transcripts or audio (`server/db/schema.sql`). The data processors are listed in the app under Profile → Privacy.
+
+## Call language
+
+A call is in English or Norwegian. The task picks it: one typed in Norwegian gets a Norwegian call, and «in English» / «på norsk» anywhere in the task wins. Otherwise `CALL_LANG` decides (default `en`). During the call the user can type «speak English» or «snakk norsk», and the agent, speech-to-text and voice all switch on the spot. The app's own language is a separate setting.
 
 ## How it's built
 
@@ -44,7 +48,7 @@ The hard part is keeping a phone conversation natural on 8 kHz audio in Norwegia
 
 - **Turn-taking:** waits for the answerer's greeting before speaking, never gets cut off during the AI disclosure, and stops talking when the callee talks over it (barge-in).
 - **Numbers:** Norwegian numbers like *femten* and *femti* (15 and 50) sound alike on a phone line. Unsure numbers are flagged to the LLM, which asks back instead of guessing.
-- **A second listen:** every callee line also goes through batch Scribe. If batch is confident and realtime isn't, batch wins. Lines it tags as background talk or music are dropped.
+- **A second listen:** every callee line also goes through batch Scribe. If batch is confident and realtime isn't, batch wins. Lines it tags as background talk or music are dropped. The reply only waits for it when a number is unsure; other fixes patch the transcript afterwards.
 - **Background voices:** the server learns the callee's loudness and ignores quieter voices in the room.
 
 ### Built with ElevenLabs

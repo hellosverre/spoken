@@ -137,6 +137,14 @@ describe("faster replies", () => {
     expect(said()).toContain("Vi tar seks stykker i halvliter.");
     await s.finish("test");
   });
+  test("an unsure word that isn't a number doesn't hold the reply back", async () => {
+    const { s, line, said } = await session(["Ja, det har vi."], { revises: true });
+    line.ev.calleeFinal("c1", "Har dere Cola Zero?");
+    line.ev.calleeWords?.("c1", "Har dere Cola Zero?", [{ text: "Zero?", confidence: 0.3 }] as never);
+    await Bun.sleep(300 + 60);
+    expect(said()).toContain("Ja, det har vi."); // no batch check came, and we didn't wait for one
+    await s.finish("test");
+  });
 });
 
 describe("talked over by noise", () => {
