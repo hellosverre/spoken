@@ -50,6 +50,7 @@ export type LiveEvent =
   | { type: "approval_request"; id: string; question: string; options: string[]; at: number }
   | { type: "note"; text: string; level: "info" | "warn"; at: number }
   | { type: "level"; who: "callee" | "agent"; rms: number; at: number } // voice loudness 0..1, ~15 Hz, for the live visual
+  | { type: "facts"; items: FactItem[]; at: number } // the full list each time it changes
   | { type: "result"; result: CallResult };
 
 export type LiveCommand =
@@ -75,6 +76,7 @@ export interface CallResult {
   details: Record<string, string>; // time, price, reference…
   transcript: TranscriptLine[];
   durationSec: number;
+  receipt?: Receipt;
 }
 
 export interface Voice {
@@ -168,4 +170,26 @@ export interface CompareState {
   mode: "real" | "mock";
   done: boolean;
   legs: CompareLeg[];
+}
+
+// Trust features. Fact strip: the price, time, address and reference number heard on the call, pinned above
+// the transcript. confirmed = a second source agrees (batch STT, the callee repeated it, or said yes to a read-back).
+export type FactKind = "price" | "time" | "address" | "ref";
+export interface FactItem {
+  kind: FactKind;
+  value: string; // display text: «250 kr», «kl. 18:00», «Storgata 5», «A-1234»
+  confirmed: boolean;
+}
+
+// Compliance receipt after the call: exactly what was disclosed, shared and agreed. No audio, no transcript is kept.
+export interface Receipt {
+  lang: Lang;
+  callee: string;
+  durationSec: number;
+  disclosedAsAi: boolean; // the first agent line says it is an AI
+  disclosure?: string; // that line, word for word
+  shared: string[]; // fields actually spoken: "name" | "phone" | "address" | "email" | "birthdate" | "fnr" | "allergies"
+  agreed: { question: string; choice: string }[]; // approval cards the user accepted
+  declined: { question: string; choice: string }[];
+  stored: string; // «Only the summary is kept. No audio, no transcript.»
 }

@@ -18,6 +18,8 @@ import { isNumberish, numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
 import { LINES, langFromText } from "./lines.ts";
 import { uiText } from "./ui-text.ts";
+import { FactTracker } from "./facts.ts";
+import { buildReceipt, type ApprovalLogItem } from "./receipt.ts";
 import { asksWhoTheyAre, endsSentence, errandParts, isEcho, isFillerOnly, isMeta, parseErrand, restatesErrand, shortenErrand, stripFillerPrefix, type Errand } from "./style.ts";
 import { Segmenter, type Segment } from "./segment.ts";
 import { asksUserWhereCallee, fixCardOptions, priceWarning } from "./approval.ts";
@@ -262,6 +264,8 @@ export class CallSession {
   private waitLines = 0; // how many approval-wait lines were said this call
   private lastApprovalAt = 0;
   private answered: { q: string; choice: string }[] = []; // approval questions the user answered
+  private approvalLog: ApprovalLogItem[] = []; // the same, verbatim, for the receipt
+  private facts = new FactTracker(); // price/time/address/ref for the fact strip
   private approvedCommit = false;
   private approvedItems: string[] = []; // normalised texts of approved commitments
   private confirmedByCallee = false;
@@ -335,8 +339,16 @@ export class CallSession {
     }
   }
 
+  /** Feeds final transcript lines to the fact strip; emits «facts» when the list changed. */
+  private trackFacts(ev: LiveEvent) {
+    if (ev.type !== "transcript" || !ev.final) return;
+    const items = ev.text ? this.facts.observe(ev.who, ev.id, ev.text) : this.facts.drop(ev.id);
+    if (items) this.emit({ type: "facts", items, at: Date.now() });
+  }
+
   private emit(ev: LiveEvent) {
     this.events.push(ev);
+    this.trackFacts(ev);
     if (!(ev.type === "transcript" && !ev.final)) this.debug("event", { ev });
     for (const fn of this.listeners) {
       try { fn(ev); } catch (e) { console.error("[session] listener failed", e); }
@@ -387,7 +399,7 @@ export class CallSession {
         },
         calleeRevised: (id, text, words) => this.onRevised(id, text, words),
         calleeNoise: (id) => this.onNoise(id),
-        calleeBatchDone: (id) => this.releaseSpeech(id),
+        calleeBatchDone: (id) => { const f = this.facts.batchAgrees(id); if (f) this.emit({ type: "facts", items: f, at: Date.now() }); this.releaseSpeech(id); },
         voicemail: () => this.onVoicemail(),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
@@ -1436,6 +1448,7 @@ export class CallSession {
       return; // card stays open; the next instruction is the answer
     }
     this.answered.push({ q: norm(p.question), choice });
+    this.approvalLog.push({ question: p.question, choice });
     clearTimeout(p.timer);
     this.pending = undefined;
     this.init.line.stopWaitingSound();
@@ -1583,6 +1596,14 @@ export class CallSession {
       transcript: [...this.transcript],
       durationSec: this.connectedAt ? Math.round((Date.now() - this.connectedAt) / 1000) : 0,
     };
+    this.result.receipt = buildReceipt({
+      transcript: this.transcript,
+      profile: this.init.profile,
+      approvals: this.approvalLog,
+      callee: this.init.plan.callee.name,
+      durationSec: this.result.durationSec,
+      lang: this.init.profile.lang,
+    });
     if (this.latencies.length) {
       const avg = Math.round(this.latencies.reduce((a, b) => a + b, 0) / this.latencies.length);
       console.log(`[latency] call ${this.callId}: avg ${avg} ms over ${this.latencies.length} turns (${this.latencies.join(", ")})`);
