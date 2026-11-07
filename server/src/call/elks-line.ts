@@ -13,6 +13,7 @@
 import type { ServerWebSocket } from "bun";
 import { timingSafeEqual } from "node:crypto";
 import { config } from "../config.ts";
+import { createDenoiser } from "../voice/denoise.ts";
 import { ScribeStream } from "../voice/scribe.ts";
 import { batchVerdict, meanConf } from "./batch-verdict.ts";
 import { peakLevel, SpeakerLevel } from "./loudness.ts";
@@ -106,6 +107,8 @@ export class ElksLine implements CallLine {
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
   private rtConf = new Map<string, number>();
+  /** RNNoise + adaptive gate on the callee audio (null when DENOISE=0). */
+  private dn = createDenoiser();
   private lastVoicedAt = 0;
   private lastPartialAt = 0;
   private voicedSinceCommit = false;
@@ -295,15 +298,16 @@ export class ElksLine implements CallLine {
   }
 
   private onFrame(raw: Uint8Array) {
-    const pcm = g711ToPcm16(raw, false);
+    const pcm = this.dn ? this.dn.process(g711ToPcm16(raw, false), 8000) : g711ToPcm16(raw, false);
     const rms = pcmRms(pcm);
-    if (rms > VOICED_RMS) {
+    const vrms = this.dn && !this.dn.voiced ? 0 : rms; // gated frames (noise / distant voices) count as silence
+    if (vrms > VOICED_RMS) {
       this.voicedSinceCommit = true;
       if (!this.segOnsetAt) this.segOnsetAt = Date.now();
       this.lastVoicedAt = Date.now();
       if (rms > this.speaker.floor()) this.lastLoudAt = this.lastVoicedAt;
     }
-    this.localVad(rms);
+    this.localVad(vrms);
     this.emitLevel("callee", rms);
     this.sttSamples += pcm.length;
     this.recent.push({ at: Date.now(), pcm, rms });
@@ -528,6 +532,7 @@ export class ElksLine implements CallLine {
 
   private finishAudio() {
     this.reportCost();
+    this.dn?.destroy();
     clearInterval(this.ticker);
     this.ticker = undefined;
     this.scribe?.close();
