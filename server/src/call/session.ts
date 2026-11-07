@@ -91,6 +91,7 @@ const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
 const ANNOUNCEMENT = /velkommen til|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
 const MENU = /trykk|tast(er)? \d|press \d|for (bestilling|reservasjon|å (snakke|prate))/i;
 const ANNOUNCEMENT_GAP_MS = 3500;
+const ANNOUNCEMENT_MAX_MS = 45_000; // a recorded message can run long; never talk over it
 const GREETING_MAX_MS = Number(process.env.GREETING_MAX_MS ?? 8000);
 // After the disclosure: give them a moment to answer («ja?», «nei takk») before stating the errand.
 const AFTER_OPENING_MS = Number(process.env.AFTER_OPENING_MS ?? 2000);
@@ -483,6 +484,7 @@ export class CallSession {
       const menu = this.greetAll.trim();
       this.greetAll = "";
       this.debug("phone_menu", { menu });
+      console.log(`[call] ${this.callId} phone menu heard, choosing a key`);
       this.openingPending = false;
       this.history.push({ role: "user", text: `[instruks] Det som ble sagt var en automatisk telefonmeny: «${menu}». Ikke snakk. Svar bare med [[DTMF: n]] for valget som passer målet (snakke med en person, bestilling eller reservasjon).` });
       this.requestTurn();
@@ -492,6 +494,7 @@ export class CallSession {
       return this.sayOpening();
     }
     this.debug("opening_start", { greeted, waitedMs: Date.now() - this.connectedAt });
+    console.log(`[call] ${this.callId} opening after ${Date.now() - this.connectedAt} ms${this.greetAll ? " (heard: " + this.greetAll.trim().slice(0, 80) + ")" : ""}`);
     this.openingSpeaking = true;
     try { await this.say(opening); } finally { this.openingSpeaking = false; this.openingPending = false; }
     if (this.ended) return;
@@ -521,7 +524,7 @@ export class CallSession {
         const done = this.ended
           || (greeted && quiet >= gap)
           || (!greeted && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
-          || waited >= GREETING_MAX_MS;
+          || waited >= (ANNOUNCEMENT.test(this.greetAll) ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
         if (done) { clearInterval(tick); resolve(greeted); }
       }, 50);
     });
