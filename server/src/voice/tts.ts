@@ -25,6 +25,8 @@ export interface TtsOptions {
   signal?: AbortSignal;
   /** Cache this phrase (fixed lines, disclosure). */
   cache?: boolean;
+  /** Output format; the phone path uses µ-law 8 kHz. */
+  format?: "ulaw_8000" | "pcm_16000";
   /** Called with the billed character count when a real (uncached) request is made. */
   onBilled?: (chars: number) => void;
 }
@@ -34,7 +36,8 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
   const voiceId = opts.voiceId || config.elevenlabs.defaultVoice;
   const model = opts.model || config.elevenlabs.ttsModel;
   const speakable = toSpeakable(text);
-  const key = cacheKey(speakable, voiceId, model);
+  const format = opts.format ?? "ulaw_8000";
+  const key = cacheKey(speakable, voiceId, model) + (format === "ulaw_8000" ? "" : `-${format}`);
   const cached = memCache.get(key) ?? (await readDisk(key));
   if (cached) { memCache.set(key, cached); yield cached; return; }
 
@@ -42,7 +45,7 @@ export async function* tts(text: string, opts: TtsOptions = {}): AsyncGenerator<
   const firstByte = new AbortController();
   const timer = setTimeout(() => firstByte.abort(), 6000);
   const signal = opts.signal ? AbortSignal.any([opts.signal, firstByte.signal]) : firstByte.signal;
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=ulaw_8000`;
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?output_format=${format}`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "xi-api-key": config.elevenlabs.apiKey, "Content-Type": "application/json" },

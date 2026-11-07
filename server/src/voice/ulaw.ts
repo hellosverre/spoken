@@ -75,3 +75,35 @@ export function alawToUlaw(buf: Uint8Array): Uint8Array {
   for (let i = 0; i < buf.length; i++) out[i] = ALAW_TO_ULAW[buf[i]!]!;
   return out;
 }
+
+const ALAW_DECODE = new Int16Array(256).map((_, i) => alawToLinear(i));
+
+/** Telnyx G.711 payload → 16-bit linear PCM, decoded once (no lossy µ-law re-encode for STT). */
+export function g711ToPcm16(raw: Uint8Array, alaw: boolean): Int16Array {
+  const table = alaw ? ALAW_DECODE : DECODE;
+  const out = new Int16Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = table[raw[i]!]!;
+  return out;
+}
+
+export function pcmRms(pcm: Int16Array): number {
+  if (!pcm.length) return 0;
+  let sum = 0;
+  for (let i = 0; i < pcm.length; i++) sum += pcm[i]! * pcm[i]!;
+  return Math.sqrt(sum / pcm.length);
+}
+
+export function linearToAlaw(sample: number): number {
+  let s = Math.max(-32768, Math.min(32767, Math.round(sample)));
+  const sign = s >= 0 ? 0x80 : 0;
+  if (!sign) s = -s - 1;
+  let exp = 7;
+  for (let mask = 0x4000; (s & mask) === 0 && exp > 0; mask >>= 1) exp--;
+  const mant = exp === 0 ? (s >> 4) & 0x0f : (s >> (exp + 3)) & 0x0f;
+  return ((sign | (exp << 4) | mant) ^ 0x55) & 0xff;
+}
+
+/** Loudness 0..1 for the live voice visual (speech on a phone line sits around 0.2–0.8). */
+export function levelOf(rms: number): number {
+  return Math.min(1, Math.sqrt(rms / 9000));
+}

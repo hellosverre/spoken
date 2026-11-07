@@ -52,6 +52,9 @@ const BACKCHANNEL_MS = Number(process.env.BACKCHANNEL_MS ?? 450);
 const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
 // Callee text that sounds cut off mid-sentence: wait this long for more before answering.
 const HOLD_MS = 450;
+// Word confidences arrive ~20 ms after the commit; batch revisions ~0.7 s.
+const WORDS_WAIT_MS = 120;
+const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 1000);
 const UNFINISHED = /(,|\b(og|eller|men|så|at|som|blir|er|det|den|en|et|ei|til|på|for|med|om|hvis|fordi|altså|eh|ehm|øh|liksom))[.…]?$/i;
 
 interface Spec {
@@ -129,6 +132,8 @@ export class CallSession {
   private lastFiller = "";
   private timing?: TurnTiming;
   private spec?: Spec;
+  private gate?: { id: string; timer?: ReturnType<typeof setTimeout>; go: () => void };
+  private segItems = new Map<string, HistoryItem>(); // callee segment id → its history line
   private lineCost?: { ttsChars: number; sttSec: number };
   private specTimer?: ReturnType<typeof setTimeout>;
   private holdTimer?: ReturnType<typeof setTimeout>;
@@ -161,6 +166,13 @@ export class CallSession {
     if (!CALL_LOG) return;
     try { appendFileSync(join(LOG_DIR, `${this.callId}.jsonl`), JSON.stringify({ t: Date.now(), kind, ...data }) + "\n"); }
     catch { /* logging must never break a call */ }
+  }
+
+  /** High-rate events (voice level): to clients only, not replayed to late joiners or logged. */
+  private emitLive(ev: LiveEvent) {
+    for (const fn of this.listeners) {
+      try { fn(ev); } catch { /* listener gone */ }
+    }
   }
 
   private emit(ev: LiveEvent) {
@@ -203,7 +215,12 @@ export class CallSession {
         },
         metric: (m) => this.onMetric(m),
         cost: (c) => { this.lineCost = c; },
-        calleeWords: (id, text, words) => this.emit({ type: "transcript", id, who: "callee", text, final: true, words, at: Date.now() }),
+        level: (who, rms) => this.emitLive({ type: "level", who, rms, at: Date.now() }),
+        calleeWords: (id, text, words) => {
+          this.emit({ type: "transcript", id, who: "callee", text, final: true, words, at: Date.now() });
+          this.onWords(id, words);
+        },
+        calleeRevised: (id, text, words) => this.onRevised(id, text, words),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
       });
@@ -255,11 +272,11 @@ export class CallSession {
     this.lastCalleeAt = Date.now();
     this.nudged = 0;
     clearTimeout(this.silenceTimer);
-    clearTimeout(this.holdTimer);
-    this.dropSpec("call ended");
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: this.lastCalleeAt });
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
-    this.history.push({ role: "callee", text: clean });
+    const item: HistoryItem = { role: "callee", text: clean };
+    this.history.push(item);
+    this.segItems.set(id, item);
     if (this.speaking) this.onCalleeSpeech();
 
     if (this.pending) {
@@ -295,7 +312,56 @@ export class CallSession {
       this.holdTimer = setTimeout(() => { this.holdTimer = undefined; this.requestTurn(); }, HOLD_MS);
       return;
     }
-    this.requestTurn();
+    this.startGate(id);
+  }
+
+  // ---------- word confidence ----------
+
+  /**
+   * Low-confidence words go to the LLM as a hint (the transcript the user sees is unchanged):
+   * "Jeg må snakke med rektor ⟨usikre ord: rektor⟩". If a speculative reply was made without
+   * that hint, drop it so the model can reinterpret or ask.
+   */
+  private onWords(id: string, words: Word[]) {
+    const unsure = words.filter((w) => w.confidence < 0.6).map((w) => w.text.replace(/[.,!?]$/, ""));
+    const gate = this.gate?.id === id ? this.gate : undefined;
+    if (!unsure.length) { gate?.go(); return; }
+    const item = this.segItems.get(id);
+    if (item && !item.text.includes("⟨")) item.text = `${item.text} ⟨usikre ord: ${unsure.join(", ")}⟩`;
+    this.debug("unsure_words", { id, unsure });
+    if (this.spec) this.dropSpec("unsure words");
+    // Unsure words: give the batch second opinion up to 1 s before answering.
+    if (gate) { clearTimeout(gate.timer); gate.timer = setTimeout(gate.go, REVISION_WAIT_MS); }
+  }
+
+  /** Batch STT disagreed with realtime: fix the transcript, the result card and what the LLM sees. */
+  private onRevised(id: string, text: string, words: Word[]) {
+    const clean = text.trim();
+    if (!clean || this.ended) return;
+    this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: Date.now() });
+    const item = this.segItems.get(id);
+    if (item) {
+      const line = this.transcript.find((t) => t.who === "callee" && t.text === item.text.replace(/ ⟨usikre ord:.*⟩$/, ""));
+      if (line) line.text = clean;
+      const unsure = words.filter((w) => w.confidence < 0.6).map((w) => w.text.replace(/[.,!?]$/, ""));
+      item.text = unsure.length ? `${clean} ⟨usikre ord: ${unsure.join(", ")}⟩` : clean;
+    }
+    this.debug("stt_revised", { id, text: clean });
+    if (this.gate?.id === id) this.gate.go();
+  }
+
+  /** Wait briefly for word confidences (and, if unsure, the batch revision) before answering. */
+  private startGate(id: string) {
+    if (!this.init.line.revises) { this.requestTurn(); return; }
+    clearTimeout(this.gate?.timer);
+    let fired = false;
+    const gate = {
+      id,
+      timer: undefined as ReturnType<typeof setTimeout> | undefined,
+      go: () => { if (fired) return; fired = true; clearTimeout(gate.timer); if (this.gate === gate) this.gate = undefined; this.requestTurn(); },
+    };
+    this.gate = gate;
+    gate.timer = setTimeout(gate.go, WORDS_WAIT_MS);
   }
 
   // ---------- speculative turn ----------
@@ -723,6 +789,9 @@ export class CallSession {
     if (this.ended) return;
     this.ended = true;
     clearTimeout(this.maxTimer);
+    clearTimeout(this.holdTimer);
+    clearTimeout(this.gate?.timer);
+    this.dropSpec("call ended");
     clearTimeout(this.silenceTimer);
     this.turnAbort?.abort();
     if (this.pending) clearTimeout(this.pending.timer);

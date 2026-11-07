@@ -31,6 +31,7 @@ ${placeholders(ctx)}- Aldri kortnummer, CVV eller PIN. Foreslå betaling ved hen
 - Hvis mottakeren sier nei til å snakke med en KI: si ha det høflig og skriv [[END: refused | kort grunn]].
 - Når samtalen er ferdig: si ha det og skriv [[END: done|partial|failed | én linje med resultatet]].
 - Linjer som starter med [godkjent], [avslått], [svar], [instruks], [enklere], [avslutt] kommer fra brukeren i appen, ikke fra mottakeren.
+- Mottakerens ord kommer fra talegjenkjenning over telefon. Ord merket ⟨usikre ord: …⟩ kan være feilhørt: tolk dem ut fra sammenhengen. Hvis meningen fortsatt er uklar og det betyr noe (pris, tid, ja/nei), still ett kort oppklaringsspørsmål i stedet for å handle på det.
 - Hvis du ikke hørte hva de sa: be dem gjenta.
 Tone: ${TONES[ctx.tone]}${ctx.simpler ? "\nSnakk ekstra enkelt og sakte: korte ord, én ting om gangen." : ""}`;
 }
