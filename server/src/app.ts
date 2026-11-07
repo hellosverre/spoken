@@ -1,6 +1,7 @@
 // REST + live WebSocket per CONTRACT.md, plus the Telnyx webhook and media socket.
 
 import type { Server, ServerWebSocket } from "bun";
+import { parseErrand } from "./call/style.ts";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
@@ -191,7 +192,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     const maxSec = typeof b.maxSec === "number" && b.maxSec > 10 ? Math.min(b.maxSec, config.maxCallSec) : config.maxCallSec;
     const callId = id("c");
     const line = real
-      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name), maxSec })
+      ? new TelnyxLine({ callId, to: num.e164, voiceId: t.plan.voiceId, keyterms: keyterms(t.input.text, t.plan.callee.name, t.profile.name, t.plan.goal), maxSec })
       : new MockLine(config.callProvider === "telnyx" ? 1 : config.mockSpeed);
     const fnr = typeof b.fnr === "string" && /^\d{11}$/.test(b.fnr) && t.plan.willShare.includes("fnr") ? b.fnr : undefined;
     const callLlm = config.callProvider === "telnyx" && !real ? new MockLlm(15) : llm; // the mock callee follows the mock agent's script
@@ -211,10 +212,12 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     return json({ callId, mode, ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
 
-  function keyterms(text: string, callee: string, userName: string): string[] {
+  function keyterms(text: string, callee: string, userName: string, goal = ""): string[] {
     // Names and nouns from the task, then the call lexicon. Scribe realtime allows 50.
     const fromTask = `${callee} ${text}`.match(/[A-ZÆØÅ][\wæøåÆØÅ']{2,}|\b[\wæøå]{6,}\b/g) ?? [];
-    return [...new Set(["KI-assistent", userName, ...fromTask.map((w) => w.trim()), ...CALL_LEXICON].filter(Boolean))].slice(0, 50);
+    // The ordered item as one phrase: «cola zero» was heard as «barne-gulag, zero» (c_cc7521a0c46d).
+    const item = parseErrand(goal, userName).item?.replace(/^(en|ei|et|én|to|tre|fire|fem|seks|\d+)\s+/i, "").trim();
+    return [...new Set(["KI-assistent", userName, ...(item && item.length <= 40 ? [item] : []), ...fromTask.map((w) => w.trim()), ...CALL_LEXICON].filter(Boolean))].slice(0, 50);
   }
 
   async function route(req: Request, server: Server<WsData>): Promise<Response | undefined> {

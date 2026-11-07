@@ -22,6 +22,8 @@ export interface LineEvents {
   calleeRevised?(segmentId: string, text: string, words: Word[]): void;
   /** Batch STT heard only background noise in this segment: the realtime line was made up. */
   calleeNoise?(segmentId: string): void;
+  /** Batch STT finished this segment and agreed with realtime (or failed): nothing to change. */
+  calleeBatchDone?(segmentId: string): void;
   ended(reason: string): void;
   /** Line-level facts for the per-call debug log (latency, webhooks, media format). */
   debug?(kind: string, data: Record<string, unknown>): void;
