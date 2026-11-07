@@ -23,7 +23,9 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
     if (!el) return;
     el.style.height = "auto";
     // A hidden tab measures 0: keep the natural one-line height instead of collapsing it.
-    el.style.height = el.scrollHeight ? `${Math.min(el.scrollHeight, 120)}px` : "";
+    // The cap is 7.5rem so it grows with the phone's text size.
+    const cap = 7.5 * parseFloat(getComputedStyle(document.documentElement).fontSize);
+    el.style.height = el.scrollHeight ? `${Math.min(el.scrollHeight, cap)}px` : "";
   }, [value]);
 
   useEffect(() => {
