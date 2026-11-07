@@ -5,7 +5,7 @@ import type { Server, ServerWebSocket } from "bun";
 import { parseErrand } from "./call/style.ts";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Clarify, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
+import type { Clarify, FeedbackInput, LiveCommand, Plan, Profile, TaskInput } from "../../shared/contract.ts";
 import { timingSafeEqual } from "node:crypto";
 import { MockLine } from "./call/mock-line.ts";
 import { MockLlm } from "./llm/mock.ts";
@@ -94,6 +94,19 @@ function validTask(b: any): TaskInput | string {
   if (b.lang !== undefined && b.lang !== "no" && b.lang !== "en") return "lang must be no or en";
   if (b.phone !== undefined && typeof b.phone !== "string") return "phone must be a string";
   return { text: b.text.trim(), lang: b.lang ?? "no", phone: b.phone?.trim() || undefined, contactId: b.contactId };
+}
+
+function validFeedback(b: any): FeedbackInput | string {
+  if (!b || typeof b !== "object") return "body is required";
+  if (b.source !== "call" && b.source !== "profile") return "source must be call or profile";
+  if (b.rating !== undefined && b.rating !== null && b.rating !== "up" && b.rating !== "down") return "rating must be up or down";
+  if (b.comment !== undefined && b.comment !== null && typeof b.comment !== "string") return "comment must be a string";
+  if (b.callId !== undefined && b.callId !== null && (typeof b.callId !== "string" || !/^[\w-]{1,64}$/.test(b.callId))) return "callId is invalid";
+  const comment = typeof b.comment === "string" ? b.comment.trim() : "";
+  if (comment.length > 1000) return "comment is too long (max 1000)";
+  const rating = b.rating ?? undefined;
+  if (!rating && !comment) return "rating or comment is required";
+  return { source: b.source, ...(rating ? { rating } : {}), ...(comment ? { comment } : {}), ...(b.callId ? { callId: b.callId } : {}) };
 }
 
 function validProfile(b: any): Profile | string {
@@ -303,6 +316,16 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       if (!s) return err(404, "unknown call (results are kept 30 min, in memory only)");
       if (!s.result) return json({ status: s.status, inProgress: true }, 202);
       return json(s.result);
+    }
+
+    if (path === "/api/feedback" && m === "POST") {
+      if (overLimit(`feedback:${userKey(req, server)}`, 20, 10 * 60_000)) return err(429, "For mange tilbakemeldinger. Prøv igjen senere.");
+      const device = deviceOf(req);
+      if (!device) return err(400, "X-Spoken-Device header (a UUID) is required");
+      const v = validFeedback(await body(req));
+      if (typeof v === "string") return err(400, v);
+      try { await db.saveFeedback(device, v); } catch (e) { console.warn("[db] saveFeedback:", (e as Error).message); return err(500, "Kunne ikke lagre tilbakemeldingen."); }
+      return json({ ok: true }, 201);
     }
 
     if (path === "/api/voices" && m === "GET") return json(listVoices());

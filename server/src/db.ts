@@ -2,7 +2,7 @@
 // Supabase (PostgREST, service role, key in memory only) with an in-memory fallback, so a dead
 // network or a missing key never breaks a demo.
 
-import type { CallResult, Contact, Profile } from "../../shared/contract.ts";
+import type { CallResult, Contact, FeedbackInput, Profile } from "../../shared/contract.ts";
 
 /** One row of call history (what GET /api/calls returns). */
 export interface CallSummary {
@@ -25,6 +25,7 @@ export interface Db {
   deleteContact(device: string, id: string): Promise<boolean>;
   saveResult(device: string, r: CallResult, calleeName: string): Promise<void>;
   listResults(device: string, limit?: number): Promise<CallSummary[]>;
+  saveFeedback(device: string, f: FeedbackInput): Promise<void>;
 }
 
 export const isDeviceId = (s: string | null | undefined): s is string =>
@@ -37,6 +38,8 @@ export class MemoryDb implements Db {
   private profiles = new Map<string, Profile>();
   private contacts = new Map<string, Contact[]>();
   private results = new Map<string, CallSummary[]>();
+  /** Feedback kept in memory only as a fallback while Supabase is down (read by tests). */
+  readonly feedback: (FeedbackInput & { device: string; at: string })[] = [];
 
   async getProfile(d: string) { return this.profiles.get(d) ?? null; }
   async putProfile(d: string, p: Profile) { this.profiles.set(d, p); }
@@ -56,6 +59,7 @@ export class MemoryDb implements Db {
     this.results.set(d, [row, ...(this.results.get(d) ?? []).filter((x) => x.callId !== r.callId)]);
   }
   async listResults(d: string, limit = 20) { return (this.results.get(d) ?? []).slice(0, limit); }
+  async saveFeedback(d: string, f: FeedbackInput) { this.feedback.push({ device: d, ...f, at: new Date().toISOString() }); }
 }
 
 // ---------- supabase (PostgREST) ----------
@@ -124,6 +128,11 @@ export class SupabaseDb implements Db {
       details: r.details ?? {}, durationSec: r.duration_sec, at: r.created_at,
     }));
   }
+  async saveFeedback(d: string, f: FeedbackInput) {
+    await this.rest("POST", "feedback", {
+      device_id: d, call_id: f.callId ?? null, rating: f.rating ?? null, comment: f.comment ?? null, source: f.source,
+    }, "return=minimal");
+  }
 }
 
 // ---------- fallback wrapper ----------
@@ -161,6 +170,10 @@ export class FallbackDb implements Db {
   }
   async saveResult(d: string, r: CallResult, n: string) { await this.mem.saveResult(d, r, n); await this.tryBoth("saveResult", (db) => db.saveResult(d, r, n), async () => {}); }
   listResults(d: string, limit?: number) { return this.tryBoth("listResults", (db) => db.listResults(d, limit), () => this.mem.listResults(d, limit)); }
+  saveFeedback(d: string, f: FeedbackInput) {
+    // Remote first; memory only when Supabase fails, so a note is never silently lost.
+    return this.tryBoth("saveFeedback", (db) => db.saveFeedback(d, f), () => this.mem.saveFeedback(d, f));
+  }
 }
 
 /**
