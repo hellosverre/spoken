@@ -88,6 +88,20 @@ export function mockReplyText(ctx: AgentContext): string {
   }
 
   const c = callee.toLowerCase();
+  // Phone menu: pick the option whose label shares a word with the goal, else the first.
+  if (/trykk\s+\d/.test(c) && !/\bkan jeg hjelpe\b/.test(c)) {
+    const opts = [...c.matchAll(/(?:trykk\s+(\d)\s+for\s+([^.,]+))|(?:for\s+([^.,]+?),?\s+trykk\s+(\d))/g)]
+      .map((m) => ({ key: m[1] ?? m[4]!, label: (m[2] ?? m[3] ?? "").trim() }));
+    const goal = ctx.goal.toLowerCase();
+    const stem = (w: string) => w.slice(0, 5);
+    const hit = opts.find((o) => o.label.split(/\s+/).some((w) => w.length > 3 && goal.includes(stem(w)))) ?? opts[0];
+    if (hit) return `[[DTMF: ${hit.key}]]`;
+  }
+  if (/telefonsvar|legg igjen en beskjed|etter pipetonen/.test(c)) return "[[END: no_answer | Telefonsvarer]]";
+  if (/snakke med (en person|et menneske|personen|vedkommende|han|henne|ham)|(menneske|person) (på linja|selv)|er du en (robot|maskin)|selv\b.*\bsnakke/.test(c)) {
+    const q = callee.replace(/\s+/g, " ").trim();
+    return `Beklager, ${name} er døv og kan ikke ta samtaler, så jeg formidler alt i tekst. [[ASK: Mottakeren vil snakke med deg: «${q}». Hva skal jeg si? | Legg på]]`;
+  }
   if (/^(nei|nei takk)\b|vil ikke snakke|snakker ikke med (en )?(robot|maskin|ki)/.test(c)) {
     return "Det er helt i orden. Ha en fin dag! [[END: refused | Mottakeren ville ikke snakke med en KI-assistent.]]";
   }
