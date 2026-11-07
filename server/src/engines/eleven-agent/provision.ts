@@ -42,6 +42,7 @@ export interface ProvisionOpts {
 
 export function agentConfig(o: ProvisionOpts, toolId: string) {
   return {
+    platform_settings: { overrides: { conversation_config_override: { conversation: { text_only: true } } } },
     name: AGENT_NAME,
     tags: ["spoken", "spike"],
     conversation_config: {
