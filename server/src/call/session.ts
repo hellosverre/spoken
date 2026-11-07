@@ -602,6 +602,14 @@ export class CallSession {
       this.scheduleResume(200);
       return;
     }
+    // They cut us off and said something real: answer that, knowing what we didn't get to say.
+    if (this.cutLine && !this.cutLine.resumed && Date.now() - this.cutLine.at < 15_000) {
+      this.cutLine.resumed = true;
+      clearTimeout(this.cutTimer);
+      this.history.push({ role: "user", text: this.lang === "no"
+        ? `[instruks] Du ble avbrutt mens du sa: «${this.cutLine.text}». Svar på det de nettopp sa. Ta med resten bare hvis det fortsatt trengs, kort og naturlig, uten å gjenta deg.`
+        : `[instruks] You were cut off while saying: "${this.cutLine.text}". Answer what they just said. Bring up the rest only if it still matters, briefly and naturally, without repeating yourself.` });
+    }
     if (this.speakHold && this.speakHold.id !== id) this.speakHold.release();
     if (this.speaking) this.onCalleeSpeech();
 
@@ -833,7 +841,10 @@ export class CallSession {
       if ((this.init.line.silenceMs?.() ?? Infinity) < 500) { this.scheduleResume(400); return; }
       cut.resumed = true;
       this.debug("barge_in_resumed", { text: cut.text });
-      void this.say(cut.text, "say");
+      // Pick it up naturally instead of restarting word for word.
+      const lead = this.lang === "no" ? "Som jeg sa, " : "As I was saying, ";
+      const short = cut.text.split(/\s+/).length <= 4;
+      void this.say(short ? cut.text : lead + cut.text.charAt(0).toLowerCase() + cut.text.slice(1), "say");
     }, ms);
   }
 
