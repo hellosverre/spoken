@@ -6,6 +6,7 @@ import { config } from "../config.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { ScribeStream } from "../voice/scribe.ts";
+import { toSpeakable } from "../voice/speakable.ts";
 import { transcribeSegment } from "../voice/scribe-batch.ts";
 import { tts } from "../voice/tts.ts";
 import { alawToUlaw, g711ToPcm16, holdMusic, levelOf, pcmRms, typingSound, ulawRms, ULAW_SILENCE } from "../voice/ulaw.ts";
@@ -18,7 +19,8 @@ const LEAD_MS = 120; // how far ahead of real time we send, to ride out jitter
 const BARGE_RMS = Number(process.env.BARGE_RMS ?? 1500);
 const BARGE_FRAMES = 10;
 const BACKCHANNEL_TEXT = /^(ja|jo|mm+|mhm|hm+|okei|ok|ja ja|aha|å|åh|eh|ehm|nei)[.!,]?$/i;
-const VOICED_RMS = Number(process.env.VOICED_RMS ?? 600); // "callee is talking" for the STT timing
+const VOICED_RMS = Number(process.env.VOICED_RMS ?? 600);
+const LOCAL_COMMIT_MS = Number(process.env.LOCAL_COMMIT_MS ?? 280); // 0 = only Scribe's VAD // "callee is talking" for the STT timing
 
 // Batch second opinion per segment (STT_BATCH=0 turns it off).
 const STT_BATCH = process.env.STT_BATCH !== "0";
@@ -89,6 +91,7 @@ export class TelnyxLine implements CallLine {
   private inboundAlaw = false;
   private lastVoicedAt = 0;
   private lastPartialAt = 0;
+  private voicedSinceCommit = false;
   private lastCommittedNorm = "";
   // Last ~20 s of callee audio, for the batch second opinion on each segment.
   private recent: { at: number; pcm: Int16Array }[] = [];
@@ -244,6 +247,7 @@ export class TelnyxLine implements CallLine {
         this.lastCommitAt = Date.now();
         this.awaitingFirstAudio = true;
         this.committedIds.set(text.trim(), id);
+        this.voicedSinceCommit = false;
         this.lastCommittedNorm = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
         // Quiet speech can stay under the energy threshold; the last partial is a later bound.
         const speechEndAt = Math.max(this.lastVoicedAt, this.lastPartialAt) || undefined;
@@ -280,6 +284,7 @@ export class TelnyxLine implements CallLine {
         const pcm = g711ToPcm16(raw, this.inboundAlaw);
         const rms = pcmRms(pcm);
         if (rms > VOICED_RMS) {
+          this.voicedSinceCommit = true;
           // Voice onset of the current segment = first voiced frame after the last commit.
           if (!this.segOnsetAt) this.segOnsetAt = Date.now();
           this.lastVoicedAt = Date.now();
@@ -303,7 +308,11 @@ export class TelnyxLine implements CallLine {
           let o = 0;
           for (const b of this.inBatch) { out.set(b, o); o += b.length; }
           this.inBatch = [];
-          this.scribe?.send(out);
+          // Early commit: our energy VAD saw speech end LOCAL_COMMIT_MS ago, so don't wait for
+          // Scribe's own silence window (STT was ~0.6 s of every turn on calls #6–#7).
+          const commitNow = LOCAL_COMMIT_MS > 0 && this.voicedSinceCommit && Date.now() - this.lastVoicedAt >= LOCAL_COMMIT_MS;
+          if (commitNow) { this.voicedSinceCommit = false; this.ev.debug?.("local_commit", {}); }
+          this.scribe?.send(out, commitNow);
         }
         break;
       }
@@ -324,14 +333,17 @@ export class TelnyxLine implements CallLine {
     const t0 = Date.now();
     transcribeSegment(pcm, this.o.keyterms)
       .then((r) => {
-        const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
+        // Numbers spelled out first, so «110 krona» and «hundre og åttini kroner» can be compared.
+        const norm = (t: string) => toSpeakable(t).toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
         this.ev.debug?.("stt_batch", { id, realtime, batch: r.text, ms: Date.now() - t0 });
         this.saveSegment({ ...seg, batch: r.text, batchMs: Date.now() - t0 });
         // Only replace realtime when batch looks like the same utterance (guards bad windows).
         const n = (t: string) => norm(t).split(" ").filter(Boolean).length;
         // and must share at least one word ("I Storo." → "Bestill levering" on call #4 was the wrong window).
-        const rw = new Set(norm(realtime).split(" "));
-        const overlap = norm(r.text).split(" ").some((w) => w && rw.has(w));
+        // Same stem counts («krona»/«kroner»): first 4 letters.
+        const stem = (w: string) => w.slice(0, 4);
+        const rw = new Set(norm(realtime).split(" ").map(stem));
+        const overlap = norm(r.text).split(" ").some((w) => w && rw.has(stem(w)));
         const plausible = overlap && n(r.text) >= Math.max(1, 0.6 * n(realtime)) && n(r.text) <= 1.6 * n(realtime) + 1;
         if (r.text && plausible && norm(r.text) !== norm(realtime)) this.ev.calleeRevised?.(id, r.text, r.words);
       })

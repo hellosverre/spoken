@@ -20,6 +20,8 @@ export const config = {
   llmProvider: (env("LLM_PROVIDER", "mock") as LlmProviderName),
   llmApiKey: env("LLM_API_KEY", env("OPENROUTER_API_KEY")),
   llmModel: env("LLM_MODEL"),
+  // Planning (clarify/plan/summary) may use a stronger, slower model than in-call turns.
+  llmPlanModel: env("LLM_PLAN_MODEL"),
   telnyx: {
     apiKey: env("TELNYX_API_KEY"),
     connectionId: env("TELNYX_CONNECTION_ID"),

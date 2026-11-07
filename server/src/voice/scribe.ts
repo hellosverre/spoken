@@ -96,11 +96,12 @@ export class ScribeStream {
 
   /** Raw µ-law bytes from the call. */
   /** Encoded audio in the stream's format (µ-law bytes, or little-endian 16-bit PCM). */
-  send(audio: Uint8Array) {
+  /** commit=true asks Scribe to finalise the segment now (our own VAD saw the speaker stop). */
+  send(audio: Uint8Array, commit = false) {
     const msg: Record<string, unknown> = {
       message_type: "input_audio_chunk",
       audio_base_64: Buffer.from(audio.buffer, audio.byteOffset, audio.byteLength).toString("base64"),
-      commit: false,
+      commit,
       sample_rate: this.format === "pcm_16000" ? 16000 : 8000,
     };
     if (!this.sentFirst && this.previousText) msg.previous_text = this.previousText.slice(0, 500);

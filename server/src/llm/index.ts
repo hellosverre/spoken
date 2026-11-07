@@ -6,7 +6,7 @@ import type { LlmProvider } from "./types.ts";
 export function createLlm(): LlmProvider {
   const p = config.llmProvider;
   if ((p === "mistral" || p === "openai" || p === "openrouter") && config.llmApiKey) {
-    return new OpenAiCompatLlm(p, config.llmApiKey, config.llmModel);
+    return new OpenAiCompatLlm(p, config.llmApiKey, config.llmModel, undefined, config.llmPlanModel);
   }
   if (p !== "mock") console.warn(`[llm] LLM_PROVIDER=${p} without LLM_API_KEY: using mock`);
   return new MockLlm(config.mockSpeed >= 1 ? 15 : 0);
