@@ -33,3 +33,18 @@ Short answers to the hard questions. Criteria (Saturday slides): functionality, 
 | Have Deaf people tested it? | One Deaf user gave feedback; the app now collects feedback after every call. Quote her only with her written OK. | Én døv bruker har gitt tilbakemelding; appen samler nå tilbakemelding etter hver samtale. |
 | How do you make money? | Pay per call, about 29 kr; our cost is about 2 kr. Later: hearing organisations and municipalities buy it for their members. | Betal per samtale, rundt 29 kr; kostnaden vår er rundt 2 kr. Senere: hørselsorganisasjoner og kommuner kjøper det til medlemmene. |
 | Does it scale? | Under 2 kr per call, nothing per user. Swedish and Danish need a new prompt. The home server is a hackathon choice. | Under 2 kr per samtale. Svensk og dansk krever bare ny prompt. Hjemmeserveren er et hackathon-valg. |
+
+## Why "hand over to me" isn't built yet
+
+The feature: Spoken makes the call, and when the user wants to talk themselves, it connects them into the call.
+
+| Reason | Detail |
+|---|---|
+| Our first users can't use it | Spoken is built Deaf-first. A Deaf user can't take over a voice call, so the feature only helps the second group (people with phone anxiety). We built for the first group first |
+| It needs a second phone leg | Spoken would have to call the user's own phone and join the two calls. That doubles the cost per call and adds a second point of failure on stage |
+| Consent and trust | The shop agreed to talk to an AI. Switching to a person mid-call needs a clear line from Spoken ("Now you're talking to Olav") and a way back. We want to design that with real users, not guess |
+| Time | We chose callbacks and parallel calls for this weekend because they help both groups |
+
+**Answer (EN):** "It's next on the list. We built for Deaf users first, and they can't take over a voice call. For people with phone anxiety, handing over is the natural next step, and the phone line we use already supports joining two calls."
+
+**Svar (NO):** «Det er neste på lista. Vi bygde for døve først, og de kan ikke ta over en talesamtale. For folk med telefonangst er det neste naturlige steg, og telefonlinja vi bruker kan allerede koble sammen to samtaler.»
