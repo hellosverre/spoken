@@ -74,6 +74,9 @@ type LiveEvent =
   | { type: "transcript"; id: string; who: "callee" | "agent"; text: string; final: boolean }
   | { type: "approval_request"; id: string; question: string; options: string[] }
   | { type: "note"; text: string; level: "info" | "warn" }
+  | { type: "on_hold"; since: number }
+  | { type: "hold_over" }
+  | { type: "chips"; items: string[] }
   | { type: "result"; result: CallResult }
   | { type: "facts"; items: FactItem[] }
   | { type: string };
@@ -90,6 +93,10 @@ export interface LiveIO extends CallIO {
   /** Appends words to the speaker's last line (one agent turn arrives clause by clause). */
   sayMore(who: "ai" | "them", text: string): Promise<void>;
   note(text: string): void;
+  /** The shop put us on hold (since = epoch ms) or a person is back (null). */
+  hold?(since: number | null): void;
+  /** Suggested next instructions. */
+  chips?(items: string[]): void;
   connected(): void;
   /** Where the store sends the user's mid-call messages, chips and hang-up. */
   attach(sink: { instruction(text: string): void; hangup(): void } | null): void;
@@ -287,6 +294,15 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           queue(async () => setFacts(items));
           break;
         }
+        case "on_hold":
+          io.hold?.((e as { since: number }).since);
+          break;
+        case "hold_over":
+          io.hold?.(null);
+          break;
+        case "chips":
+          io.chips?.((e as { items: string[] }).items);
+          break;
         case "result":
           finished = true;
           setReceipt((e as { result: CallResult }).result.receipt);

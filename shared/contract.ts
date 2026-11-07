@@ -51,6 +51,9 @@ export type LiveEvent =
   | { type: "note"; text: string; level: "info" | "warn"; at: number }
   | { type: "level"; who: "callee" | "agent"; rms: number; at: number } // voice loudness 0..1, ~15 Hz, for the live visual
   | { type: "facts"; items: FactItem[]; at: number } // the full list each time it changes
+  | { type: "on_hold"; since: number } // the shop put US on hold; agent stays silent
+  | { type: "hold_over"; at: number } // a person is back
+  | { type: "chips"; items: string[]; at: number } // 3 suggested next instructions
   | { type: "result"; result: CallResult };
 
 export type LiveCommand =
