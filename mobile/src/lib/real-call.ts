@@ -1,3 +1,4 @@
+import { authHeader } from "./account";
 import type { Lang, Row } from "./i18n";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
 import { resetFacts, setFacts, type FactItem } from "../components/FactStrip";
@@ -64,6 +65,7 @@ async function http<T>(method: string, path: string, body?: unknown, extra: Reco
       headers: {
         ...(body === undefined ? {} : { "Content-Type": "application/json" }),
         ...(settings.deviceId ? { "X-Spoken-Device": settings.deviceId } : {}),
+        ...(await authHeader()),
         ...extra,
       },
       body: body === undefined ? undefined : JSON.stringify(body),

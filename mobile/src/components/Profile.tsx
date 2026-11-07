@@ -4,6 +4,7 @@ import type { ThemePref } from "../lib/store";
 import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
+import { AccountSection, useAccountCopy } from "./Account";
 import { ContactsSection } from "./ContactPicker";
 import { FeedbackSheet } from "./Feedback";
 import { HeroDuet } from "./drawings/Hero";
@@ -26,6 +27,8 @@ export function Profile() {
   const profile = useSpoken((s) => s.profile);
   const serverCalls = useSpoken((s) => s.serverCalls);
   const savedCode = useSpoken((s) => s.passcode);
+  const ac = useAccountCopy();
+  const [contactsKey, setContactsKey] = useState(0);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [code, setCode] = useState(savedCode);
   useEffect(() => setCode(savedCode), [savedCode]);
@@ -158,8 +161,11 @@ export function Profile() {
         ) : null}
       </View>
 
+      <SectionTitle icon="key" title={ac.title} />
+      <AccountSection onChange={() => setContactsKey((k) => k + 1)} />
+
       <SectionTitle icon="person" title={lang === "no" ? "Lagrede kontakter" : "Saved contacts"} />
-      <ContactsSection />
+      <ContactsSection key={contactsKey} />
 
       <SectionTitle icon="sliders" title={m.appearance} />
       <View style={styles.group}>

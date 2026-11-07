@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/account";
 import { e164List } from "@/lib/phone";
 import { useSpoken } from "@/lib/use-spoken";
 import { Icon } from "./Icon";
@@ -68,40 +69,7 @@ export function useContactPicker(): boolean {
   return ok;
 }
 
-/* ---- server (same device header as real-call.ts) ---- */
-
-function apiBase(): string {
-  const api = process.env.NEXT_PUBLIC_SPOKEN_API ?? "";
-  return api === "/" ? window.location.origin : api.replace(/\/$/, "");
-}
-
-async function api<T>(method: string, path: string, body?: unknown): Promise<T> {
-  let device = "";
-  try {
-    device = localStorage.getItem("spoken-device") ?? "";
-    if (!device) {
-      device = crypto.randomUUID();
-      localStorage.setItem("spoken-device", device);
-    }
-  } catch {
-    /* private mode: the server will say the header is missing */
-  }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 15_000);
-  try {
-    const res = await fetch(apiBase() + path, {
-      method,
-      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), ...(device ? { "X-Spoken-Device": device } : {}) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: ctrl.signal,
-    });
-    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+/* ---- server (device + account token headers live in lib/account.ts) ---- */
 
 export const listSaved = () => api<SavedContact[]>("GET", "/api/contacts");
 export const removeSaved = (id: string) => api<{ ok: true }>("DELETE", `/api/contacts/${id}`);
