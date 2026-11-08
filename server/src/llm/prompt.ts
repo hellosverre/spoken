@@ -107,7 +107,7 @@ export function summaryPrompt(ctx: AgentContext): string {
   const summary = ctx.uiLang === "en"
     ? "one line in English, e.g. «Ordered: 1 large pepperoni, pickup 18:00, 189 kr»"
     : "én linje på norsk, f.eks. «Bestilt: 1 stor pepperoni, hentes 18:00, 189 kr»";
-  return `Mål: ${ctx.goal}\nSamtale:\n${lines}\n\nSvar som JSON: {"outcome": "done|partial|failed|refused|no_answer", "summary": "${summary}", "details": {"tid": "...", "pris": "...", "referanse": "..."}}`;
+  return `Mål: ${ctx.goal}\nSamtale:\n${lines}\n\nSvar som JSON: {"outcome": "done|partial|failed|refused|no_answer", "summary": "${summary}", "details": {"tid": "...", "pris": "...", "referanse": "..."}}\nSummary: én kort setning (maks 15 ord). Details: maks 4 felt, bare det som faktisk ble avtalt eller oppgitt, korte verdier.`;
 }
 
 const TONES_EN = {

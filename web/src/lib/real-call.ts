@@ -404,8 +404,11 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: stri
 }
 
 function outcomeOf(result: CallResult): Outcome {
-  const rows = Object.entries(result.details ?? {}).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as Row);
-  return { ok: result.outcome === "done", title: result.summary, rows };
+  // Keep the result short: the first sentence as the title and at most four key details.
+  const rows = Object.entries(result.details ?? {}).slice(0, 4).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as Row);
+  const first = (result.summary ?? "").split(/(?<=[.!?])\s+/)[0] ?? "";
+  const title = first.length > 110 ? first.slice(0, 107).replace(/\s+\S*$/, "") + "…" : first;
+  return { ok: result.outcome === "done", title, rows };
 }
 
 /** Feedback after a call or from Profile. In the recorded demo there is no server, so it just resolves. */
