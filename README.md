@@ -10,6 +10,18 @@ Built for Deaf and nonspeaking people, and useful for anyone who would rather no
 
 Oslo Sprint 2026. This repo was created Sat 7 Nov 09:01, and everything in it was written during the hackathon.
 
+## Production setup (Sun 8 Nov 2026)
+
+| Part | What runs |
+|---|---|
+| Phone line | Vonage Voice API (`CALL_PROVIDER=vonage`), outbound + callbacks; Telnyx and 46elks adapters kept |
+| Speech to text | ElevenLabs Scribe v2 realtime, locked to the call language, with keyterms and entity detection |
+| Voice | ElevenLabs v4 Turbo (`TTS_MODEL=eleven_v4_turbo`), Flash v2.5 as automatic fallback |
+| LLM | OpenRouter (Haiku-class on calls) |
+| Data | Supabase (EU): profiles, contacts, call summaries, feedback, accounts. No audio, no transcripts (`SAVE_CALL_AUDIO=0`, `CALL_LOG=0`) |
+| Login | Phone number + SMS code, required for every `/api` route |
+| Web build | `cd web && SPOKEN_EXPORT=1 NEXT_PUBLIC_SPOKEN_API=/ npx next build` (static export served by the server) |
+
 ## How a call works
 
 1. **You type the errand.** Presets cover common calls (pizza, doctor, haircut, calling mom), or you write your own.

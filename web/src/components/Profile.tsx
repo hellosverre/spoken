@@ -274,7 +274,9 @@ export function Profile() {
       .map((w) => w[0]!.toUpperCase())
       .join("") || "?";
   const first = profile.name.trim().split(/\s+/)[0] ?? "";
-  const hour = new Date().getHours();
+  // The hour comes from the browser after mount, so static prerendering never reads the clock.
+  const [hour, setHour] = useState(12);
+  useEffect(() => setHour(new Date().getHours()), []);
   const greet = m.greet[hour < 5 ? "night" : hour < 11 ? "morning" : hour < 18 ? "day" : "evening"];
 
   return (

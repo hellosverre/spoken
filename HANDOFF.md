@@ -14,7 +14,7 @@ For the next agent picking this up. Read AGENTS.md → CONTRACT.md → SPEC.md f
 
 ## Debug data from real calls
 - `server/logs/<callId>.jsonl`: every event (transcripts, `stt_batch` with `rtConf`/`batchConf`, latency, turns).
-- `SAVE_CALL_AUDIO=1` is on: `server/.cache/calls/<callId>.pcm` (8 kHz s16le callee audio) + `.segments.jsonl` (realtime vs batch text per segment, with confidences). Gitignored. Delete after use.
+- Production runs with `SAVE_CALL_AUDIO=0` and `CALL_LOG=0`: no audio or transcripts are written. For local debugging only, `SAVE_CALL_AUDIO=1` writes `server/.cache/calls/<callId>.pcm` + `.segments.jsonl` (gitignored); delete after use.
 - `bun scripts/stt-segments.ts <callId>` (under bas-secret) re-runs batch STT on a saved call, for tuning.
 
 ## Done recently
