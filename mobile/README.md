@@ -13,6 +13,10 @@ On top of the web design, mobile adds:
 - **Back to home** on the call screen once the call has ended.
 - **Cancel** on the plan card, next to Change: drops the plan and starts an empty chat.
 - **A bigger tab bar**: full width, 56 pt tabs, every label shown.
+- **Colour-blind safe colours**: done is teal and not done is orange (not green against red), delete is a vermilion, and the preset tints are picked to stay apart under protanopia, deuteranopia and tritanopia, checked by simulation (Machado 2009) along with 4.5:1 text contrast in both themes. Status always has an icon and words as well, so nothing depends on colour alone. Not yet checked with colour-blind users. See the note at the top of `src/lib/theme.tsx`.
+- **Follows the phone's accessibility settings**: text size (layouts stack, sheets scroll), Bold Text, Increase Contrast / High contrast text (also a Higher contrast switch in Profile), Reduce Motion, and VoiceOver / TalkBack announcements for each call line. Checked in the iOS simulator only; see `ACCESSIBILITY-AUDIT.md` for what is tested and what is open.
+- **Terms of use** (`src/lib/terms.ts`, English and Norwegian): agreed with a checkbox at login, readable at any time from Profile. Bumping `TERMS_VERSION` asks everyone again. It's a plain-language draft for the test version, not reviewed by a lawyer, and its data section must stay true to the server's logging settings.
+- **Sign-up and call minutes (showcase only)**: Login → Create an account → pick a monthly minutes plan (`src/lib/plans.ts`), redeem an organisation's code, or contact us about Enterprise; a plan or a code logs in as the demo user. Profile shows this month's minutes used and left, Add minutes, and Change plan (with code redemption and Enterprise). Organisations buy many accounts at an agreed price and hand out one code per person; any code shaped like ABCD-1234 works in the showcase. Nothing is charged or sent, and calls don't count minutes down yet.
 - **Plainer labels**: no "Live" status pill or blinking dots in the call, and small labels are sentence-case Inter instead of the web's uppercase mono ("Spoken", "You", not "SPOKEN · AI", "YOU → SPOKEN"). Mobile-only names live in `copy-mobile.ts`.
 
 ```bash
@@ -92,6 +96,20 @@ Every request carries `X-Spoken-Device` (a random id made once and kept on the p
 When Spoken is waiting for you (an approval, or a question in the chat) and the app isn't in front, you get a system notification with the question, cleared once you answer (`src/lib/notify.ts`). These are local notifications, so the OS has to keep the app running to send them: there's no server push yet, and iOS can suspend a backgrounded app within seconds.
 
 With the right passcode the server places a real Telnyx call, only to numbers on its `CALL_ALLOWLIST`. Built-in presets have no number and use the server's demo directory, whose numbers aren't real, so save a real number in a preset to call it.
+
+## Call history
+
+Every finished call is saved on the phone (`src/lib/history.ts`, AsyncStorage, newest 100): who, number, date, outcome, the result details and the whole transcript, including your messages and the system notes. Nothing is sent to the server, which keeps no transcripts. Profile → **Call history** opens a sheet with each call's title, date and outcome; **View transcript** shows the conversation in the call screen's bubble style. Single calls or all of them can be deleted there.
+
+## Leaving the app during a call
+
+The call runs on the server whatever the app does, and the server replays every event to a new connection. On the phone:
+
+- **Keep-alive** (`src/lib/keep-alive.ts`): during a call the app plays a silent loop with iOS background audio on (the `expo-audio` plugin adds `UIBackgroundModes: audio`), so iOS doesn't suspend it. It mixes with other audio. Fine for a personal build; App Store review rejects silent audio as a keep-alive, and the lasting fix is server push, which needs a paid Apple account. Android shows a lock-screen media control for it.
+- **Reconnect** (`src/lib/real-call.ts`): a dropped live socket reconnects with backoff, and at once when you come back to the app. Replayed lines, notes and approvals are skipped.
+- **Notifications** (`src/lib/notify.ts`): when Spoken needs your OK and the app isn't in front, a notification shows the question with its choices as buttons (Approve / Decline, or the offered times), so you can answer without opening the app. A notice also says when the call ended, with the outcome.
+
+Needs a native build (`expo-audio` and `expo-notifications`); Expo Go can't add background audio to its own settings.
 
 ## On your own iPhone (no paid Apple account)
 

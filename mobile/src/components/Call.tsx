@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, findNodeHandle, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, type HostInstance, type ScrollViewInstance } from "react-native";
-import Animated, { FadeIn, useAnimatedStyle, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from "react-native-reanimated";
+import { AccessibilityInfo, Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, type HostInstance } from "react-native";
+import Animated, { FadeIn, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fill, type Row } from "../lib/i18n";
 import { SCENARIOS } from "../lib/scenarios";
-import type { Sheet as SheetContent } from "../lib/store";
-import { ease, em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
+import type { MobileCopy } from "../lib/copy-mobile";
+import type { Sheet as SheetContent, SpokenStore } from "../lib/store";
+import { ease, em, F, HEADING_SCALE, makeStyles, PAD, small, useLargeText, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Composer } from "./Composer";
 import { Glow, PulseRings } from "./Art";
@@ -16,7 +17,7 @@ import { CallFeedback } from "./Feedback";
 import { FactStrip, getFacts } from "./FactStrip";
 import { Receipt } from "./Receipt";
 import { Icon, Mark } from "./Icon";
-import { Btn, Press, T } from "./ui";
+import { Btn, CHAT_KEYBOARD_DISMISS, JumpToLatest, Press, T, TapToDismiss, useSpeechLang, useStickToEnd } from "./ui";
 import { MultiCall } from "./Compare";
 
 // The live call, as web/src/components/Call.tsx: who you're calling, who is
@@ -58,11 +59,23 @@ function useContact() {
   return { ...sc, contact: sc[lang].contact };
 }
 
+/** Hanging up can't be undone on a real call, so it asks first (the button, and Android back). */
+export function confirmEndCall(store: SpokenStore, m: MobileCopy) {
+  Alert.alert(m.endCallQ, m.endCallBody, [
+    { text: m.keepCall, style: "cancel" },
+    { text: m.endCallQ.replace(/\?$/, ""), style: "destructive", onPress: () => store.endCall() },
+  ]);
+}
+
+/** How far call-screen chrome (header, status, chips) grows with the text size. */
+const CHROME_SCALE = 1.5;
+
 // No status pill here (the web's "Live" badge): the speaker card right below
 // already says who is talking, and the timer shows the call is running.
 function CallHead() {
   const store = useStore();
   const t = useCopy();
+  const m = useMobileCopy();
   const styles = useStyles();
   const { contact, number } = useContact();
   const elapsed = useSpoken((s) => s.elapsed);
@@ -70,15 +83,16 @@ function CallHead() {
 
   return (
     <View style={styles.callhead}>
+      {/* Large text: the header grows less, so the transcript keeps the screen. */}
       <View style={styles.grow}>
-        <T size={16} weight="medium">
+        <T size={16} weight="medium" maxFontSizeMultiplier={CHROME_SCALE}>
           {contact}
         </T>
-        <Text style={styles.num}>
+        <Text style={styles.num} maxFontSizeMultiplier={CHROME_SCALE}>
           {number} · <Text style={styles.timer}>{elapsed}</Text>
         </Text>
       </View>
-      <Press accessibilityLabel={t.endCall} disabled={callEnded} onPress={() => store.endCall()} style={[styles.endbtn, callEnded && { opacity: 0.3 }]}>
+      <Press accessibilityLabel={t.endCall} disabled={callEnded} onPress={() => confirmEndCall(store, m)} style={[styles.endbtn, callEnded && { opacity: 0.3 }]}>
         <Icon name="hang" color="#fff" />
       </Press>
     </View>
@@ -93,6 +107,8 @@ function Speaker() {
   const { contact, init } = useContact();
   const who = useSpoken((s) => s.speaker);
   const note = useSpoken((s) => s.speakerNote);
+  // Large text: just the words, so the transcript keeps most of the screen.
+  const compact = useLargeText();
 
   const label =
     who === "them" ? fill(t.speakingThem, { name: contact })
@@ -102,32 +118,35 @@ function Speaker() {
     : t.listening;
 
   return (
-    <View style={styles.speaker}>
+    <View style={[styles.speaker, compact && styles.speakerCompact]}>
       {/* The glow sits on whoever is talking: neutral for them, the accent for Spoken. */}
       <SideGlow on={who === "them"} side="left" color={C.ink} />
       <SideGlow on={who === "ai"} side="right" color={C.accent} />
-      <View style={styles.pods}>
-        <View style={styles.podWrap}>
-          <PulseRings active={who === "them"} color={C.muted} size={56} />
-          <View style={[styles.pod, styles.podThem, who === "ai" && styles.quiet]}>
-            <T size={15} weight="semibold">
-              {init}
-            </T>
+      {/* Who is talking is said in the label below (and each line is read out), so the pods are visual only. */}
+      {compact ? null : (
+        <View style={styles.pods} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+          <View style={styles.podWrap}>
+            <PulseRings active={who === "them"} color={C.muted} size={56} />
+            <View style={[styles.pod, styles.podThem, who === "ai" && styles.quiet]}>
+              <T size={15} weight="semibold">
+                {init}
+              </T>
+            </View>
+          </View>
+          <View style={styles.wave}>
+            {Array.from({ length: 9 }, (_, i) => (
+              <Bar key={i} i={i} who={who} />
+            ))}
+          </View>
+          <View style={styles.podWrap}>
+            <PulseRings active={who === "ai"} color={C.accent} size={56} />
+            <View style={[styles.pod, styles.podAi, who === "them" && styles.quiet]}>
+              <Mark w={26} h={16} color={C.inv} />
+            </View>
           </View>
         </View>
-        <View style={styles.wave} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-          {Array.from({ length: 9 }, (_, i) => (
-            <Bar key={i} i={i} who={who} />
-          ))}
-        </View>
-        <View style={styles.podWrap}>
-          <PulseRings active={who === "ai"} color={C.accent} size={56} />
-          <View style={[styles.pod, styles.podAi, who === "them" && styles.quiet]}>
-            <Mark w={26} h={16} color={C.inv} />
-          </View>
-        </View>
-      </View>
-      <Text style={[styles.speakerLabel, who && { color: C.muted }]} accessibilityLiveRegion="polite">
+      )}
+      <Text style={[styles.speakerLabel, who && { color: C.muted }]} maxFontSizeMultiplier={CHROME_SCALE}>
         {label}
       </Text>
     </View>
@@ -153,16 +172,18 @@ function SideGlow({ on, side, color }: { on: boolean; side: "left" | "right"; co
 function Bar({ i, who }: { i: number; who: "them" | "ai" | null }) {
   const { C } = useTheme();
   const styles = useStyles();
+  const reduce = useReducedMotion();
   const s = useSharedValue(0.15);
   const n = i + 1;
   const offset = n % 5 === 0 ? 150 : n % 3 === 0 ? 550 : n % 2 === 0 ? 300 : 0;
   useEffect(() => {
-    if (!who) {
-      s.value = withTiming(0.15, { duration: 200 });
+    // Reduced motion: still bars, tall while someone talks.
+    if (!who || reduce) {
+      s.value = withTiming(who ? 0.3 + ((n * 37) % 60) / 100 : 0.15, { duration: 200 });
       return;
     }
     s.value = withDelay(offset, withRepeat(withSequence(withTiming(1, { duration: 400 }), withTiming(0.2, { duration: 400 })), -1));
-  }, [who, offset, s]);
+  }, [who, offset, s, reduce, n]);
   const anim = useAnimatedStyle(() => ({ transform: [{ scaleY: s.value }] }));
   const color = who === "ai" ? C.accent : who === "them" ? C.ink : C.line2;
   return <Animated.View style={[styles.bar, { backgroundColor: color }, anim]} />;
@@ -173,71 +194,68 @@ function Transcript() {
   const { C } = useTheme();
   const styles = useStyles();
   const { contact } = useContact();
+  const speechLang = useSpeechLang();
   const lines = useSpoken((s) => s.transcript);
-  const scroll = useRef<ScrollViewInstance>(null);
-
-  // VoiceOver only reads live regions on Android. Lines fill in word by word, so once the
-  // transcript has been still for a moment, say whatever has not been announced yet.
-  const announced = useRef(lines.length ? lines[lines.length - 1].id : -1);
-  useEffect(() => {
-    const id = setTimeout(() => {
-      for (const line of lines) {
-        if (line.id <= announced.current) continue;
-        if (line.kind === "sys") AccessibilityInfo.announceForAccessibility(line.text);
-        else if (line.kind !== "you" && line.words.length) {
-          AccessibilityInfo.announceForAccessibility(`${line.kind === "ai" ? m.aiLabel : contact}: ${line.words.join(" ")}`);
-        }
-        announced.current = line.id;
-      }
-    }, 1200);
-    return () => clearTimeout(id);
-  }, [lines, m.aiLabel, contact]);
+  // Follows new words only while you're at the bottom; scrolled up to reread, it stays put.
+  const stick = useStickToEnd();
 
   return (
-    <ScrollView
-      ref={scroll}
-      style={styles.grow}
-      contentContainerStyle={styles.transcript}
-      onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: false })}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-    >
-      {lines.map((line) => {
-        if (line.kind === "sys")
-          return (
-            <Text key={line.id} style={styles.sysText}>
-              {line.text}
-            </Text>
-          );
-        if (line.kind === "you")
-          return (
-            <Animated.View key={line.id} entering={FadeIn.duration(300)} style={[styles.msg, styles.right]}>
-              <Text style={styles.who}>{m.youLabel}</Text>
-              <View style={[styles.txt, styles.youTxt]}>
-                <T size={14} color={C.muted}>
+    <View style={styles.grow}>
+      <ScrollView
+        {...stick.props}
+        style={styles.grow}
+        contentContainerStyle={styles.transcriptScroll}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={CHAT_KEYBOARD_DISMISS}
+      >
+        <TapToDismiss style={styles.transcript}>
+          {lines.map((line) => {
+            if (line.kind === "sys")
+              return (
+                <Text key={line.id} style={styles.sysText}>
                   {line.text}
-                </T>
-              </View>
-            </Animated.View>
-          );
-        const ai = line.kind === "ai";
-        const text = line.words.join(" ");
-        return (
-          <Animated.View
-            key={line.id}
-            entering={FadeIn.duration(300)}
-            style={[styles.msg, ai ? styles.right : styles.left]}
-            accessible
-            accessibilityLabel={`${ai ? m.aiLabel : contact}: ${text}`}
-          >
-            <Text style={styles.who}>{ai ? m.aiLabel : contact}</Text>
-            <View style={[styles.txt, ai ? styles.aiTxt : styles.themTxt]}>
-              <Text style={[styles.lineText, ai && { color: C.inv }]}>{text}</Text>
-            </View>
-          </Animated.View>
-        );
-      })}
-    </ScrollView>
+                </Text>
+              );
+            if (line.kind === "you")
+              return (
+                <Animated.View
+                  key={line.id}
+                  entering={FadeIn.duration(300)}
+                  style={[styles.msg, styles.right]}
+                  accessible
+                  accessibilityLabel={`${m.youLabel}: ${line.text}`}
+                  accessibilityLanguage={speechLang}
+                >
+                  <Text style={styles.who}>{m.youLabel}</Text>
+                  <View style={[styles.txt, styles.youTxt]}>
+                    <T size={14} color={C.muted}>
+                      {line.text}
+                    </T>
+                  </View>
+                </Animated.View>
+              );
+            const ai = line.kind === "ai";
+            const text = line.words.join(" ");
+            return (
+              <Animated.View
+                key={line.id}
+                entering={FadeIn.duration(300)}
+                style={[styles.msg, ai ? styles.right : styles.left]}
+                accessible
+                accessibilityLabel={`${ai ? m.aiLabel : contact}: ${text}`}
+                accessibilityLanguage={speechLang}
+              >
+                <Text style={styles.who}>{ai ? m.aiLabel : contact}</Text>
+                <View style={[styles.txt, ai ? styles.aiTxt : styles.themTxt]}>
+                  <Text style={[styles.lineText, ai && { color: C.inv }]}>{text}</Text>
+                </View>
+              </Animated.View>
+            );
+          })}
+        </TapToDismiss>
+      </ScrollView>
+      <JumpToLatest on={stick.behind} onPress={() => stick.toEnd()} />
+    </View>
   );
 }
 
@@ -289,32 +307,40 @@ function CallFooter() {
 
 /* ---------- bottom sheet: approvals and results ---------- */
 
+type TitleRef = React.RefObject<HostInstance | null>;
+
 function Sheet() {
+  const store = useStore();
   const styles = useStyles();
   const sheet = useSpoken((s) => s.sheet);
   const open = useSpoken((s) => s.sheetOpen);
   const insets = useSafeAreaInsets();
+  const reduce = useReducedMotion();
   const [h, setH] = useState(800);
   const p = useSharedValue(0);
-  const first = useRef<HostInstance>(null);
+  const title = useRef<HostInstance>(null);
+  // A new approval or a result: the question or outcome is read first.
+  const key = sheet?.kind === "ask" ? sheet.since : sheet?.title;
 
   useEffect(() => {
     p.value = withTiming(open ? 1 : 0, { duration: open ? 350 : 250, easing: ease });
   }, [open, p]);
 
-  // Move screen-reader focus to the first choice once the sheet has slid up.
+  // Move screen-reader focus to the sheet's heading once it is up.
   useEffect(() => {
-    if (!open || sheet?.kind !== "ask") return;
-    if (sheet.cfg.title) AccessibilityInfo.announceForAccessibility(sheet.cfg.title);
+    if (!open) return;
     const id = setTimeout(() => {
-      const node = first.current && findNodeHandle(first.current);
+      const node = title.current && findNodeHandle(title.current);
       if (node) AccessibilityInfo.setAccessibilityFocus(node);
-    }, 450);
+    }, reduce ? 100 : 450);
     return () => clearTimeout(id);
-  }, [open, sheet]);
+  }, [open, key, reduce]);
 
   const scrim = useAnimatedStyle(() => ({ opacity: p.value }));
-  const slide = useAnimatedStyle(() => ({ transform: [{ translateY: (1 - p.value) * h }] }));
+  // Reduced motion: the sheet fades in place instead of sliding up.
+  const slide = useAnimatedStyle(() =>
+    reduce ? { opacity: p.value } : { transform: [{ translateY: (1 - p.value) * h }] },
+  );
 
   return (
     <>
@@ -324,27 +350,31 @@ function Sheet() {
         accessibilityViewIsModal={open}
         accessibilityElementsHidden={!open}
         importantForAccessibility={open ? "yes" : "no-hide-descendants"}
+        // VoiceOver's escape gesture closes a result. An approval stays until it is answered.
+        onAccessibilityEscape={sheet?.kind === "result" ? () => store.closeSheet() : undefined}
         onLayout={(e) => setH(e.nativeEvent.layout.height)}
         style={[styles.sheet, { paddingBottom: 18 + insets.bottom }, slide]}
       >
-        {sheet?.kind === "ask" ? <AskSheet sheet={sheet} first={first} /> : null}
-        {sheet?.kind === "result" ? <ResultSheet sheet={sheet} /> : null}
+        {sheet?.kind === "ask" ? <AskSheet sheet={sheet} title={title} /> : null}
+        {sheet?.kind === "result" ? <ResultSheet sheet={sheet} title={title} /> : null}
       </Animated.View>
     </>
   );
 }
 
-function Rows({ rows }: { rows: Row[] }) {
+/** Label and value side by side; stacked when the text is large. */
+export function Rows({ rows }: { rows: Row[] }) {
   const { C } = useTheme();
   const styles = useStyles();
+  const stack = useLargeText();
   return (
     <View>
       {rows.map(([k, v]) => (
-        <View key={k} style={styles.dlRow}>
+        <View key={k} style={[styles.dlRow, stack && styles.dlStack]} accessible accessibilityLabel={`${k}: ${v}`}>
           <T size={14} color={C.muted}>
             {k}
           </T>
-          <T size={14} weight="medium" style={styles.dd}>
+          <T size={14} weight="medium" style={stack ? undefined : styles.dd}>
             {v}
           </T>
         </View>
@@ -353,6 +383,18 @@ function Rows({ rows }: { rows: Row[] }) {
   );
 }
 
+/** How long the other side has been holding: m:ss, ticking once a second. */
+function Waited({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  return <>{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`}</>;
+}
+
+/** Key facts (price, time …) as chips instead of a table, read out as one list. */
 function Chips({ items }: { items: string[] }) {
   const { C } = useTheme();
   const styles = useStyles();
@@ -368,24 +410,34 @@ function Chips({ items }: { items: string[] }) {
   );
 }
 
-function AskSheet({ sheet, first }: { sheet: Extract<SheetContent, { kind: "ask" }>; first: React.RefObject<HostInstance | null> }) {
+function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask" }>; title: TitleRef }) {
   const store = useStore();
   const t = useCopy();
   const { C } = useTheme();
   const styles = useStyles();
+  const stack = useLargeText();
+  const speechLang = useSpeechLang();
   const { cfg, pressed } = sheet;
-  const many = cfg.options.length > 1;
+  // Times side by side, unless the text is too big for them to fit.
+  const many = cfg.options.length > 1 && !stack;
   // Key facts (price, time …) as at most three chips instead of a table.
   const facts = cfg.rows.map(([, v]) => v).filter(Boolean).slice(0, 3);
 
   return (
     <>
-      <Text style={[styles.h3, { fontSize: 24, lineHeight: 29 }]} accessibilityRole="header">
-        {cfg.title}
-      </Text>
-      <Chips items={facts} />
-      <View style={styles.acts}>
-        <View ref={first} style={many ? styles.optrow : undefined}>
+      {/* The question scrolls at large text sizes; the answers below always stay on screen. */}
+      <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody}>
+        {/* Not a live region: the timer would be read out every second. */}
+        <Text style={styles.flagText}>
+          {t.waiting} · <Waited since={sheet.since} />
+        </Text>
+        <Text ref={title} style={[styles.h3, styles.askH]} accessibilityRole="header" accessibilityLanguage={speechLang} maxFontSizeMultiplier={HEADING_SCALE}>
+          {cfg.title}
+        </Text>
+        <Chips items={facts} />
+      </ScrollView>
+      <View style={[styles.acts, styles.pinned]}>
+        <View style={many ? styles.optrow : styles.acts}>
           {cfg.options.map((o) => (
             <Btn
               key={o.v}
@@ -398,50 +450,54 @@ function AskSheet({ sheet, first }: { sheet: Extract<SheetContent, { kind: "ask"
           ))}
         </View>
         <Btn kind="ghost" block label={cfg.decline} onPress={() => store.choose("no")} />
+        <Text style={[styles.hold, styles.holdSmall]}>
+          {t.holdSaid} <Text style={{ color: C.muted }}>“{cfg.hold}”</Text>
+        </Text>
       </View>
-      <Text style={[styles.hold, { fontSize: 12, textAlign: "center" }]}>
-        {t.holdSaid} <Text style={{ color: C.muted }}>“{cfg.hold}”</Text>
-      </Text>
     </>
   );
 }
 
-function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" }> }) {
+function ResultSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "result" }>; title: TitleRef }) {
   const store = useStore();
   const t = useCopy();
   const lang = useSpoken((s) => s.lang);
   const { C } = useTheme();
   const styles = useStyles();
+  const compact = useLargeText();
+  const speechLang = useSpeechLang();
   const [more, setMore] = useState(false);
   const rows = sheet.rows.slice(0, 4);
   const facts = getFacts().map((f) => f.value).filter((v) => !rows.some(([, rv]) => rv === v)).slice(0, 4);
+  const details = lang === "en" ? "Details" : "Detaljer";
 
   return (
-    <>
-      <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={104} /> : <NothingAgreedArt width={104} />}</Animated.View>
-      <Text style={styles.h3} accessibilityRole="header">
+    // The comment box is in here too, so the keyboard insets keep it in view.
+    <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      {compact ? null : (
+        <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={104} /> : <NothingAgreedArt width={104} />}</Animated.View>
+      )}
+      <Text ref={title} style={styles.h3} accessibilityRole="header" accessibilityLanguage={speechLang} maxFontSizeMultiplier={HEADING_SCALE}>
         {sheet.title}
       </Text>
       <Rows rows={rows} />
       <Chips items={facts} />
-      <Press
-        onPress={() => setMore(!more)}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: more }}
-        accessibilityLabel={lang === "en" ? "Details" : "Detaljer"}
-        style={styles.detToggle}
-      >
-        <T size={15} color={C.muted}>{lang === "en" ? "Details" : "Detaljer"} {more ? "▴" : "▾"}</T>
+      <Press onPress={() => setMore(!more)} accessibilityRole="button" accessibilityState={{ expanded: more }} accessibilityLabel={details} style={styles.detToggle}>
+        <T size={15} color={C.muted}>
+          {details} {more ? "▴" : "▾"}
+        </T>
       </Press>
       {more ? <Receipt /> : null}
       <CallFeedback />
       <View style={styles.acts}>
         <Btn block label={t.back} onPress={() => store.goHome()} style={styles.bigBtn} />
         <Press onPress={() => store.closeSheet()} accessibilityRole="button" accessibilityLabel={t.readT} style={styles.detToggle}>
-          <T size={15} color={C.muted} style={{ textDecorationLine: "underline" }}>{t.readT}</T>
+          <T size={15} color={C.muted} style={{ textDecorationLine: "underline" }}>
+            {t.readT}
+          </T>
         </Press>
       </View>
-    </>
+    </ScrollView>
   );
 }
 
@@ -453,7 +509,7 @@ export const useStyles = makeStyles((C) => ({
   callhead: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: PAD, paddingTop: 16, paddingBottom: 10 },
   num: { fontFamily: F.regular, fontSize: 13, color: C.dim },
   timer: { color: C.muted, fontVariant: ["tabular-nums"] },
-  endbtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.danger, alignItems: "center", justifyContent: "center" },
+  endbtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: C.danger, alignItems: "center", justifyContent: "center" },
   speaker: {
     marginVertical: 4,
     backgroundColor: C.surface,
@@ -473,10 +529,13 @@ export const useStyles = makeStyles((C) => ({
   podThem: { backgroundColor: C.surface2 },
   podAi: { backgroundColor: C.accent },
   quiet: { opacity: 0.35 },
+  speakerCompact: { paddingTop: 8, paddingBottom: 8, borderRadius: 14 },
   wave: { flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", alignItems: "center", height: 36 },
   bar: { width: 4, height: 36, borderRadius: 2 },
   speakerLabel: { fontFamily: F.medium, fontSize: 13.5, textAlign: "center", color: C.dim, minHeight: 18 },
-  transcript: { gap: 12, paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 16 },
+  // The tap-to-close area fills the scroll view even while the transcript is short.
+  transcriptScroll: { flexGrow: 1 },
+  transcript: { flexGrow: 1, gap: 12, paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 16 },
   msg: { maxWidth: "88%", gap: 4 },
   left: { alignSelf: "flex-start" },
   right: { alignSelf: "flex-end", alignItems: "flex-end" },
@@ -504,16 +563,21 @@ export const useStyles = makeStyles((C) => ({
     borderTopRightRadius: 22,
     paddingTop: 22,
     paddingHorizontal: PAD,
-    gap: 16,
   },
+  sheetScroll: { flexGrow: 0, flexShrink: 1 },
+  sheetBody: { gap: 16, paddingBottom: 4 },
+  pinned: { paddingTop: 14 },
   flagText: { fontFamily: F.medium, fontSize: 14, color: C.accent, marginBottom: -8 },
   h3: { fontFamily: F.semibold, fontSize: 29, lineHeight: 32, letterSpacing: em(-0.02, 29), color: C.ink },
   dlRow: { flexDirection: "row", justifyContent: "space-between", gap: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.line },
   dd: { textAlign: "right", flexShrink: 1 },
+  dlStack: { flexDirection: "column", gap: 2 },
   hold: { fontFamily: F.regular, fontSize: 13.5, lineHeight: 20, color: C.dim },
   acts: { gap: 8 },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
-  rchip: { height: 30, paddingHorizontal: 12, borderRadius: 15, borderWidth: 1, borderColor: C.line2, justifyContent: "center" },
+  rchip: { minHeight: 30, paddingVertical: 4, paddingHorizontal: 12, borderRadius: 15, borderWidth: 1, borderColor: C.line2, justifyContent: "center" },
+  askH: { fontSize: 24, lineHeight: 29 },
+  holdSmall: { fontSize: 12, lineHeight: 17, textAlign: "center" },
   bigBtn: { minHeight: 56 },
   detToggle: { minHeight: 44, justifyContent: "center", alignItems: "center" },
   optrow: { flexDirection: "row", gap: 8 },

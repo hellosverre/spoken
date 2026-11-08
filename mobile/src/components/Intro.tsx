@@ -43,6 +43,8 @@ export function Intro() {
   // The bubble is as wide as the typed line will be, like the web's measureLine().
   const bw = lineW ? Math.min(lineW + 48, Math.min(screenW, 400) - 40) : 260;
   const centreY = screenH * 0.46;
+  // The icons sit ±150 pt out; on narrow screens (Display Zoom, 320 pt) they move in to stay visible.
+  const spread = Math.min(1, (screenW - 48) / 344);
 
   const y = useSharedValue(0);
   const sx = useSharedValue(1);
@@ -106,19 +108,20 @@ export function Intro() {
   return (
     <Pressable style={styles.root} onPress={() => store.skipIntro()} accessibilityRole="button" accessibilityLabel={`${t.introLine} ${t.skip}`}>
       {/* Invisible copy of the line, only to measure how wide the bubble should grow. */}
-      <Text style={[styles.line, styles.measure]} onLayout={(e) => setLineW(e.nativeEvent.layout.width)} numberOfLines={1}>
+      <Text style={[styles.line, styles.measure]} onLayout={(e) => setLineW(e.nativeEvent.layout.width)} numberOfLines={1} maxFontSizeMultiplier={1.3}>
         {t.introLine}
       </Text>
 
       <View style={[styles.ring, { top: centreY }]} pointerEvents="none">
         {POPS.map(([name, x, yy], i) => (
-          <Pop key={name} name={name} x={x} y={yy} i={i} solid={i % 2 === 1} on={s.pops} still={s.still} />
+          <Pop key={name} name={name} x={x * spread} y={yy} i={i} solid={i % 2 === 1} on={s.pops} still={s.still} />
         ))}
       </View>
 
       <View style={[styles.blobPos, { top: centreY }]} pointerEvents="none">
         <Animated.View style={[styles.blob, blob]}>
-          <Text style={styles.line} numberOfLines={1}>
+          {/* One line in a bubble of fixed height, so it grows only a little; the whole line is the button's label. */}
+          <Text style={styles.line} numberOfLines={1} maxFontSizeMultiplier={1.3}>
             {s.typed}
             {s.caret ? <Caret /> : null}
           </Text>

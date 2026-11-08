@@ -7,8 +7,11 @@ import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
 import { currentReal, isLive, planRealCall, planTargets, realEnabled, restoreReal, resumeRealCall, type LiveIO } from "./real-call";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
+import { HISTORY_MAX, historyRepo, type CallRecord } from "./history";
+import { DEMO_MINUTES, migrateMinutes, parseCode, PLANS, type Minutes, type PaidPlanId } from "./plans";
+import { TERMS_VERSION } from "./terms";
 
-export type Screen = "intro" | "login" | "home" | "call";
+export type Screen = "intro" | "login" | "signup" | "plans" | "home" | "call";
 /** Home = presets and demos, Chat = talk to Spoken, Settings = the Profile tab. */
 export type Tab = "home" | "chat" | "settings";
 export type ThemePref = "system" | "dark" | "light";
@@ -81,6 +84,18 @@ export interface State {
   presets: StoredPreset[];
   /** Set while the multi-call view (2–3 parallel info calls) is on screen. */
   multi: MultiRequest | null;
+  /** Finished calls with their transcripts, newest first. Kept in this browser only (history.ts). */
+  history: CallRecord[];
+  /** Higher contrast switched on in Profile. The device's own setting (prefers-contrast) applies anyway, in CSS. */
+  highContrast: boolean;
+  /** Vibrate when Spoken needs you (phones whose browser can). */
+  haptics: boolean;
+  /** The terms of use this browser agreed to, and when. Login asks again when TERMS_VERSION changes. */
+  terms: { version: string; at: string } | null;
+  /** Call minutes on the account: dummy numbers for the showcase, nothing is charged. */
+  minutes: Minutes;
+  /** Came from sign-up and a plan: Login says it's the last step. */
+  signupPending: boolean;
 }
 
 export interface MultiRequest {
@@ -123,13 +138,20 @@ const INITIAL: State = {
   profile: { name: "", phone: "" },
   presets: DEFAULT_PRESETS,
   multi: null,
+  history: [],
+  highContrast: false,
+  haptics: true,
+  terms: null,
+  minutes: DEMO_MINUTES,
+  signupPending: false,
 };
 
 const HANG = Symbol("hang");
 const ABORT = Symbol("abort");
 const LANG_KEY = "spoken-lang";
-/** { themePref, profile } as JSON. layout.tsx reads the theme from here before first paint. */
+/** SavedPrefs as JSON. layout.tsx reads the theme and contrast from here before first paint. */
 export const PREFS_KEY = "spoken-prefs";
+type SavedPrefs = Pick<State, "themePref" | "profile" | "highContrast" | "haptics" | "terms" | "minutes">;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Wait two frames so a reset class is painted before the next one is added. */
@@ -222,9 +244,18 @@ export class SpokenStore {
     } catch {}
     this.setLang(lang);
     try {
-      const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "null") as Partial<Pick<State, "themePref" | "profile">> | null;
-      if (p) this.set((s) => ({ themePref: p.themePref ?? s.themePref, profile: { ...s.profile, ...p.profile } }));
+      const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "null") as Partial<SavedPrefs> | null;
+      if (p)
+        this.set((s) => ({
+          themePref: p.themePref ?? s.themePref,
+          profile: { ...s.profile, ...p.profile },
+          highContrast: p.highContrast === true,
+          haptics: p.haptics ?? s.haptics,
+          terms: p.terms ?? s.terms,
+          minutes: migrateMinutes(p.minutes) ?? s.minutes,
+        }));
     } catch {}
+    this.set({ history: historyRepo.load() });
     // The stored session token is the login: a reload keeps it, a 401 anywhere drops it.
     this.set({ authed: !!getToken() });
     onUnauthorized(() => this.sessionExpired());
@@ -390,10 +421,77 @@ export class SpokenStore {
     else this.set({ screen: "login" });
   }
 
-  /** The SMS code was accepted (account.verifyLogin stored the token): enter the app. */
-  signedIn() {
-    this.set({ authed: true });
+  /** True when this browser has agreed to the current terms of use. */
+  termsOk(): boolean {
+    return this.state.terms?.version === TERMS_VERSION;
+  }
+
+  /**
+   * The SMS code was accepted (account.verifyLogin stored the token): enter the app.
+   * `agreed` is the terms checkbox on the phone step; new or changed terms are recorded here.
+   */
+  signedIn(agreed = false) {
+    if (!this.termsOk() && agreed) this.acceptTerms();
+    this.set({ authed: true, signupPending: false });
     this.goHome();
+  }
+
+  private acceptTerms() {
+    this.set({ terms: { version: TERMS_VERSION, at: new Date().toISOString() } });
+    this.savePrefs();
+  }
+
+  /*
+   * Sign-up and plans: a showcase, as in the app. Nothing is sent or charged. Accounts are phone
+   * numbers (account.ts), so after a plan or a code the last step is the SMS login.
+   */
+
+  openSignup() {
+    this.set({ screen: "signup" });
+  }
+
+  openLogin() {
+    this.set({ screen: "login" });
+  }
+
+  /** The form was filled in (checked in Signup.tsx) and the terms agreed: on to the plans. */
+  signup() {
+    this.acceptTerms();
+    this.set({ screen: "plans" });
+  }
+
+  /** After sign-up: a new plan, nothing used yet, then the phone number to finish. */
+  choosePlan(id: PaidPlanId) {
+    const plan = PLANS.find((p) => p.id === id) ?? PLANS[0]!;
+    this.set({ minutes: { plan: plan.id, used: 0, extra: 0 }, signupPending: true, screen: "login" });
+    this.savePrefs();
+  }
+
+  /** Profile → Change plan. Minutes used this month and extra minutes stay. */
+  changePlan(id: PaidPlanId) {
+    this.set((s) => ({ minutes: { plan: id, used: s.minutes.used, extra: s.minutes.extra } }));
+    this.savePrefs();
+  }
+
+  /**
+   * An organisation's code: its plan, paid by them. From the plans page (`fromSignup`) the
+   * phone login follows. Returns false for a code without the right shape (any such code works).
+   */
+  redeemCode(code: string, fromSignup = false): boolean {
+    const r = parseCode(code);
+    if (!r.ok) return false;
+    this.set((s) => ({
+      minutes: { plan: "org", used: fromSignup ? 0 : s.minutes.used, extra: fromSignup ? 0 : s.minutes.extra, org: r.org },
+    }));
+    this.savePrefs();
+    if (fromSignup) this.set({ signupPending: true, screen: "login" });
+    return true;
+  }
+
+  /** Profile → Add minutes. No payment: the minutes are just added. */
+  addMinutes(n: number) {
+    this.set((s) => ({ minutes: { ...s.minutes, extra: s.minutes.extra + n } }));
+    this.savePrefs();
   }
 
   async logout() {
@@ -418,7 +516,7 @@ export class SpokenStore {
     this.goHome();
     this.set({ transcript: [], sheet: null, liveCallId: null, callStartedAt: null, callEnded: false, draft: "" });
     void this.persister.clear();
-    this.set({ authed: false, screen: "login" });
+    this.set({ authed: false, screen: "login", signupPending: false });
   }
 
   setThemePref(themePref: ThemePref) {
@@ -427,9 +525,24 @@ export class SpokenStore {
     this.savePrefs();
   }
 
-  /** data-theme on <html> picks the palette in globals.css ("system" follows the device). */
+  /** data-theme on <html> picks the palette in globals.css ("system" follows the device); data-contrast adds higher contrast. */
   private applyTheme() {
-    document.documentElement.dataset.theme = this.state.themePref;
+    const d = document.documentElement.dataset;
+    d.theme = this.state.themePref;
+    if (this.state.highContrast) d.contrast = "more";
+    else delete d.contrast;
+  }
+
+  /** Profile: higher contrast on top of the device's setting (which can't be turned off from here). */
+  setHighContrast(highContrast: boolean) {
+    this.set({ highContrast });
+    this.applyTheme();
+    this.savePrefs();
+  }
+
+  setHaptics(haptics: boolean) {
+    this.set({ haptics });
+    this.savePrefs();
   }
 
   setProfile(patch: Partial<Profile>) {
@@ -438,10 +551,45 @@ export class SpokenStore {
   }
 
   private savePrefs() {
-    const { themePref, profile } = this.state;
+    const { themePref, profile, highContrast, haptics, terms, minutes } = this.state;
+    const saved: SavedPrefs = { themePref, profile, highContrast, haptics, terms, minutes };
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ themePref, profile }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify(saved));
     } catch {}
+  }
+
+  /* ---------- call history (history.ts): saved when a call ends, kept in this browser ---------- */
+
+  private saveCall(sheet: Extract<Sheet, { kind: "result" }>) {
+    const sc = SCENARIOS[this.state.scenario];
+    const lines = this.state.transcript.map((l) =>
+      l.kind === "you" || l.kind === "sys" ? { who: l.kind, text: l.text } : { who: l.kind, text: l.words.join(" ") },
+    );
+    const record: CallRecord = {
+      id: `call-${Date.now().toString(36)}`,
+      at: new Date().toISOString(),
+      contact: sc[this.state.lang].contact,
+      number: sc.number,
+      ok: sheet.ok,
+      title: sheet.title,
+      rows: sheet.rows,
+      scripted: !isLive(this.state.scenario),
+      lines,
+    };
+    this.setHistory([record, ...this.state.history].slice(0, HISTORY_MAX));
+  }
+
+  deleteCall(id: string) {
+    this.setHistory(this.state.history.filter((c) => c.id !== id));
+  }
+
+  clearHistory() {
+    this.setHistory([]);
+  }
+
+  private setHistory(history: CallRecord[]) {
+    this.set({ history });
+    historyRepo.save(history);
   }
 
   /* ---------- presets (see presets.ts for the storage and request seams) ---------- */
@@ -759,9 +907,11 @@ export class SpokenStore {
         this.set((s) => ({
           pill: "hold", flashTick: s.flashTick + 1, sheet: { kind: "ask", cfg, pressed: null }, sheetOpen: true,
         }));
-        try {
-          navigator.vibrate?.([120, 80, 120]);
-        } catch {}
+        if (this.state.haptics) {
+          try {
+            navigator.vibrate?.([120, 80, 120]);
+          } catch {}
+        }
         const done = (v: string) => {
           this.askResolve = null;
           this.set({ sheetOpen: false, pill: "live" });
@@ -851,6 +1001,7 @@ export class SpokenStore {
         ? { kind: "result", ok: false, title: t.hungTitle, rows: [...t.hungRows, [t.dur, dur]] }
         : { kind: "result", ok: o.ok, title: o.title, rows: [...o.rows, [t.dur, dur]] };
     this.set({ sheet, sheetOpen: true });
+    if (sheet.kind === "result") this.saveCall(sheet);
     this.demo = false;
     this.recent = [
       ...this.recent.filter((r) => r.callId !== this.state.liveCallId || !r.callId),

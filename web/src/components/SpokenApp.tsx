@@ -8,6 +8,8 @@ import { IncomingCall } from "./IncomingCall";
 import { Intro } from "./Intro";
 import { Login } from "./Login";
 import { Pitch } from "./Pitch";
+import { Plans } from "./Plans";
+import { Signup } from "./Signup";
 
 export function SpokenApp() {
   return (
@@ -57,6 +59,8 @@ function Device() {
     <main className="device" id="device">
       <Intro on={screen === "intro"} />
       <Login on={screen === "login"} />
+      <Signup on={screen === "signup"} />
+      <Plans on={screen === "plans"} />
       <Home on={screen === "home"} />
       <Call on={screen === "call"} />
       <IncomingCall />

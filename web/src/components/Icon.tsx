@@ -103,6 +103,26 @@ const PATHS = {
       <path d="M10 8l-4 4 4 4M6 12h10" />
     </>
   ),
+  // A circle with a bang: notes, warnings and field errors (with words, never colour alone).
+  alert: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.8v5.2M12 16.2v.1" />
+    </>
+  ),
+  doc: (
+    <>
+      <path d="M6.5 3.5h7.5l4 4v13h-11.5z" />
+      <path d="M14 3.5v4h4M9.5 12h5.5M9.5 15.5h5.5" />
+    </>
+  ),
+  history: (
+    <>
+      <path d="M4.6 12a7.5 7.5 0 1 0 2.2-5.3" />
+      <path d="M4.2 4.4v3.3h3.3" />
+      <path d="M12 8.2v4l2.8 1.8" />
+    </>
+  ),
   speaker: (
     <>
       <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />

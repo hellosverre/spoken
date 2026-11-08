@@ -20,9 +20,9 @@ export const viewport: Viewport = {
   colorScheme: "dark light",
 };
 
-// Set the saved theme before first paint so a light-theme user never sees a dark flash.
-// Same key and shape as PREFS_KEY in lib/store.ts.
-const THEME_BOOT = `try{var p=JSON.parse(localStorage.getItem("spoken-prefs")||"null");document.documentElement.dataset.theme=(p&&p.themePref)||"system"}catch(e){document.documentElement.dataset.theme="system"}`;
+// Set the saved theme (and Profile's higher contrast) before first paint so a light-theme user
+// never sees a dark flash. Same key and shape as PREFS_KEY in lib/store.ts.
+const THEME_BOOT = `try{var p=JSON.parse(localStorage.getItem("spoken-prefs")||"null"),d=document.documentElement.dataset;d.theme=(p&&p.themePref)||"system";if(p&&p.highContrast===true)d.contrast="more"}catch(e){document.documentElement.dataset.theme="system"}`;
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

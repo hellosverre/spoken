@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Alert, Pressable, ScrollView, Text, View } from "react-native";
 import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
 import { BUILT_IN_KEYS, resolvePreset, toRequest, type Preset } from "../lib/presets";
-import { em, F, makeStyles, PAD, useTheme } from "../lib/theme";
+import { em, F, HEADING_SCALE, makeStyles, PAD, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow, useTint } from "./Art";
 import { HeroDuet } from "./drawings/Hero";
@@ -56,7 +56,7 @@ export function Presets() {
     <>
       <ScrollView style={styles.grow} contentContainerStyle={styles.body}>
         <View style={styles.headRow}>
-          <Text style={styles.h} accessibilityRole="header">
+          <Text style={styles.h} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
             {m.presetsH}
           </Text>
           <Press
@@ -85,7 +85,7 @@ export function Presets() {
         <View style={styles.grid}>
           {shown.map((p) => (
             <Animated.View key={p.id} layout={LinearTransition.duration(250)} exiting={FadeOut.duration(180)} style={styles.cell}>
-              <PresetCard preset={p} editing={editing} onPress={() => open(p)} onDelete={() => confirmDelete(p)} />
+              <PresetCard preset={p} editing={editing} onPress={() => open(p)} onEdit={() => setEditorFor(p)} onDelete={() => confirmDelete(p)} />
             </Animated.View>
           ))}
           <Animated.View layout={LinearTransition.duration(250)} style={styles.cell}>
@@ -116,7 +116,7 @@ export function Presets() {
           </Pressable>
         ) : null}
 
-        <Text style={styles.section}>{m.demoH}</Text>
+        <Text style={styles.section} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>{m.demoH}</Text>
         <List>
           {(
             [
@@ -156,7 +156,19 @@ export function Presets() {
 }
 
 /** One preset: its own colour tint, a soft glow in that colour, title and who it calls. */
-function PresetCard({ preset: p, editing, onPress, onDelete }: { preset: Preset; editing: boolean; onPress(): void; onDelete(): void }) {
+function PresetCard({
+  preset: p,
+  editing,
+  onPress,
+  onEdit,
+  onDelete,
+}: {
+  preset: Preset;
+  editing: boolean;
+  onPress(): void;
+  onEdit(): void;
+  onDelete(): void;
+}) {
   const m = useMobileCopy();
   const { C } = useTheme();
   const styles = useStyles();
@@ -165,8 +177,13 @@ function PresetCard({ preset: p, editing, onPress, onDelete }: { preset: Preset;
     <>
       <Press
         onPress={onPress}
-        accessibilityLabel={editing ? `${m.editPreset}: ${p.title}` : p.title}
-        accessibilityHint={p.contactName || undefined}
+        accessibilityLabel={`${editing ? `${m.editPreset}: ` : ""}${p.title}, ${p.contactName || m.noContact}`}
+        // Screen-reader and switch users edit or delete from here, without edit mode's small badges.
+        accessibilityActions={[
+          { name: "edit", label: m.editPreset },
+          { name: "delete", label: m.deletePreset },
+        ]}
+        onAccessibilityAction={(e) => (e.nativeEvent.actionName === "edit" ? onEdit() : onDelete())}
         style={[styles.card, editing && styles.cardEditing]}
       >
         {editing ? null : <Glow color={tint.fg} opacity={C.glow * 0.7} cx={0} cy={0} r={0.85} />}
@@ -191,7 +208,7 @@ function PresetCard({ preset: p, editing, onPress, onDelete }: { preset: Preset;
       </Press>
       {editing ? (
         <Animated.View entering={FadeIn.duration(150)} style={styles.deleteWrap}>
-          <Press accessibilityLabel={`${m.deletePreset}: ${p.title}`} onPress={onDelete} scale={0.9} style={styles.delete}>
+          <Press accessibilityLabel={`${m.deletePreset}: ${p.title}`} onPress={onDelete} hitSlop={8} scale={0.9} style={styles.delete}>
             <Icon name="trash" color="#fff" size={15} strokeWidth={2} />
           </Press>
         </Animated.View>

@@ -41,7 +41,8 @@ export async function sessionLost() {
   unauthorizedHandler?.();
 }
 async function clearSession() {
-  await clearSession();
+  cache = { token: "", phone: "" };
+  await Promise.all([AsyncStorage.removeItem(TOKEN_KEY), AsyncStorage.removeItem(PHONE_KEY)]).catch(() => {});
 }
 
 export async function hasSession(): Promise<boolean> {
