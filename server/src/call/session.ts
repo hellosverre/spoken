@@ -407,6 +407,18 @@ export class CallSession {
       if (!this.ended && Date.now() - this.lastLlmAt > 20_000) void this.init.llm.warm?.();
     }, 20_000);
     const maxSec = Math.min(config.maxCallSec, this.init.maxSec ?? config.maxCallSec);
+    // Watchdog: the callee spoke last, nothing is pending, and we've been quiet for 4 s → answer.
+    let dogFor = 0;
+    const dog = setInterval(() => {
+      if (this.ended) { clearInterval(dog); return; }
+      const last = this.transcript.at(-1);
+      if (this.status !== "connected" || this.openingPending || this.pending || this.turnRunning || this.speaking || this.onHold.active) return;
+      if (last?.who !== "callee" || Date.now() - this.lastCalleeAt < 4000) return;
+      if ((this.init.line.silenceMs?.() ?? Infinity) < 1500 || dogFor === this.lastCalleeAt) return;
+      dogFor = this.lastCalleeAt; // once per callee line
+      this.debug("watchdog_turn", {});
+      this.requestTurn();
+    }, 1000);
     this.maxTimer = setTimeout(() => this.forceEnd(this.U.summary.maxTime(maxSec >= 60 ? `${Math.round(maxSec / 60)} min` : `${maxSec} s`)), maxSec * 1000);
     try {
       await this.init.line.start({
