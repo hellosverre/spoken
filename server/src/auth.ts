@@ -173,6 +173,19 @@ export function createAuth(db: Db, opts: { sms?: SmsSender; now?: () => number }
       return { phone: s.phone, accountId: s.id, device: s.primaryDevice };
     },
 
+    /** Erases the account behind the token and everything stored for it; the token is dead afterwards. */
+    async deleteAccount(authorization: string | null): Promise<AuthResult<null>> {
+      const me = await this.resolve(authorization);
+      if (!me) return fail(401, "login required");
+      try {
+        await db.deleteAccount(me.accountId);
+      } catch (e) {
+        console.warn("[auth] deleteAccount failed:", (e as Error).message);
+        return fail(500, "Kunne ikke slette kontoen akkurat nå. Prøv igjen.");
+      }
+      return { ok: true, value: null };
+    },
+
     async logout(authorization: string | null): Promise<void> {
       const m = authorization?.match(/^Bearer\s+([\w-]{20,100})$/i);
       if (m) await db.deleteSession(sha256(m[1]!));
