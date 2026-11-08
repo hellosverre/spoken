@@ -89,7 +89,7 @@ const OPENING_ECHO_CONF = Number(process.env.OPENING_ECHO_CONF ?? 0.6);
 const GREETING_WAIT_MS = Number(process.env.GREETING_WAIT_MS ?? 3000);
 const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
 // A recorded welcome message or phone menu answers first at many restaurants: wait it out.
-const ANNOUNCEMENT = /velkommen til|gjelder (din )?henvendelse|her (vil|kan) du (alltid )?finne|for english|press \d|for norsk|beste priser|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
+const ANNOUNCEMENT = /gjelder (din )?henvendelse|her (vil|kan) du (alltid )?finne|for english|press \d|for norsk|beste priser|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
 const MENU = /trykk|tast(er)? \d|press (\d|zero|one|two|three|four|five|six|seven|eight|nine)|for (bestilling|reservasjon|å (snakke|prate))/i;
 // The menu named a way to reach a person: no need to hear the rest before pressing.
 const MENU_TARGET = /resepsjon|kundeservice|kundesenter|bestilling|reservasjon|bordbestilling|snakke med|prate med|operatør|sentralbord|reception|front desk|customer service|speak (to|with)|reservations?/i;
