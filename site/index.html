@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="nb" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spoken: Du skriver, vi snakker.</title>
+<meta name="description" content="Spoken ringer bedrifter for deg. Du skriver hva du trenger, leser samtalen live som tekst og svarer JA eller NEI. Laget for døve og hørselshemmede, nyttig for alle som ikke liker å ringe.">
+<meta name="theme-color" content="#06070A" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#EEF0F5" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://spoken.hellosverre.com/">
+<link rel="alternate" hreflang="nb" href="https://spoken.hellosverre.com/">
+<link rel="alternate" hreflang="en" href="https://spoken.hellosverre.com/?lang=en">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Spoken">
+<meta property="og:url" content="https://spoken.hellosverre.com/">
+<meta property="og:title" content="Spoken: Du skriver, vi snakker.">
+<meta property="og:description" content="En KI som ringer for deg. Du leser samtalen live og svarer JA eller NEI.">
+<meta property="og:image" content="https://spoken.hellosverre.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Spoken: Du skriver, vi snakker. En telefon viser en samtale med Løkka Pizza som tekst.">
+<meta property="og:locale" content="nb_NO">
+<meta property="og:locale:alternate" content="en_GB">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.png" type="image/png" sizes="64x64">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preload" href="/fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/styles.css">
+<script>
+  /* Theme and language before first paint: stored choice, else dark (dark first) and Norwegian. */
+  (function(){
+    var d=document.documentElement; d.classList.add('js');
+    try{
+      var t=localStorage.getItem('spoken-site-theme'); if(t==='light'||t==='dark') d.dataset.theme=t;
+      var q=new URLSearchParams(location.search).get('lang');
+      var l=q==='en'||q==='no'?q:localStorage.getItem('spoken-site-lang');
+      if(l==='en'){d.lang='en';d.dataset.lang='en'}
+    }catch(e){}
+  })();
+</script>
+<script src="/main.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main" data-i18n="skip">Hopp til innholdet</a>
+<div class="grain" aria-hidden="true"></div>
+
+<header class="nav" id="top">
+  <div class="nav-in wrap">
+    <a class="brand" href="#top" aria-label="Spoken, til toppen">
+      <svg class="duet" viewBox="9 18 46 28" aria-hidden="true"><path d="M9 18H44C44 25 38 29 31 29H24C18 29 13 33 9 37Z M55 46H20C20 39 26 35 33 35H40C46 35 51 31 55 27Z"/></svg>
+      <span>Spoken</span>
+    </a>
+    <nav class="links" aria-label="Seksjoner" data-i18n-attr="aria-label:navLabel">
+      <a href="#slik" data-i18n="navHow">Slik virker det</a>
+      <a href="#funksjoner" data-i18n="navFeatures">Funksjoner</a>
+      <a href="#trygghet" data-i18n="navSafety">Trygghet</a>
+      <a href="#nav" data-i18n="navNav">Nav-støtte</a>
+    </nav>
+    <div class="tools">
+      <button class="tool lang" type="button" id="langBtn">
+        <span class="lang-now">NO</span><span class="lang-sep">/</span><span class="lang-alt">EN</span><span class="sr-only" data-i18n="langHint">: bytt språk til engelsk</span>
+      </button>
+      <button class="tool" type="button" id="themeBtn" aria-label="Bytt til lyst tema" data-i18n-attr="aria-label:themeToLight">
+        <svg class="i i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/></svg>
+        <svg class="i i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 14.2A7.5 7.5 0 0 1 9.8 4.5a7.5 7.5 0 1 0 9.7 9.7Z"/></svg>
+      </button>
+      <a class="btn small primary nav-cta" href="https://spoken-api.hellosverre.com" data-i18n="ctaTryShort">Prøv nå</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- HERO: the promise, set huge; the real app on the right; a dot field that "speaks" behind it. -->
+<section class="hero" aria-labelledby="hero-title">
+  <canvas class="field" id="field" aria-hidden="true"></canvas>
+  <div class="hero-in wrap">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span data-i18n="eyebrow">Telefonsamtaler for døve og hørselshemmede</span></p>
+      <h1 id="hero-title" class="hero-title">
+        <span class="hl hl-1"><span data-i18n="h1a">Du skriver,</span></span>
+        <span class="hl hl-2"><span data-i18n="h1b">vi snakker.</span></span>
+      </h1>
+      <p class="lede" data-i18n="lede">Spoken ringer legen, frisøren eller pizzastedet for deg. Du leser samtalen live som tekst, og ingenting blir avtalt før du har svart JA.</p>
+      <div class="cta-row">
+        <a class="btn primary big" href="https://spoken-api.hellosverre.com">
+          <span data-i18n="ctaTry">Prøv i nettleseren</span>
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6.5 18.5 12 13 17.5"/></svg>
+        </a>
+        <a class="btn ghost big" href="#appen" data-i18n="ctaApp">Last ned appen</a>
+      </div>
+      <p class="fine" data-i18n="heroFine">Logg inn med telefonnummer og SMS-kode. Spoken sier alltid at den er en KI.</p>
+    </div>
+    <div class="hero-phone">
+      <figure class="phone" data-screen="live">
+        <div class="phone-glass">
+          <img class="shot" src="/shots/no-dark-live.webp" width="780" height="1688" alt="Spoken under en samtale med Løkka Pizza: det de sier og det Spoken sier vises som tekstbobler, med et felt nederst for å skrive til Spoken." data-shot="live" data-i18n-attr="alt:altLive" fetchpriority="high" decoding="async">
+        </div>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- STATEMENT: why it exists, read like a line of transcript. -->
+<section class="statement wrap" aria-labelledby="why-title">
+  <h2 id="why-title" class="sr-only" data-i18n="whyTitle">Hvorfor Spoken</h2>
+  <p class="big-say reveal-words" data-i18n="why">For de fleste er en telefonsamtale hverdag. For døve er den umulig. <em>Å bestille en time eller spørre apoteket om noe skal ikke kreve et annet menneske.</em></p>
+</section>
+
+<!-- HOW IT WORKS: pinned phone, steps scroll past it, the screen follows. -->
+<section class="how" id="slik" aria-labelledby="how-title">
+  <div class="wrap">
+    <header class="sec-head">
+      <p class="kicker" data-i18n="howKicker">Slik virker det</p>
+      <h2 id="how-title" class="sec-title" data-i18n="howTitle">Tre steg, og du har kontrollen i alle.</h2>
+    </header>
+    <div class="how-grid">
+      <ol class="steps">
+        <li class="step" data-step="home">
+          <span class="step-n" aria-hidden="true">01</span>
+          <h3 data-i18n="s1t">Skriv hva du trenger</h3>
+          <p data-i18n="s1p">«Bestill en stor pepperoni til henting 18:30, maks 250 kr.» Bruk en snarvei eller skriv fritt. Mangler noe, spør Spoken deg først.</p>
+          <figure class="phone mini"><div class="phone-glass"><img class="shot" loading="lazy" decoding="async" src="/shots/no-dark-home.webp" width="780" height="1688" alt="Startskjermen i Spoken med snarveier: Bestill pizza, Bestill legetime, Ring mamma og Bestill frisør." data-shot="home" data-i18n-attr="alt:altHome"></div></figure>
+        </li>
+        <li class="step" data-step="plan">
+          <span class="step-n" aria-hidden="true">02</span>
+          <h3 data-i18n="s2t">Se planen, trykk JA</h3>
+          <p data-i18n="s2p">Spoken viser hvem den ringer, hva målet er, hva den må spørre deg om, og nøyaktig hvordan den åpner samtalen. Ingenting skjer før du starter.</p>
+          <figure class="phone mini"><div class="phone-glass"><img class="shot" loading="lazy" decoding="async" src="/shots/no-dark-plan.webp" width="780" height="1688" alt="Planen før samtalen: Løkka Pizza, målet, at pris og hentetid må godkjennes, og åpningsreplikken der Spoken sier at den er en KI-assistent." data-shot="plan" data-i18n-attr="alt:altPlan"></div></figure>
+        </li>
+        <li class="step" data-step="live">
+          <span class="step-n" aria-hidden="true">03</span>
+          <h3 data-i18n="s3t">Spoken ringer. Du leser live.</h3>
+          <p data-i18n="s3p">Det de sier, kommer som tekst mens de snakker. Det du skriver, sier Spoken høyt. Du kan be dem gjenta, legge til noe eller legge på.</p>
+          <figure class="phone mini"><div class="phone-glass"><img class="shot" loading="lazy" decoding="async" src="/shots/no-dark-live.webp" width="780" height="1688" alt="Samtalen som tekst: Løkka Pizza svarer, Spoken bestiller en stor pepperoni til 18:30." data-shot="live" data-i18n-attr="alt:altLive2"></div></figure>
+        </li>
+        <li class="step" data-step="approve">
+          <span class="step-n sub" aria-hidden="true">JA/NEI</span>
+          <h3 data-i18n="s4t">Pris eller tid? Du bestemmer.</h3>
+          <p data-i18n="s4p">Foreslår de 239 kr og 18:40 i stedet for 18:30, ber Spoken dem vente og spør deg. Du trykker Godta eller Avslå. Spoken sier aldri ja for deg.</p>
+          <figure class="phone mini"><div class="phone-glass"><img class="shot" loading="lazy" decoding="async" src="/shots/no-dark-approve.webp" width="780" height="1688" alt="Godkjenningskortet: 239 kr, klar 18:40, du ba om 18:30. Knappene Godta og Avslå." data-shot="approve" data-i18n-attr="alt:altApprove"></div></figure>
+        </li>
+        <li class="step" data-step="done">
+          <span class="step-n sub" aria-hidden="true">✓</span>
+          <h3 data-i18n="s5t">Resultatet, kort og klart</h3>
+          <p data-i18n="s5p">Når de legger på, får du det som ble avtalt: hva, pris, tid og navn. Hele samtalen kan du lese igjen etterpå.</p>
+          <figure class="phone mini"><div class="phone-glass"><img class="shot" loading="lazy" decoding="async" src="/shots/no-dark-done.webp" width="780" height="1688" alt="Resultatet: Bestillingen er lagt inn. Stor pepperoni, 239 kr, henting 18:40 på Løkka Pizza, navn Ingrid." data-shot="done" data-i18n-attr="alt:altDone"></div></figure>
+        </li>
+      </ol>
+      <div class="pin" aria-hidden="true">
+        <figure class="phone pinned">
+          <div class="phone-glass">
+            <img class="shot layer on" src="/shots/no-dark-home.webp" width="780" height="1688" alt="" data-shot="home" loading="lazy" decoding="async">
+            <img class="shot layer" src="/shots/no-dark-plan.webp" width="780" height="1688" alt="" data-shot="plan" loading="lazy" decoding="async">
+            <img class="shot layer" src="/shots/no-dark-live.webp" width="780" height="1688" alt="" data-shot="live" loading="lazy" decoding="async">
+            <img class="shot layer" src="/shots/no-dark-approve.webp" width="780" height="1688" alt="" data-shot="approve" loading="lazy" decoding="async">
+            <img class="shot layer" src="/shots/no-dark-done.webp" width="780" height="1688" alt="" data-shot="done" loading="lazy" decoding="async">
+          </div>
+        </figure>
+        <div class="rail"><span></span><span></span><span></span><span></span><span></span></div>
+      </div>
+    </div>
+    <p class="demo-note" data-i18n="demoNote">Skjermbildene er fra demo-samtalen i appen. Løkka Pizza og Ingrid er oppdiktet.</p>
+  </div>
+</section>
+
+<!-- FEATURES: a spec sheet, not a card grid. -->
+<section class="features wrap" id="funksjoner" aria-labelledby="feat-title">
+  <header class="sec-head split">
+    <p class="kicker" data-i18n="featKicker">Funksjoner</p>
+    <h2 id="feat-title" class="sec-title" data-i18n="featTitle">Laget for samtalene som faktisk skjer.</h2>
+    <p class="sec-sub" data-i18n="featSub">Køer, menyer, folk som snakker fort. Spoken tar det kjedelige, du tar avgjørelsene.</p>
+  </header>
+  <ul class="spec">
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><path d="M5 9.5h13M5 15h18M5 20.5h9"/><path d="M19 20.5h0.01M22.5 20.5h0.01M26 20.5h0.01" stroke-width="2.6"/></svg>
+      <h3 data-i18n="f1t">Live tekst</h3>
+      <p data-i18n="f1p">Det de sier, vises som tekst mens de snakker. Det du skriver, sier Spoken høyt.</p>
+    </li>
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><rect x="4.5" y="7" width="23" height="18" rx="4"/><path d="m9.5 16 3 3 5.5-6"/><path d="M21.5 13.5l3 3m0-3-3 3"/></svg>
+      <h3 data-i18n="f2t">Du godkjenner</h3>
+      <p data-i18n="f2p">Pris, tid og bestilling kommer til deg som JA eller NEI. Spoken binder deg aldri til noe på egen hånd.</p>
+    </li>
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><rect x="6" y="4.5" width="20" height="23" rx="4"/><path d="M11 10.5h0.01M16 10.5h0.01M21 10.5h0.01M11 15.5h0.01M16 15.5h0.01M21 15.5h0.01M11 20.5h0.01M21 20.5h0.01" stroke-width="2.6"/><circle cx="16" cy="20.5" r="2.2"/></svg>
+      <h3 data-i18n="f3t">Telefonmenyer og kø</h3>
+      <p data-i18n="f3p">Trykker riktig tast, venter stille gjennom innspilte meldinger og kø, og snakker først når et menneske svarer.</p>
+    </li>
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><path d="M25 12a9.5 9.5 0 1 0 1 6"/><path d="M26.5 6v6.5H20"/><path d="M12 16h8M12 19.5h5"/></svg>
+      <h3 data-i18n="f4t">Når de ringer tilbake</h3>
+      <p data-i18n="f4p">Må de sjekke og ringe tilbake, tar Spoken imot samtalen og gir deg beskjeden som tekst.</p>
+    </li>
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><rect x="3.5" y="9" width="7" height="14" rx="2"/><rect x="12.5" y="6" width="7" height="20" rx="2"/><rect x="21.5" y="9" width="7" height="14" rx="2"/></svg>
+      <h3 data-i18n="f5t">Tre steder samtidig</h3>
+      <p data-i18n="f5p">Be Spoken spørre tre steder om pris og første ledige tid. Samtalene går parallelt, svarene kommer side om side.</p>
+    </li>
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><path d="M4.5 8.5h11a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3H11l-4 3.5v-3.5H7.5a3 3 0 0 1-3-3v-4a3 3 0 0 1 3-3Z"/><path d="M21.5 13h3a3 3 0 0 1 3 3v4a3 3 0 0 1-3 3v3l-3.5-3H17a3 3 0 0 1-2.6-1.5"/></svg>
+      <h3 data-i18n="f6t">Norsk og engelsk</h3>
+      <p data-i18n="f6p">Velg språk for samtalen. Svarer de på et annet språk, bytter Spoken midt i samtalen.</p>
+    </li>
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><path d="M5 16h2.5M10 11v10M14.5 7v18M19 12v8M23.5 9.5v13M27 16h0"/></svg>
+      <h3 data-i18n="f7t">Naturlige stemmer</h3>
+      <p data-i18n="f7p">Velg stemmen som snakker for deg. Den høres ut som en rolig person, ikke en telefonsvarer.</p>
+    </li>
+    <li>
+      <svg class="i ic" viewBox="0 0 32 32" aria-hidden="true"><rect x="9" y="3.5" width="14" height="25" rx="3.5"/><path d="M13 9.5h3.5M12.5 15h7M12.5 19.5h4.5"/><path d="M14.5 25h3"/></svg>
+      <h3 data-i18n="f8t">Følger telefonen din</h3>
+      <p data-i18n="f8p">Større tekst, Reduser bevegelse, Øk kontrast og mørk modus fra iPhone-innstillingene gjelder også i Spoken.</p>
+    </li>
+  </ul>
+</section>
+
+<!-- SAFETY: written like the app's own receipt: rule on the left, how on the right. -->
+<section class="safety" id="trygghet" aria-labelledby="safe-title">
+  <div class="wrap safety-in">
+    <header class="sec-head">
+      <p class="kicker" data-i18n="safeKicker">Trygghet og personvern</p>
+      <h2 id="safe-title" class="sec-title" data-i18n="safeTitle">Den første setningen er alltid: «Jeg er en KI.»</h2>
+      <p class="sec-sub" data-i18n="safeSub">Den som svarer, skal vite hvem de snakker med. Og du skal vite hva som skjer med samtalen.</p>
+    </header>
+    <dl class="receipt">
+      <div><dt data-i18n="r1t">Sier at den er en KI</dt><dd data-i18n="r1d">«Hei! Jeg er en KI-assistent som ringer på vegne av …» kommer før noe annet i hver samtale.</dd></div>
+      <div><dt data-i18n="r2t">Ingen lydopptak</dt><dd data-i18n="r2d">Samtalen tas ikke opp. Verken lyd eller transkripsjon lagres i databasen, bare et kort sammendrag.</dd></div>
+      <div><dt data-i18n="r3t">Data i EU</dt><dd data-i18n="r3d">Profil, kontakter og sammendrag ligger i en database i Irland. Tale og KI behandles hos ElevenLabs og OpenRouter, og det står i dataoversikten i appen.</dd></div>
+      <div><dt data-i18n="r4t">Aldri uten ditt JA</dt><dd data-i18n="r4d">Pris, tid og bestilling godtas bare når du trykker Godta. Kortnummeret ditt sies aldri høyt.</dd></div>
+      <div><dt data-i18n="r5t">Ringer aldri nødnumre</dt><dd data-i18n="r5d">110, 112 og 113 er sperret. Trenger du hjelp, bruk nødmeldingstjenesten for døve og hørselshemmede.</dd></div>
+      <div><dt data-i18n="r6t">Bare godkjente numre</dt><dd data-i18n="r6d">Antall samtaler er begrenset, og ekte samtaler går bare til godkjente numre. Det stopper tull og trakassering.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<!-- NAV: the one big number on the page, sourced. -->
+<section class="nav-support wrap" id="nav" aria-labelledby="nav-title">
+  <div class="nav-grid">
+    <div class="amount" aria-hidden="true"><span class="num">2&#8239;000</span><span class="cur">kr</span></div>
+    <div class="nav-copy">
+      <p class="kicker" data-i18n="navKicker">For døve og hørselshemmede</p>
+      <h2 id="nav-title" class="sec-title" data-i18n="navTitle">Nav gir 2 000 kr til apper du trenger på grunn av en varig funksjonsnedsettelse.</h2>
+      <p data-i18n="navP1">Tilskuddet dekker kjøp og abonnement på apper som er laget for å hjelpe ved funksjonsnedsettelse. Du søker selv, med en begrunnelse fra en fagperson. Spoken er ikke godkjent av Nav ennå. Vilkårene står hos Nav.</p>
+      <p data-i18n="navP2">Bildetolktjenesten er åpen hverdager 08–20. Spoken tar de små samtalene, også klokka ni en søndag kveld.</p>
+      <a class="arrow-link" href="https://www.nav.no/apper-og-programvare" rel="noopener">
+        <span data-i18n="navLink">Les om tilskuddet på nav.no</span>
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- GET IT: web now, stores later, Expo Go for testers. -->
+<section class="get" id="appen" aria-labelledby="get-title">
+  <div class="wrap get-in">
+    <div class="get-copy">
+      <h2 id="get-title" class="get-title" data-i18n="getTitle">Ring din første samtale i dag.</h2>
+      <p class="sec-sub" data-i18n="getSub">Spoken virker i nettleseren på mobil og PC. Appene er på vei.</p>
+      <a class="btn primary big" href="https://spoken-api.hellosverre.com">
+        <span data-i18n="ctaTry">Prøv i nettleseren</span>
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6.5 18.5 12 13 17.5"/></svg>
+      </a>
+    </div>
+    <div class="stores">
+      <div class="store off">
+        <svg class="i" viewBox="0 0 32 32" aria-hidden="true"><rect x="9" y="3.5" width="14" height="25" rx="3.5"/><path d="M14 7h4"/></svg>
+        <span class="store-t"><small data-i18n="iosSmall">For iPhone</small><b>App Store</b></span>
+        <span class="soon" data-i18n="soon">Kommer snart</span>
+      </div>
+      <div class="store off">
+        <svg class="i" viewBox="0 0 32 32" aria-hidden="true"><rect x="8" y="4.5" width="16" height="23" rx="3"/><path d="M8 23h16M14.5 25.3h3"/></svg>
+        <span class="store-t"><small data-i18n="andSmall">For Android</small><b>Google Play</b></span>
+        <span class="soon" data-i18n="soon">Kommer snart</span>
+      </div>
+      <a class="store expo" href="https://expo.dev/go" rel="noopener">
+        <svg class="i" viewBox="0 0 32 32" aria-hidden="true"><path d="M5 10V6.5A1.5 1.5 0 0 1 6.5 5H10M22 5h3.5A1.5 1.5 0 0 1 27 6.5V10M27 22v3.5a1.5 1.5 0 0 1-1.5 1.5H22M10 27H6.5A1.5 1.5 0 0 1 5 25.5V22"/><path d="M10.5 10.5h4v4h-4zM17.5 17.5h4v4h-4zM17.5 10.5h4M10.5 21.5h4M21.5 14.5v-1"/></svg>
+        <span class="store-t"><small data-i18n="expoSmall">Test nå</small><b data-i18n="expoB">med Expo Go</b></span>
+        <svg class="i go" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>
+      </a>
+      <p class="fine" data-i18n="expoNote">Last ned Expo Go, og skann QR-koden du får fra teamet. Da kjører du mobilappen før den er i butikkene.</p>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="foot-brand">
+      <svg class="duet big" viewBox="9 18 46 28" aria-hidden="true"><path d="M9 18H44C44 25 38 29 31 29H24C18 29 13 33 9 37Z M55 46H20C20 39 26 35 33 35H40C46 35 51 31 55 27Z"/></svg>
+      <p class="foot-say" data-i18n="footSay">Bygd for døve, nyttig for alle.</p>
+    </div>
+    <dl class="foot-meta">
+      <div><dt data-i18n="footBuilt">Bygd på</dt><dd>Oslo Sprint 2026</dd></div>
+      <div><dt>Team</dt><dd>Sverre, Jakob</dd></div>
+      <div><dt data-i18n="footContact">Kontakt</dt><dd><a href="https://hellosverre.com" rel="noopener">hellosverre.com</a></dd></div>
+      <div><dt data-i18n="footApp">Appen</dt><dd><a href="https://spoken-api.hellosverre.com">spoken-api.hellosverre.com</a></dd></div>
+    </dl>
+  </div>
+  <p class="wrap foot-fine">© 2026 Spoken. <span data-i18n="footFine">Spoken er ikke en nødtjeneste.</span></p>
+</footer>
+</body>
+</html>
