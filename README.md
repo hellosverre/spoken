@@ -108,7 +108,7 @@ See [ACCESSIBILITY.md](ACCESSIBILITY.md) for proposed core-flow requirements, re
 
 ## Pitch preparation
 
-See [PITCH.md](PITCH.md) for jury questions, evidence to prepare and the rehearsal checklist.
+Pitch material lives in the team's planning repo.
 
 ## For AI agents
 
