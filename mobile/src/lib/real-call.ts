@@ -1,6 +1,8 @@
+import { AppState } from "react-native";
 import { askQuestions } from "../components/QuestionSheet";
 import { ApiError, authHeader, sessionLost } from "./account";
 import type { Lang, Row } from "./i18n";
+import { startKeepAlive, stopKeepAlive } from "./keep-alive";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
 import { resetFacts, setFacts, type FactItem } from "../components/FactStrip";
 import { setReceipt, type ReceiptData } from "../components/Receipt";
@@ -287,23 +289,42 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: stri
   }
   // The session rides in the query: a websocket can't carry headers everywhere.
   const sessionToken = ((await authHeader()).Authorization ?? "").replace(/^Bearer /, "");
-  const ws = new WebSocket(`${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(sessionToken)}`);
-  // Anything sent before the socket opens (a quick hang-up) goes out as soon as it does.
+  const url = `${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(sessionToken)}`;
+  let reconnectOnFocus: { remove(): void } | undefined;
+  // Keep the app awake while you're in another app, so the socket stays up and approvals notify.
+  void startKeepAlive({ title: "Spoken", artist: lang === "no" ? "Samtale pågår" : "Call in progress" });
+
+  // The call runs on the server whatever happens to this socket, and the server replays every
+  // event to a new socket. So a dropped socket (iOS suspends backgrounded apps) is reconnected,
+  // and the replay is de-duplicated below: shown lines, notes and approvals aren't repeated.
+  let ws: WebSocket | null = null;
+  let finished = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retries = 0;
+  let downSince = 0;
+  // Anything sent while the socket is down (a quick hang-up, a message) goes out when it's back.
   const outbox: string[] = [];
   const send = (cmd: object) => {
     const raw = JSON.stringify(cmd);
-    if (ws.readyState === WebSocket.OPEN) ws.send(raw);
+    if (ws?.readyState === WebSocket.OPEN) ws.send(raw);
     else outbox.push(raw);
   };
-  ws.onopen = () => {
-    while (outbox.length) ws.send(outbox.shift()!);
+  // Stops everything this run started; also how drop() lets a newer connection take over.
+  const cleanup = () => {
+    finished = true;
+    clearTimeout(retryTimer);
+    reconnectOnFocus?.remove();
+    stopKeepAlive();
   };
-  let finished = false;
   io.attach({
     instruction: (text) => send({ type: "instruction", text }),
     hangup: () => send({ type: "hangup" }),
-    open: () => ws.readyState === WebSocket.OPEN,
-    drop: () => { finished = true; try { ws.close(); } catch {} },
+    // Up, or reconnecting by itself: the store only starts over once this run has given up.
+    open: () => !finished,
+    drop: () => {
+      cleanup();
+      try { ws?.close(); } catch {}
+    },
   });
 
   // Lines are shown one after another (say animates word by word); the approval sheet runs beside them.
@@ -311,11 +332,19 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: stri
   const queue = (fn: () => Promise<void>) => { chain = chain.then(fn).catch(() => {}); };
   const shown = new Map<string, string>(); // transcript id → text shown so far
   const them = new Map<string, { first: string; text: string; revised: boolean }>(); // callee lines
+  const asked = new Set<string>(); // approval ids already shown
+  const noted = new Set<string>(); // notes already shown (at + text)
   let connected = false;
 
   const startedAt = Date.now();
   const result = await new Promise<CallResult>((resolve, reject) => {
-    ws.onmessage = (m) => {
+    const done = (r: CallResult) => {
+      if (finished) return;
+      finished = true;
+      setReceipt(r.receipt);
+      resolve(r);
+    };
+    const onMessage = (m: { data: unknown }) => {
       let e: LiveEvent;
       try { e = JSON.parse(String(m.data)); } catch { return; }
       switch (e.type) {
@@ -359,6 +388,8 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: stri
         }
         case "approval_request": {
           const a = e as Extract<LiveEvent, { type: "approval_request" }>;
+          if (asked.has(a.id)) break; // replayed after a reconnect
+          asked.add(a.id);
           const neg = a.options.find((o) => NEGATIVE.test(o));
           const pos = a.options.filter((o) => o !== neg);
           const yesNo = pos.length === 1 && /^(ja|yes)$/i.test(pos[0]!);
@@ -376,8 +407,11 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: stri
         }
         case "note": {
           // In line with the transcript, or a refusal shows up before what it refused.
-          const text = (e as { text: string }).text;
-          queue(async () => io.note(text));
+          const n = e as { text: string; at?: number };
+          const key = `${n.at ?? ""}|${n.text}`;
+          if (noted.has(key)) break;
+          noted.add(key);
+          queue(async () => io.note(n.text));
           break;
         }
         case "facts": {
@@ -395,32 +429,54 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: stri
           io.chips?.((e as { items: string[] }).items);
           break;
         case "result":
-          finished = true;
-          setReceipt((e as { result: CallResult }).result.receipt);
-          resolve((e as { result: CallResult }).result);
+          done((e as { result: CallResult }).result);
           break;
       }
     };
-    // A dropped socket doesn't end the call on the server, so don't end it here: onclose always
-    // follows and keeps asking the server for the result.
-    ws.onerror = () => {};
-    ws.onclose = () => {
-      if (finished) return;
-      // Socket gone before the result: ask the server (202 while the call is still running).
-      void (async () => {
-        for (let i = 0; i < 30; i++) {
-          const r = await http<CallResult & { inProgress?: boolean }>("GET", `/api/calls/${encodeURIComponent(callId)}`).catch(() => null);
-          if (r && !r.inProgress) { setReceipt(r.receipt); return resolve(r); }
-          await new Promise((ok) => setTimeout(ok, 2000));
-        }
-        reject(new Error("Fikk ikke resultatet fra samtalen."));
-      })();
+
+    // The server no longer knows the call (it restarted): ask for the result instead.
+    const fetchResult = async () => {
+      for (let i = 0; i < 30 && !finished; i++) {
+        const r = await http<CallResult & { inProgress?: boolean }>("GET", `/api/calls/${encodeURIComponent(callId)}`).catch(() => null);
+        if (r && !r.inProgress) return done(r);
+        await new Promise((ok) => setTimeout(ok, 2000));
+      }
+      if (!finished) reject(new Error("Fikk ikke resultatet fra samtalen."));
     };
-  });
+
+    const connect = () => {
+      clearTimeout(retryTimer);
+      if (finished || ws) return;
+      const sock = new WebSocket(url);
+      ws = sock;
+      sock.onopen = () => {
+        retries = 0;
+        downSince = 0;
+        while (outbox.length && sock.readyState === WebSocket.OPEN) sock.send(outbox.shift()!);
+      };
+      sock.onmessage = onMessage;
+      sock.onerror = () => {};
+      sock.onclose = (ev) => {
+        if (ws === sock) ws = null;
+        if (finished) return;
+        if (ev.code === 1008) return void fetchResult(); // unknown call
+        downSince ||= Date.now();
+        // Calls last at most 10 min; after 12 min of trying, settle it over REST.
+        if (Date.now() - downSince > 12 * 60_000) return void fetchResult();
+        retryTimer = setTimeout(connect, Math.min(10_000, 1000 * 2 ** retries++));
+      };
+    };
+    connect();
+    // Coming back to the app: reconnect at once instead of waiting for the backoff.
+    reconnectOnFocus = AppState.addEventListener("change", (state) => {
+      if (state === "active" && !finished && !ws) connect();
+    });
+  }).finally(cleanup);
 
   await chain;
   io.attach(null);
-  try { ws.close(); } catch {}
+  // ws is reassigned inside the callbacks, which TypeScript's narrowing can't see.
+  try { (ws as WebSocket | null)?.close(); } catch {}
   return outcomeOf(result);
 }
 

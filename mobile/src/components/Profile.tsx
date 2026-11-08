@@ -3,13 +3,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { api } from "../lib/account";
 import type { ThemePref } from "../lib/store";
-import { em, F, makeStyles, PAD, small, useTheme } from "../lib/theme";
+import { em, F, HEADING_SCALE, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { AccountSection, useAccountCopy } from "./Account";
 import { ContactsSection } from "./ContactPicker";
 import { resetContactCache } from "./ContactChip";
 import { FeedbackSheet } from "./Feedback";
+import { historyCount, HistorySheet } from "./History";
+import { MinutesCard } from "./Minutes";
+import { TermsSheet } from "./Terms";
 import { HeroDuet } from "./drawings/Hero";
 import { Icon, type IconName } from "./Icon";
 import { List, Row, Seg } from "./List";
@@ -54,9 +57,12 @@ export function Profile() {
   const profile = useSpoken((s) => s.profile);
   const serverCalls = useSpoken((s) => s.serverCalls);
   const savedCode = useSpoken((s) => s.passcode);
+  const calls = useSpoken((s) => s.history.length);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const ac = useAccountCopy();
   const [contactsKey, setContactsKey] = useState(0);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [code, setCode] = useState(savedCode);
   useEffect(() => setCode(savedCode), [savedCode]);
 
@@ -79,12 +85,15 @@ export function Profile() {
   const first = name.trim().split(/\s+/)[0] ?? "";
   const hour = new Date().getHours();
   const greet = m.greet[hour < 5 ? "night" : hour < 11 ? "morning" : hour < 18 ? "day" : "evening"];
+  const highContrast = useSpoken((s) => s.highContrast);
+  const sysContrast = useSpoken((s) => s.sysContrast);
+  const haptics = useSpoken((s) => s.haptics);
   const realOn = serverCalls && !!savedCode;
-  const teal = C.tints.teal;
+  const ready = C.ok;
 
   return (
     <ScrollView style={styles.grow} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-      <Text style={styles.h} accessibilityRole="header">
+      <Text style={styles.h} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
         {m.profileH}
       </Text>
 
@@ -103,6 +112,24 @@ export function Profile() {
         </T>
         <Text style={styles.handle}>@demo</Text>
       </View>
+
+      {/* Past calls and their transcripts, saved on this phone. */}
+      <View style={styles.historyRow}>
+        <List>
+          <Row
+            first
+            icon="history"
+            title={m.historyL}
+            sub={historyCount(calls, m)}
+            go={<Icon name="chevron" color={C.dim} size={16} />}
+            onPress={() => setHistoryOpen(true)}
+          />
+        </List>
+      </View>
+      <HistorySheet open={historyOpen} onClose={() => setHistoryOpen(false)} />
+
+      <SectionTitle icon="phone" title={m.minutesH} />
+      <MinutesCard />
 
       <SectionTitle icon="person" title={m.you} />
       <View style={styles.group}>
@@ -145,10 +172,10 @@ export function Profile() {
       <ReasonSection />
 
       <SectionTitle icon="phone" title={m.callsH} />
-      <View style={[styles.group, realOn && { borderColor: teal.fg }]}>
+      <View style={[styles.group, realOn && { borderColor: ready.fg }]}>
         <View style={styles.switchRow}>
-          <View style={[styles.tile, { backgroundColor: realOn ? teal.bg : C.accentSoft }]}>
-            <Icon name="cloud" color={realOn ? teal.fg : C.accent} size={19} />
+          <View style={[styles.tile, { backgroundColor: realOn ? ready.bg : C.accentSoft }]}>
+            <Icon name="cloud" color={realOn ? ready.fg : C.accent} size={19} />
           </View>
           <View style={styles.grow}>
             <T size={15} weight="semibold">
@@ -170,7 +197,7 @@ export function Profile() {
         {serverCalls ? (
           <>
             <View style={styles.divider} />
-            <FieldRow icon="key" tint={realOn ? teal : undefined}>
+            <FieldRow icon="key" tint={realOn ? ready : undefined}>
               <Field
                 label={m.passcodeL}
                 value={code}
@@ -186,11 +213,13 @@ export function Profile() {
             </FieldRow>
             {/* The state of calls, said plainly: real phones can ring, or it's a demo. */}
             <View style={styles.state} accessibilityLiveRegion="polite">
-              <Icon name={realOn ? "check" : "phone"} color={realOn ? teal.fg : C.dim} size={16} strokeWidth={realOn ? 2.4 : 1.7} />
-              <Text style={[styles.stateText, { color: realOn ? teal.fg : C.dim }]}>{realOn ? m.passcodeSet : m.passcodeS}</Text>
+              <Icon name={realOn ? "check" : "phone"} color={realOn ? ready.fg : C.dim} size={16} strokeWidth={realOn ? 2.4 : 1.7} />
+              <Text style={[styles.stateText, { color: realOn ? ready.fg : C.dim }]}>{realOn ? m.passcodeSet : m.passcodeS}</Text>
             </View>
           </>
         ) : null}
+        <View style={styles.divider} />
+        <SwitchRow icon="phone" title={m.hapticsL} sub={m.hapticsS} value={haptics} onChange={(v) => store.setHaptics(v)} />
       </View>
 
       <SectionTitle icon="key" title={ac.title} />
@@ -221,6 +250,16 @@ export function Profile() {
           onChange={(v) => store.setThemePref(v)}
           options={(["system", "light", "dark"] as const).map((v) => ({ v, label: m.themes[v], icon: THEME_ICON[v] }))}
         />
+        <View style={styles.divider} />
+        {/* With the phone's contrast setting on it is on here too, and only the phone turns it off. */}
+        <SwitchRow
+          icon="sun"
+          title={m.contrastL}
+          sub={sysContrast ? m.contrastSys : m.contrastS}
+          value={highContrast || sysContrast}
+          disabled={sysContrast}
+          onChange={(v) => store.setHighContrast(v)}
+        />
       </View>
 
       <SectionTitle icon="bubble" title={m.general} />
@@ -235,12 +274,13 @@ export function Profile() {
               label={t.langL}
               value={lang}
               onChange={(v) => store.setLang(v)}
-              options={(["en", "no"] as const).map((v) => ({ v, label: v.toUpperCase() }))}
+              options={(["en", "no"] as const).map((v) => ({ v, label: v.toUpperCase(), a11y: m.langNames[v] }))}
             />
           }
         />
         <Row icon="replay" title={t.replay} sub={t.replayS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => store.replay()} />
         <Row icon="bubble" title={m.fbRowT} sub={m.fbRowS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setFeedbackOpen(true)} />
+        <Row icon="doc" title={m.termsL} sub={m.termsS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setTermsOpen(true)} />
         <Row title={m.logout} icon="logout" tone="danger" onPress={() => { resetContactCache(); void store.logout(); }} />
       </List>
 
@@ -266,6 +306,7 @@ export function Profile() {
         />
       </List>
       {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
+      <TermsSheet open={termsOpen} onClose={() => setTermsOpen(false)} />
     </ScrollView>
   );
 }
@@ -382,6 +423,51 @@ function ReasonSection() {
 
 const THEME_ICON: Record<ThemePref, IconName> = { system: "auto", light: "sun", dark: "moon" };
 
+/** An icon tile, a title with a note, and a switch named by the title. */
+function SwitchRow({
+  icon,
+  title,
+  sub,
+  value,
+  disabled,
+  onChange,
+}: {
+  icon: IconName;
+  title: string;
+  sub: string;
+  value: boolean;
+  disabled?: boolean;
+  onChange(v: boolean): void;
+}) {
+  const { C } = useTheme();
+  const styles = useStyles();
+  return (
+    <View style={styles.switchRow}>
+      <View style={[styles.tile, { backgroundColor: C.accentSoft }]}>
+        <Icon name={icon} color={C.accent} size={19} />
+      </View>
+      <View style={styles.grow}>
+        <T size={15} weight="semibold">
+          {title}
+        </T>
+        <T size={13} color={C.dim}>
+          {sub}
+        </T>
+      </View>
+      <Switch
+        value={value}
+        disabled={disabled}
+        onValueChange={onChange}
+        trackColor={{ false: C.line2, true: C.accent }}
+        thumbColor="#fff"
+        ios_backgroundColor={C.line2}
+        accessibilityLabel={title}
+        accessibilityHint={sub}
+      />
+    </View>
+  );
+}
+
 /** A field with an icon tile beside its input. */
 function FieldRow({ icon, tint, children }: { icon: IconName; tint?: { fg: string; bg: string }; children: ReactNode }) {
   const { C } = useTheme();
@@ -402,7 +488,7 @@ function SectionTitle({ icon, title }: { icon: IconName; title: string }) {
   return (
     <View style={styles.section}>
       <Icon name={icon} color={C.accent} size={16} />
-      <Text style={styles.sectionText} accessibilityRole="header">
+      <Text style={styles.sectionText} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
         {title}
       </Text>
     </View>
@@ -454,4 +540,5 @@ const useStyles = makeStyles((C) => ({
   state: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: -4 },
   stateText: { flex: 1, fontFamily: F.medium, fontSize: 13, lineHeight: 18 },
   about: { marginTop: 22, marginHorizontal: 2, fontFamily: F.regular, fontSize: 13, lineHeight: 19, color: C.dim, maxWidth: 320 },
+  historyRow: { marginTop: 14 },
 }));

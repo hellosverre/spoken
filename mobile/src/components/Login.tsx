@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { KeyboardAvoidingView, ScrollView, Text, View, type TextInputInstance } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, Text, View, type TextInputInstance } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ApiError, startLogin, verifyLogin } from "../lib/account";
 import type { Lang } from "../lib/i18n";
-import { em, F, makeStyles, PAD, small } from "../lib/theme";
-import { useSpoken, useStore } from "../lib/use-spoken";
+import { TERMS_VERSION } from "../lib/terms";
+import { em, F, HEADING_SCALE, makeStyles, PAD, small } from "../lib/theme";
+import { useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { Hero } from "./drawings/Hero";
 import { Wordmark } from "./Icon";
 import { toE164 } from "./phone";
+import { TermsAgree, TermsSheet } from "./Terms";
 import { Btn, Field, Rise } from "./ui";
 
 /**
@@ -41,6 +43,8 @@ const T = {
     offline: "Får ikke kontakt med Spoken. Sjekk nettet og prøv igjen.",
     other: "Noe gikk galt. Prøv igjen.",
     hint: "Meldingspriser fra mobilselskapet kan gjelde.",
+    finishH: "Siste steg: telefonnummeret ditt",
+    finishSub: "Kontoen din er knyttet til telefonnummeret. Bekreft det med en kode på SMS, så er du i gang.",
   },
   en: {
     h: "Log in with your phone number",
@@ -66,6 +70,8 @@ const T = {
     offline: "Can't reach Spoken. Check your connection and try again.",
     other: "Something went wrong. Try again.",
     hint: "Your carrier's message rates may apply.",
+    finishH: "Last step: your phone number",
+    finishSub: "Your account is your phone number. Confirm it with a code by text, and you're in.",
   },
 } as const;
 type Copy = (typeof T)[Lang];
@@ -97,6 +103,14 @@ export function Login() {
   const [note, setNote] = useState("");
   const [wait, setWait] = useState(0);
   const codeRef = useRef<TextInputInstance>(null);
+  const m = useMobileCopy();
+  // From sign-up and a plan: this is the last step. Terms: agreed (this version) or a checkbox.
+  const finishing = useSpoken((s) => s.signupPending);
+  const terms = useSpoken((s) => s.terms);
+  const termsOk = terms?.version === TERMS_VERSION;
+  const [agreed, setAgreed] = useState(false);
+  const [needTerms, setNeedTerms] = useState(false);
+  const [reading, setReading] = useState(false);
 
   // Resend countdown.
   useEffect(() => {
@@ -119,6 +133,7 @@ export function Login() {
 
   async function sendCode(again = false) {
     if (busy) return;
+    if (!termsOk && !agreed) return setNeedTerms(true);
     if (!e164) {
       setError(c.badPhone);
       return;
@@ -146,7 +161,7 @@ export function Login() {
     try {
       await verifyLogin(e164, code);
       setCode("");
-      store.signedIn();
+      store.signedIn(agreed);
     } catch (e) {
       setError(explain(e, "code", c));
       setCode("");
@@ -167,10 +182,10 @@ export function Login() {
           <Hero width={210} />
         </Rise>
         <Rise i={1} on={on}>
-          <Text style={styles.h} accessibilityRole="header">
-            {step === "phone" ? c.h : c.codeH}
+          <Text style={styles.h} accessibilityRole="header" maxFontSizeMultiplier={HEADING_SCALE}>
+            {step === "phone" ? (finishing ? c.finishH : c.h) : c.codeH}
           </Text>
-          <Text style={styles.lede}>{step === "phone" ? c.sub : c.codeSub(e164 || phone.trim())}</Text>
+          <Text style={styles.lede}>{step === "phone" ? (finishing ? c.finishSub : c.sub) : c.codeSub(e164 || phone.trim())}</Text>
         </Rise>
         <Rise i={2} on={on} style={styles.form}>
           {step === "phone" ? (
@@ -214,6 +229,20 @@ export function Login() {
               {error}
             </Text>
           ) : null}
+          {step === "phone" && !termsOk ? (
+            <>
+              {terms ? <Text style={styles.hint}>{m.termsChanged}</Text> : null}
+              <TermsAgree
+                checked={agreed}
+                onChange={(v) => {
+                  setAgreed(v);
+                  setNeedTerms(false);
+                }}
+                onRead={() => setReading(true)}
+                error={needTerms ? m.termsNeeded : undefined}
+              />
+            </>
+          ) : null}
           {note ? (
             <Text style={styles.hint} accessibilityLiveRegion="polite">
               {note}
@@ -248,8 +277,18 @@ export function Login() {
             </>
           ) : null}
           <Text style={styles.hint}>{c.hint}</Text>
+          {step === "phone" && !finishing ? (
+            <View style={styles.switch}>
+              <Text style={styles.switchText}>{m.newHere}</Text>
+              <Pressable accessibilityRole="button" onPress={() => store.openSignup()} hitSlop={8} style={styles.link}>
+                <Text style={styles.linkText}>{m.createAccount}</Text>
+              </Pressable>
+            </View>
+          ) : null}
+          {termsOk ? <Btn kind="ghost" label={m.termsL} onPress={() => setReading(true)} style={styles.termsBtn} /> : null}
         </Rise>
       </ScrollView>
+      <TermsSheet open={reading} onClose={() => setReading(false)} />
     </KeyboardAvoidingView>
   );
 }
@@ -265,4 +304,9 @@ const useStyles = makeStyles((C) => ({
   bad: { fontFamily: F.regular, fontSize: 13.5, color: C.danger },
   btn: { marginTop: 4, minHeight: 48 },
   hint: { ...small(13), color: C.dim, textAlign: "center", marginTop: 4 },
+  termsBtn: { alignSelf: "center" },
+  switch: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "center", columnGap: 6 },
+  switchText: { ...small(14), color: C.muted },
+  link: { minHeight: 44, justifyContent: "center" },
+  linkText: { fontFamily: F.medium, fontSize: 14, color: C.accent, textDecorationLine: "underline" },
 }));

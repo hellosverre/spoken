@@ -44,6 +44,12 @@ const PATHS = {
   send: <Path d="M5 12h13M13 6l6 6-6 6" />,
   check: <Path d="M5 12.5l4.5 4.5L19 7.5" />,
   x: <Path d="M7 7l10 10M17 7 7 17" />,
+  alert: (
+    <>
+      <Circle cx="12" cy="12" r="8.5" />
+      <Path d="M12 7.8v5.2M12 16.2v.1" />
+    </>
+  ),
   replay: (
     <>
       <Path d="M4 12a8 8 0 1 0 2.4-5.7" />
@@ -83,6 +89,12 @@ const PATHS = {
     </>
   ),
   cloud: <Path d="M7.2 18.5h9.6a4.2 4.2 0 0 0 .4-8.4 5.6 5.6 0 0 0-10.8 1.3 3.6 3.6 0 0 0 .8 7.1z" />,
+  doc: (
+    <>
+      <Path d="M6.5 3.5h7.5l4 4v13h-11.5z" />
+      <Path d="M14 3.5v4h4M9.5 12h5.5M9.5 15.5h5.5" />
+    </>
+  ),
   key: (
     <>
       <Circle cx="8" cy="12" r="3.6" />
@@ -91,6 +103,14 @@ const PATHS = {
   ),
   // Mobile only: the Profile and Home tabs, log out, presets.
   home: <Path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5H15v-5.5H9v5.5H5.5A1.5 1.5 0 0 1 4 19z" />,
+  // A clock turning back: call history.
+  history: (
+    <>
+      <Path d="M4.6 12a7.5 7.5 0 1 0 2.2-5.3" />
+      <Path d="M4.2 4.4v3.3h3.3" />
+      <Path d="M12 8.2v4l2.8 1.8" />
+    </>
+  ),
   heart: <Path d="M12 19.5s-7.5-4.4-7.5-10A4.3 4.3 0 0 1 12 6.8a4.3 4.3 0 0 1 7.5 2.7c0 5.6-7.5 10-7.5 10z" />,
   trash: <Path d="M5 7h14M10 7V5h4v2M7 7l1 12.5h8L17 7M10.5 10.5v6M13.5 10.5v6" />,
   pencil: <Path d="M15.5 5.5l3 3L9 18l-4 1 1-4zM13.5 7.5l3 3" />,
@@ -163,7 +183,10 @@ export function Wordmark({ size = 17 }: { size?: number }) {
   return (
     <View style={styles.wordmark} accessibilityRole="header" accessibilityLabel="Spoken">
       <Mark />
-      <Text style={[styles.word, { fontSize: size, letterSpacing: em(-0.012, size) }]}>Spoken</Text>
+      {/* The logo: grows a little with the text size, not as much as the content. */}
+      <Text style={[styles.word, { fontSize: size, letterSpacing: em(-0.012, size) }]} maxFontSizeMultiplier={1.2}>
+        Spoken
+      </Text>
     </View>
   );
 }
