@@ -254,6 +254,7 @@ export class CallSession {
   private lastGreeting = "";
   private greetAll = ""; // everything said before our opening (welcome message, menu)
   private menuTries = 0;
+  private openInstruction?: { text: string; turns: number }; // the user's latest typed instruction
   private lastPartialAt = 0; // last partial transcript while waiting to open
   private announceMode = false; // a recording played (or we pressed a menu key): wait for a person
   private ended = false;
@@ -988,6 +989,11 @@ export class CallSession {
   }
 
   private async runTurn(spec?: Spec) {
+    if (this.openInstruction && this.openInstruction.turns-- > 0) {
+      this.history.push({ role: "user", text: this.lang === "no"
+        ? `[instruks] Brukeren ba nettopp om: «${this.openInstruction.text}». Det går foran alt annet. Har du ikke gjort det ennå, gjør det i dette svaret.`
+        : `[instruks] The user just asked: "${this.openInstruction.text}". It comes first. If you haven't done it yet, do it in this reply.` });
+    }
     this.turnRunning = true;
     this.wantTurn = false;
     const abort = new AbortController();
@@ -1115,7 +1121,9 @@ export class CallSession {
           }
           this.goalAsks++;
         }
-        const commitment = isCommitment(s.text);
+        // A read-back with a price («So that's one Margherita, 50 kroner, correct?») commits the user too.
+        const priceReadBack = /\?\s*$/.test(s.text) && /\b\d[\d .]*\s*(kr|kroner|nok)\b/i.test(s.text) && /\b(so that'?s|that'?s|that will be|da er det|det blir|så det blir|totalt|correct|stemmer det|riktig)\b/i.test(s.text);
+        const commitment = isCommitment(s.text) || priceReadBack;
         if (commitment && (this.approvalCredit <= 0 || !this.coveredByApproval(s.text))) {
           // Safety: the model tried to commit without a yes from the user for exactly this.
           this.note(this.U.note.stoppedCommit, "warn");
@@ -1609,6 +1617,8 @@ export class CallSession {
         const lang = langFromText(text);
         if (lang && lang !== this.lang) this.setLang(lang);
         this.history.push({ role: "user", text: `[instruks] ${text}` });
+        // Keep it in front of the model for the next turns, so a busy moment can't swallow it.
+        this.openInstruction = { text, turns: 3 };
         this.progress();
         this.note(this.U.note.instruction(text));
         if (!this.pending && !this.speaking) this.requestTurn();
