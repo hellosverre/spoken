@@ -37,7 +37,20 @@ export function ulawRms(buf: Uint8Array): number {
 export const ULAW_SILENCE = 0xff;
 
 /** ~4 s of quiet keyboard clicks at 8 kHz, looped while we wait. Deterministic. */
+/** The ElevenLabs-made typing loop (assets/sfx/typing.ulaw) at half volume, if it's there. */
+function sfxTyping(seconds: number): Uint8Array | null {
+  try {
+    const f = require("node:fs").readFileSync(new URL("../../assets/sfx/typing.ulaw", import.meta.url)) as Uint8Array;
+    if (!f.length || process.env.SFX_TYPING === "0") return null;
+    const n = Math.min(f.length, seconds * 8000), out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) out[i] = linearToUlaw(Math.round(ulawToLinear(f[i]!) * 0.5));
+    return out;
+  } catch { return null; }
+}
+
 export function typingSound(seconds = 4): Uint8Array {
+  const sfx = sfxTyping(seconds);
+  if (sfx) return sfx;
   const rate = 8000;
   const out = new Float32Array(rate * seconds);
   let seed = 7;

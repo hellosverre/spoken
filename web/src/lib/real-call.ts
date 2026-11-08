@@ -103,7 +103,9 @@ export interface LiveIO extends CallIO {
   chips?(items: string[]): void;
   connected(): void;
   /** Where the store sends the user's mid-call messages, chips and hang-up. */
-  attach(sink: { instruction(text: string): void; hangup(): void } | null): void;
+  attach(sink: { instruction(text: string): void; hangup(): void; open(): boolean; drop(): void } | null): void;
+  /** The server's id for this call, as soon as it is known (the store persists it to resume after a reload). */
+  callId?(id: string): void;
 }
 
 // Batch STT second opinion lands ~0.5–0.9 s after a callee line; wait this long for it.
@@ -190,16 +192,51 @@ function registerReal(plan: Plan, request: string) {
     checks: plan.needsApprovalFor.slice(0, 3),
     opening: plan.opening,
   };
-  const sc: Scenario & { live: true; targets?: { name: string; phone: string }[] } = {
-    live: true,
+  setReal({
+    taskId: plan.taskId,
     init: initials(plan.callee.name),
     number: prettyPhone(plan.callee.phone),
-    en: lines,
-    no: lines,
+    lines,
     ...(plan.targets && plan.targets.length > 1 ? { targets: plan.targets } : {}),
-    run: (lang, io) => runRealCall(plan.taskId, lang, io as LiveIO),
+  });
+}
+
+/** What the plan card and call screen need from a real plan; small enough to persist across reloads. */
+export interface SavedReal {
+  taskId: string;
+  init: string;
+  number: string;
+  lines: { contact: string; request: string; goal: string; checks: string[]; opening: string };
+  targets?: { name: string; phone: string }[];
+}
+
+function setReal(r: SavedReal) {
+  const sc: Scenario & { live: true; saved: SavedReal; targets?: { name: string; phone: string }[] } = {
+    live: true,
+    saved: r,
+    init: r.init,
+    number: r.number,
+    en: r.lines,
+    no: r.lines,
+    ...(r.targets && r.targets.length > 1 ? { targets: r.targets } : {}),
+    run: (lang, io) => runRealCall(r.taskId, lang, io as LiveIO),
   };
   (SCENARIOS as Record<string, Scenario>).real = sc;
+}
+
+/** The current real plan, for persist.ts; undefined when there is none. */
+export function currentReal(): SavedReal | undefined {
+  return (SCENARIOS as Record<string, { saved?: SavedReal }>).real?.saved;
+}
+
+/** Put a persisted real plan back so its plan card and call screen work after a reload. */
+export function restoreReal(r: SavedReal) {
+  setReal(r);
+}
+
+/** Reconnect to a call that was running when the page closed: replays it, then ends with its result. */
+export function resumeRealCall(callId: string, lang: Lang, io: LiveIO): Promise<Outcome> {
+  return runRealCall(currentReal()?.taskId ?? "", lang, io, callId);
 }
 
 /** 2–3 places when the plan asks them in parallel (info only); undefined for a normal single call. */
@@ -212,23 +249,44 @@ export function isLive(key: ScenarioKey): boolean {
 }
 
 /** The live call: server events → say/ask; the user's messages → the server. */
-async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outcome> {
+async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: string): Promise<Outcome> {
   const code = passcode();
-  const { callId, mode, passcode: pc } = await http<{ callId: string; mode?: string; passcode?: string }>(
-    "POST", `/api/tasks/${encodeURIComponent(taskId)}/call`, { approved: true }, code ? { "X-Spoken-Passcode": code } : {},
-  );
+  let callId: string, mode: string | undefined, pc: string | undefined;
+  if (resume) {
+    // Already running (or finished) on the server: 404 means it is gone (kept 30 min).
+    callId = resume;
+    io.callId?.(callId);
+    const done = await http<CallResult & { inProgress?: boolean }>("GET", `/api/calls/${encodeURIComponent(callId)}`);
+    if (!done.inProgress) {
+      setReceipt(done.receipt);
+      return outcomeOf(done);
+    }
+  } else {
+    ({ callId, mode, passcode: pc } = await http<{ callId: string; mode?: string; passcode?: string }>(
+      "POST", `/api/tasks/${encodeURIComponent(taskId)}/call`, { approved: true }, code ? { "X-Spoken-Passcode": code } : {},
+    ));
+    io.callId?.(callId);
+  }
   if (pc === "wrong") {
     try { localStorage.removeItem(PASS_KEY); } catch {}
     io.note(lang === "no" ? "Feil demo-kode, så dette er en demosamtale." : "Wrong demo code, so this is a demo call.");
   } else if (mode === "mock") {
     io.note(lang === "no" ? "Demosamtale: ingen ekte telefon ringer." : "Demo call: no real phone is ringing.");
   }
-  resetFacts();
-  setReceipt(null);
-  if (mode !== "mock") beginLiveAudio(callId); // "Hear the call": refused by the server unless the profile allows it
+  if (!resume) {
+    resetFacts();
+    setReceipt(null);
+  }
+  if (resume || mode !== "mock") beginLiveAudio(callId); // "Hear the call": refused by the server unless the profile allows it
   const ws = new WebSocket(`${base().replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(getToken())}`);
   const send = (cmd: object) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(cmd)); };
-  io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });
+  let finished = false;
+  io.attach({
+    instruction: (text) => send({ type: "instruction", text }),
+    hangup: () => send({ type: "hangup" }),
+    open: () => ws.readyState === WebSocket.OPEN,
+    drop: () => { finished = true; try { ws.close(); } catch {} },
+  });
 
   // Lines are shown one after another (say animates word by word); the approval sheet runs beside them.
   let chain: Promise<void> = Promise.resolve();
@@ -237,7 +295,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   const them = new Map<string, { first: string; text: string; revised: boolean }>(); // callee lines
   let connected = false;
 
-  let finished = false;
+  const startedAt = Date.now();
   const result = await new Promise<CallResult>((resolve, reject) => {
     ws.onmessage = (m) => {
       let e: LiveEvent;
@@ -273,7 +331,8 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           shown.set(t.id, t.text);
           const h = { first: t.text.trim(), text: t.text.trim(), revised: false };
           them.set(t.id, h);
-          const until = Date.now() + REVISION_WAIT_MS;
+          // Replayed lines after a reconnect are already final: don't wait for a correction.
+          const until = Date.now() + (resume && Date.now() - startedAt < 4000 ? 0 : REVISION_WAIT_MS);
           queue(async () => {
             while (!h.revised && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
             if (h.text) await io.say("them", h.text);
@@ -322,7 +381,8 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           break;
       }
     };
-    ws.onerror = () => reject(new Error("Mistet forbindelsen til samtalen."));
+    // A dropped socket doesn't end the call on the server: onclose always follows and asks for the result.
+    ws.onerror = () => {};
     ws.onclose = () => {
       if (finished) return;
       // Socket gone before the result: ask the server (202 while the call is still running).
@@ -340,8 +400,15 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   await chain;
   io.attach(null);
   try { ws.close(); } catch {}
-  const rows = Object.entries(result.details ?? {}).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as Row);
-  return { ok: result.outcome === "done", title: result.summary, rows };
+  return outcomeOf(result);
+}
+
+function outcomeOf(result: CallResult): Outcome {
+  // Keep the result short: the first sentence as the title and at most four key details.
+  const rows = Object.entries(result.details ?? {}).slice(0, 4).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as Row);
+  const first = (result.summary ?? "").split(/(?<=[.!?])\s+/)[0] ?? "";
+  const title = first.length > 110 ? first.slice(0, 107).replace(/\s+\S*$/, "") + "…" : first;
+  return { ok: result.outcome === "done", title, rows };
 }
 
 /** Feedback after a call or from Profile. In the recorded demo there is no server, so it just resolves. */

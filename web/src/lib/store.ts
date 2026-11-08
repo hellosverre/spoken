@@ -1,8 +1,11 @@
-import { getToken, logoutAccount, onUnauthorized } from "./account";
+import { ApiError, getToken, logoutAccount, onUnauthorized } from "./account";
+import { createPersister, toDurable, type Durable, type RecentCall } from "./persist";
+import { getFacts, setFacts } from "@/components/FactStrip";
+import { getReceipt, setReceipt } from "@/components/Receipt";
 import { APP_COPY } from "./copy-app";
 import { COPY, type Copy, type Lang, type Row } from "./i18n";
 import { SCENARIOS, detect, type AskConfig, type Outcome, type ScenarioKey, type Who } from "./scenarios";
-import { isLive, planRealCall, planTargets, realEnabled, type LiveIO } from "./real-call";
+import { currentReal, isLive, planRealCall, planTargets, realEnabled, restoreReal, resumeRealCall, type LiveIO } from "./real-call";
 import { DEFAULT_PRESETS, localPresetRepo, type PresetRequest, type StoredPreset } from "./presets";
 
 export type Screen = "intro" | "login" | "home" | "call";
@@ -67,6 +70,10 @@ export interface State {
   sheetOpen: boolean;
   /** Bumped to flash the device frame when Spoken needs you. */
   flashTick: number;
+  /** The server's id for the live or last real call; persisted so a reload can reconnect. */
+  liveCallId: string | null;
+  /** Epoch ms when the call connected; the timer is derived from it so a reload keeps counting. */
+  callStartedAt: number | null;
   /** Signed in with a phone number (a session token is stored). Everything but Login needs it. */
   authed: boolean;
   themePref: ThemePref;
@@ -108,6 +115,8 @@ const INITIAL: State = {
   sheet: null,
   sheetOpen: false,
   flashTick: 0,
+  liveCallId: null,
+  callStartedAt: null,
   authed: false,
   themePref: "system",
   // No default name: real calls say this name out loud, so it must never be a made-up one.
@@ -152,10 +161,17 @@ export class SpokenStore {
   /** Real calls: the chat is waiting for an answer to a server question. */
   private chatAnswer: ((text: string) => void) | null = null;
   /** Real calls: where mid-call messages and hang-up go. */
-  private realSink: { instruction(text: string): void; hangup(): void } | null = null;
+  private realSink: { instruction(text: string): void; hangup(): void; open(): boolean; drop(): void } | null = null;
   /** The contact of the preset being run (real calls only). */
   private presetContact: { name: string; phone: string } | null = null;
   private timer: ReturnType<typeof setInterval> | undefined;
+  private persister = createPersister(typeof localStorage === "undefined" ? { getItem: () => null, setItem() {}, removeItem() {} } : localStorage);
+  /** Saving starts once the saved state has been read, or the empty start state would overwrite it. */
+  private restored = false;
+  private recent: RecentCall[] = [];
+  /** Reconnecting to a running call: replayed lines appear at once instead of being typed out. */
+  private replaying = false;
+  private offVis: (() => void) | undefined;
 
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
@@ -170,6 +186,14 @@ export class SpokenStore {
     const p = typeof patch === "function" ? patch(this.state) : patch;
     this.state = { ...this.state, ...p };
     this.listeners.forEach((l) => l());
+    this.save();
+  }
+
+  private save() {
+    if (!this.restored) return;
+    this.persister.schedule(() =>
+      toDurable(this.state, { uid: this.uid, real: currentReal(), receipt: getReceipt(), facts: getFacts(), recent: this.recent, now: Date.now() }),
+    );
   }
   private get t(): Copy {
     return COPY[this.state.lang];
@@ -207,10 +231,83 @@ export class SpokenStore {
     const presets = localPresetRepo.load();
     if (presets) this.set({ presets });
     this.applyTheme();
+    const onVis = () => {
+      if (document.visibilityState === "visible") this.reconnectIfDropped();
+      else void this.persister.flush(); // tab hidden or closing: write now
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onVis);
+    this.offVis = () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onVis);
+    };
+    void this.boot();
+  }
+
+  /** Read the saved state, then either put the user back where they were or play the intro. */
+  private async boot() {
+    const snap = this.state.authed ? await this.persister.load() : null;
+    if (!this.state.authed) void this.persister.clear();
+    if (snap && this.restore(snap)) return;
+    this.restored = true;
     this.intro();
   }
 
+  /** Put back what the user left: chat, plans, and the live or finished call. False = nothing worth restoring. */
+  private restore(d: Durable): boolean {
+    this.recent = d.recent;
+    const hasCall = d.screen === "call" && (d.transcript.length > 0 || d.liveCallId);
+    if (!d.thread.length && !hasCall && !d.draft) {
+      this.restored = true;
+      return false;
+    }
+    if (d.real) restoreReal(d.real);
+    this.uid = Math.max(this.uid, d.uid);
+    this.introId++;
+    setFacts(d.facts);
+    setReceipt(d.receipt);
+    this.set({
+      thread: d.thread as ThreadItem[],
+      threaded: d.thread.length > 0,
+      draft: d.draft,
+      tab: d.tab === "chat" || d.tab === "settings" ? d.tab : "home",
+      scenario: d.scenario as ScenarioKey,
+      screen: "home",
+      liveCallId: d.liveCallId,
+      callStartedAt: d.callStartedAt,
+    });
+    this.restored = true;
+    if (hasCall) {
+      this.set({
+        screen: "call",
+        transcript: d.transcript as Line[],
+        elapsed: d.elapsed,
+        pill: d.pill as Pill,
+        callEnded: d.callEnded,
+        chips: d.chips,
+        holdSince: d.holdSince,
+        speakerNote: d.callEnded ? "ended" : "listening",
+        sheet: d.result as Sheet | null,
+        sheetOpen: d.callEnded && d.result != null,
+      });
+      // A call that was live: reconnect to its socket (the server keeps it ~30 min).
+      if (!d.callEnded && d.liveCallId && d.real) void this.startCall(d.liveCallId);
+      else if (!d.callEnded) this.set({ callEnded: true, pill: "ended", speakerNote: "ended" });
+    }
+    return true;
+  }
+
+  /** Tab visible again with a live call whose socket the browser closed: join it again. */
+  private reconnectIfDropped() {
+    const s = this.state;
+    if (s.screen !== "call" || s.callEnded || !s.liveCallId || s.multi) return;
+    if (this.realSink?.open()) return;
+    void this.startCall(s.liveCallId);
+  }
+
   stop() {
+    this.offVis?.();
+    void this.persister.flush();
     onUnauthorized(null);
     this.introId++;
     this.homeId++;
@@ -311,7 +408,16 @@ export class SpokenStore {
 
   private toLogin() {
     this.demo = false;
+    // Logout forgets everything on this device: chat, plans, calls and their summaries.
+    this.recent = [];
+    this.uid = 1;
+    setFacts([]);
+    setReceipt(null);
+    this.realSink?.drop();
+    this.realSink = null;
     this.goHome();
+    this.set({ transcript: [], sheet: null, liveCallId: null, callStartedAt: null, callEnded: false, draft: "" });
+    void this.persister.clear();
     this.set({ authed: false, screen: "login" });
   }
 
@@ -537,8 +643,7 @@ export class SpokenStore {
     this.set((s) => ({ transcript: [...s.transcript, { id: this.uid++, kind: "sys", text }] }));
   }
 
-  private startTimer() {
-    const t0 = Date.now();
+  private startTimer(t0 = Date.now()) {
     this.stopTimer();
     this.timer = setInterval(() => this.set({ elapsed: fmt(Date.now() - t0) }), 500);
   }
@@ -557,9 +662,14 @@ export class SpokenStore {
     this.set({ multi: { request, targets }, sheetOpen: false, screen: "call" });
   }
 
-  async startCall() {
-    const targets = planTargets(this.state.scenario);
+  /** `resume` = the server's id of a call that is already running: join it instead of starting one. */
+  async startCall(resume?: string) {
+    const targets = resume ? undefined : planTargets(this.state.scenario);
     if (targets) return this.startMulti(targets);
+    // Reconnecting: close the old socket first, and keep what is on screen in case the call is gone.
+    this.realSink?.drop();
+    this.realSink = null;
+    const kept = resume ? { transcript: this.state.transcript, elapsed: this.state.elapsed } : null;
     const id = ++this.callId;
     this.homeId++;
     const lang = this.state.lang;
@@ -572,16 +682,20 @@ export class SpokenStore {
     this.askResolve = null;
     this.stopTimer();
 
+    this.replaying = !!resume;
+    if (resume) setTimeout(() => { if (id === this.callId) this.replaying = false; }, 4000);
     this.set({
-      transcript: [], sheetOpen: false, elapsed: "0:00", callEnded: false, holdSince: null, chips: [],
+      transcript: [], sheetOpen: false, callEnded: false, holdSince: null, chips: [],
       pill: "ringing", speaker: null, speakerNote: "ringing", screen: "call",
+      ...(resume ? { liveCallId: resume } : { elapsed: "0:00", liveCallId: null, callStartedAt: null }),
     });
-    this.sys(`${this.t.calling} ${L.contact} · ${sc.number}`);
+    if (!resume) this.sys(`${this.t.calling} ${L.contact} · ${sc.number}`);
     const live = isLive(this.state.scenario);
     const connected = () => {
-      this.set({ pill: "live", speakerNote: "listening" });
-      this.startTimer();
-      this.sys(this.t.connected);
+      const t0 = (resume && this.state.callStartedAt) || Date.now();
+      this.set({ pill: "live", speakerNote: "listening", callStartedAt: t0 });
+      this.startTimer(t0);
+      if (!resume) this.sys(this.t.connected);
     };
     if (!live) {
       // A script must never pass for a real call.
@@ -622,7 +736,7 @@ export class SpokenStore {
         }
       }
       if (who === "them") this.lastThem = text;
-      await sleep(who === "them" ? 500 : 350);
+      await sleep(this.replaying ? 0 : who === "them" ? 500 : 350);
       guard();
 
       const lineId = this.uid++;
@@ -634,7 +748,7 @@ export class SpokenStore {
         this.set((s) => ({
           transcript: s.transcript.map((l) => (l.id === lineId ? { id: lineId, kind: who, words: shown } : l)),
         }));
-        await sleep((who === "them" ? 105 : 90) + (/[.,!?]$/.test(words[i]) ? 140 : 0));
+        await sleep(this.replaying ? 0 : (who === "them" ? 105 : 90) + (/[.,!?]$/.test(words[i]) ? 140 : 0));
       }
       this.set({ speaker: null, speakerNote: "listening" });
     };
@@ -681,7 +795,7 @@ export class SpokenStore {
           this.set((s) => ({
             transcript: s.transcript.map((l) => (l.id === last.id && l.kind === who ? { ...l, words: [...l.words, words[i]] } : l)),
           }));
-          await sleep(90 + (/[.,!?]$/.test(words[i]) ? 140 : 0));
+          await sleep(this.replaying ? 0 : 90 + (/[.,!?]$/.test(words[i]) ? 140 : 0));
         }
         this.set({ speaker: null, speakerNote: "listening" });
       };
@@ -693,13 +807,20 @@ export class SpokenStore {
         hold: (since) => id === this.callId && this.set({ holdSince: since }),
         chips: (items) => id === this.callId && this.set({ chips: items }),
         connected: () => id === this.callId && connected(),
-        attach: (sink) => { this.realSink = sink; },
+        callId: (cid) => id === this.callId && this.set({ liveCallId: cid }),
+        attach: (sink) => { if (id === this.callId) this.realSink = sink; },
       };
-      outcome = await sc.run(lang, io);
+      outcome = await (resume ? resumeRealCall(resume, lang, io) : sc.run(lang, io));
       this.realSink = null;
     } catch (e) {
-      this.realSink = null;
+      if (id === this.callId) this.realSink = null;
       if (e === ABORT) return;
+      if (resume && e instanceof ApiError && e.status === 404) {
+        // The server forgot the call (kept 30 min, in memory): show what we saved, as ended.
+        this.set({ transcript: kept!.transcript, elapsed: kept!.elapsed });
+        this.sys(lang === "no" ? "Samtalen er ikke lenger på serveren." : "This call is no longer on the server.");
+        return this.finish(id, { ok: false, title: lang === "no" ? "Samtalen er avsluttet" : "The call has ended", rows: [] });
+      }
       if (live && e !== HANG) {
         // Server or network problem on a real call: say so, don't fake a line.
         this.sys(e instanceof Error ? e.message : String(e));
@@ -731,6 +852,11 @@ export class SpokenStore {
         : { kind: "result", ok: o.ok, title: o.title, rows: [...o.rows, [t.dur, dur]] };
     this.set({ sheet, sheetOpen: true });
     this.demo = false;
+    this.recent = [
+      ...this.recent.filter((r) => r.callId !== this.state.liveCallId || !r.callId),
+      { callId: this.state.liveCallId, contact: SCENARIOS[this.state.scenario][this.state.lang].contact, title: sheet.kind === "result" ? sheet.title : "", ok: sheet.kind === "result" && sheet.ok, at: Date.now() },
+    ].slice(-20);
+    void this.persister.flush();
   }
 
   choose(v: string) {

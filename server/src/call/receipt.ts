@@ -1,7 +1,7 @@
 // Compliance receipt, built from what actually happened on the call (never from the plan):
 // was the AI disclosed, which personal fields were spoken aloud, what the user approved or declined.
 import type { Lang, Profile, Receipt, TranscriptLine } from "../../../shared/contract.ts";
-import { toSpeakable } from "../voice/speakable.ts";
+import { digitWords } from "../voice/speakable.ts";
 
 export interface ApprovalLogItem { question: string; choice: string }
 
@@ -33,7 +33,7 @@ export function sharedFields(agentLines: string[], profile: ReceiptInput["profil
   const first = squash(profile.name).split(" ")[0];
   if (first && first.length > 1 && new RegExp(`(^| )${first}( |$)`).test(flat)) out.push("name");
   const phone = digitsOf(profile.phone ?? "").replace(/^(0047|47)(?=\d{8}$)/, "");
-  if (phone.length >= 6 && (digits.includes(phone) || flat.includes(squash(toSpeakable(phone))))) out.push("phone");
+  if (phone.length >= 6 && (digits.includes(phone) || flat.includes(squash(digitWords(phone))))) out.push("phone");
   const addr = squash(profile.address ?? "");
   if (addr && (flat.includes(addr) || /\[adresse\]/i.test(said))) out.push("address");
   const email = (profile.email ?? "").toLowerCase();

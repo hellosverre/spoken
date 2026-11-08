@@ -157,7 +157,7 @@ describe("talked over by noise", () => {
     await Bun.sleep(1800);
     const all = said().join(" | ");
     expect(all.match(/klar til henting/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
-    expect(said().filter((t) => t === "Da er det seks cola zero i 0,5 liter, klar til henting.").length).toBe(1);
+    expect(said().filter((t) => /^(Som jeg sa, d|D)a er det seks cola zero i 0,5 liter, klar til henting\.$/.test(t)).length).toBe(1);
     await s.finish("test");
   });
 });

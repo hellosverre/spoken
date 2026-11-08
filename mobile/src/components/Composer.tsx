@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { TextInput, View, type TextInputInstance } from "react-native";
+import { Keyboard, TextInput, View, type TextInputInstance } from "react-native";
 import { em, F, makeStyles, useTheme } from "../lib/theme";
 import { ContactsButton } from "./ContactPicker";
 import { Icon } from "./Icon";
@@ -24,9 +24,23 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
   const [focused, setFocused] = useState(false);
   const empty = !value.trim();
 
+  // Focus only when the tick changes while mounted. Remounting (tab switch) with an old tick used to
+  // re-focus the field, pop the keyboard up over a screen that never asked for it.
+  const seenTick = useRef(focusTick);
   useEffect(() => {
-    if (focusTick) ref.current?.focus();
+    if (focusTick === seenTick.current) return;
+    seenTick.current = focusTick;
+    const id = requestAnimationFrame(() => ref.current?.focus());
+    return () => cancelAnimationFrame(id);
   }, [focusTick]);
+
+  // Unmounting while focused (tab or screen change) leaves the keyboard up with no field: close it.
+  useEffect(() => {
+    const input = ref.current;
+    return () => {
+      if (input?.isFocused()) Keyboard.dismiss();
+    };
+  }, []);
 
   return (
     <View style={[styles.field, focused && { borderColor: C.accent }]}>

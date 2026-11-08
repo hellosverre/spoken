@@ -1,7 +1,8 @@
 // Safety rules from CONTRACT.md, enforced in code. The LLM prompt repeats them,
 // but nothing here trusts the model to follow it.
 
-import type { Lang, Shareable } from "../../shared/contract.ts";
+import type { Lang, Profile, ProfileReason, ReasonMode, Shareable } from "../../shared/contract.ts";
+import type { AgentContext } from "./llm/types.ts";
 import { LINES } from "./call/lines.ts";
 import { uiText } from "./call/ui-text.ts";
 
@@ -61,17 +62,55 @@ export function checkGoal(text: string): { ok: true } | { ok: false; reason: str
 
 // ---------- Disclosure ----------
 
-export function disclosureLine(name: string, lang: Lang = "no"): string {
-  if (lang === "en") return `Hi, I'm an AI assistant calling on behalf of ${name.trim() || "a user"}, who is following the call.`;
-  return `Hei, jeg er en KI-assistent som ringer på vegne av ${name.trim() || "en bruker"}, som følger med på samtalen.`;
+/** What the opening needs from the profile; a bare string is just the name. */
+export type DisclosureWho = string | Pick<Profile, "name" | "hearCall" | "reason" | "reasonText" | "reasonMode">;
+
+const REASON_NO: Record<Exclude<ProfileReason, "other">, string> = {
+  deaf: "som er døv", hard_of_hearing: "som er hørselshemmet", speech: "som har talevansker", anxiety: "som har telefonangst",
+};
+const REASON_EN: Record<Exclude<ProfileReason, "other">, string> = {
+  deaf: "who is Deaf", hard_of_hearing: "who is hard of hearing", speech: "who has a speech impairment", anxiety: "who has phone anxiety",
+};
+
+/** Reason is only used when it is set (and «other» has its text). */
+function reasonClause(p: Pick<Profile, "reason" | "reasonText">, lang: Lang): string | undefined {
+  if (!p.reason) return undefined;
+  if (p.reason === "other") {
+    const t = p.reasonText?.trim().slice(0, 60);
+    return t ? `${lang === "en" ? "who" : "som"} ${t}` : undefined;
+  }
+  return (lang === "en" ? REASON_EN : REASON_NO)[p.reason];
+}
+
+export function effectiveReasonMode(p: Pick<Profile, "reason" | "reasonMode">): ReasonMode {
+  return p.reasonMode ?? (p.reason ? "when_helpful" : "never");
+}
+
+/** For the LLM prompt: the reason in both languages plus when it may be mentioned. */
+export function reasonForPrompt(p: Pick<Profile, "reason" | "reasonText" | "reasonMode">): AgentContext["reason"] {
+  const no = reasonClause(p, "no"), en = reasonClause(p, "en");
+  const mode = effectiveReasonMode(p);
+  return no && en && mode !== "never" ? { mode, no, en } : undefined;
+}
+
+export function disclosureLine(who: DisclosureWho, lang: Lang = "no"): string {
+  const p = typeof who === "string" ? { name: who, hearCall: false } as const : who;
+  const name = p.name.trim() || (lang === "en" ? "a user" : "en bruker");
+  const reason = effectiveReasonMode(p) === "always" ? reasonClause(p, lang) : undefined;
+  const follows = p.hearCall ? (lang === "en" ? "following along" : "følger med") : undefined;
+  let clause = "";
+  if (reason && follows) clause = `, ${reason} ${lang === "en" ? "and is" : "og"} ${follows}`;
+  else if (reason) clause = `, ${reason}`;
+  else if (follows) clause = lang === "en" ? ", who's following along" : ", som følger med";
+  return lang === "en"
+    ? `Hi! I'm Spoken, an AI assistant calling for ${name}${clause}.`
+    : `Hei! Jeg er Spoken, en KI-assistent som ringer for ${name}${clause}.`;
 }
 
 /** The first spoken line always starts with the disclosure, whatever the plan or model said. */
-export function ensureDisclosure(opening: string, name: string, lang: Lang = "no"): string {
-  const d = disclosureLine(name, lang);
+export function ensureDisclosure(opening: string, who: DisclosureWho, lang: Lang = "no"): string {
   const rest = opening.replace(/^.*?(KI-assistent|AI assistant)[^.!?]*[.!?]\s*/i, "").trim();
-  const sayNo = /si nei|takke nei|say no/i.test(rest) ? "" : lang === "en" ? " You're welcome to say no to talking to me." : " Du kan gjerne si nei til å snakke med meg.";
-  return `${d}${sayNo}${rest ? " " + rest : ""}`;
+  return `${disclosureLine(who, lang)}${rest ? " " + rest : ""}`;
 }
 
 // ---------- Callee asks for secrets ----------

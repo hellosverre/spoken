@@ -152,6 +152,9 @@ function validProfile(b: any): Profile | string {
   if (b.personality && !["warm", "neutral", "short"].includes(b.personality)) return "bad personality";
   if (b.lang && !["no", "en"].includes(b.lang)) return "bad lang";
   const str = (v: unknown, max = 200) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
+  if (b.reason != null && !["deaf", "hard_of_hearing", "speech", "anxiety", "other"].includes(b.reason)) return "bad reason";
+  if (b.reasonMode != null && !["always", "when_helpful", "never"].includes(b.reasonMode)) return "bad reasonMode";
+  const reason = b.reason ?? undefined;
   return {
     name: b.name.trim().slice(0, 80),
     phone: str(b.phone, 20),
@@ -162,6 +165,7 @@ function validProfile(b: any): Profile | string {
     voiceId: str(b.voiceId, 64),
     personality: b.personality ?? "warm",
     lang: b.lang ?? "no",
+    ...(reason ? { reason, reasonText: reason === "other" ? str(b.reasonText, 60) : undefined, reasonMode: b.reasonMode ?? "when_helpful" } : {}),
   };
 }
 
@@ -211,7 +215,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     const profile = t.profile;
     const voiceId = profile.voiceId || config.elevenlabs.defaultVoice;
     const callLang = t.input.callLang ?? callLangFor(t.input.text, config.callLang);
-    const opening = ensureDisclosure("", profile.name, callLang);
+    const opening = ensureDisclosure("", profile, callLang);
     if (t.blocked) {
       t.plan = { taskId, callee: { name: "", phone: "", source: "user" }, goal: t.input.text, opening, willShare: [], needsApprovalFor: [], voiceId, blocked: t.blocked };
       return json(t.plan);
@@ -373,7 +377,7 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     });
     const c = createCompare({
       id: id_, text: v.text, lang: v.lang, callLang, mode: real ? "real" : "mock", device: deviceOf(req), profile, voiceId,
-      opening: ensureDisclosure("", profile.name, callLang), maxSec, legs,
+      opening: ensureDisclosure("", profile, callLang), maxSec, legs,
     });
     return json({ compareId: c.id, mode: c.mode, legs: c.legs.map((l) => ({ name: l.name, callId: l.callId })), ...(pass === "wrong" ? { passcode: "wrong" } : {}) });
   }
@@ -393,6 +397,15 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
     if (m === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
 
     if (path === "/health") return json({ ok: true, callProvider: config.callProvider, llm: llm.name });
+    // Ops only: read a finished call on the box itself (tunnel requests carry cf-connecting-ip and are refused).
+    {
+      const m2 = path.match(/^\/internal\/calls\/([\w-]+)$/);
+      if (m2 && m === "GET") {
+        if (isPublic(req) || !["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(server.requestIP(req)?.address ?? "")) return err(404, "not found");
+        const s = calls.get(m2[1]!);
+        return s ? json({ status: s.status, result: s.result, transcript: s.transcript, events: s.events.filter((e: any) => e.type === "debug" || e.type === "note").slice(-200) }) : err(404, "unknown call");
+      }
+    }
 
     // Every /api route except /api/auth/* needs a valid session (Authorization header, or ?token= for
     // websockets). Webhooks and media sockets (/vonage, /telnyx, /elks) keep their own per-call tokens.
@@ -565,6 +578,11 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       if (device && (raw?.voiceId === undefined || raw?.voiceId === null)) {
         const prev = await db.getProfile(device);
         if (prev?.voiceId) v.voiceId = prev.voiceId;
+      }
+      // Same for the reason: absent key = keep, explicit null = the user cleared it.
+      if (device && raw?.reason === undefined) {
+        const prev = await db.getProfile(device);
+        if (prev?.reason) Object.assign(v, { reason: prev.reason, reasonText: prev.reasonText, reasonMode: prev.reasonMode });
       }
       if (device) await db.putProfile(device, v);
       else if (isPublic(req)) return err(400, "X-Spoken-Device is required");

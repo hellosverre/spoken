@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { ScrollView, Switch, Text, View } from "react-native";
+import { Pressable, ScrollView, Switch, Text, View } from "react-native";
+import { api } from "../lib/account";
 import type { ThemePref } from "../lib/store";
 import { em, F, HEADING_SCALE, makeStyles, PAD, small, useTheme } from "../lib/theme";
 import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
@@ -15,6 +16,7 @@ import { Icon, type IconName } from "./Icon";
 import { List, Row, Seg } from "./List";
 import { Field, T } from "./ui";
 import { VoicePicker } from "./VoicePicker";
+import { VoiceSheet } from "./VoiceSheet";
 
 /**
  * The Profile tab: who you are, how the app looks, how calls are made, and the
@@ -143,6 +145,8 @@ export function Profile() {
       <SectionTitle icon="phone" title={lang === "no" ? "Stemme" : "Voice"} />
       <VoicePicker />
 
+      <ReasonSection />
+
       <SectionTitle icon="phone" title={m.callsH} />
       <View style={[styles.group, realOn && { borderColor: ready.fg }]}>
         <View style={styles.switchRow}>
@@ -263,6 +267,116 @@ export function Profile() {
   );
 }
 
+type Reason = "deaf" | "hard_of_hearing" | "speech" | "anxiety" | "other";
+type Mode = "always" | "when_helpful" | "never";
+interface ReasonState { reason?: Reason; reasonText?: string; reasonMode?: Mode }
+const REASONS: Reason[] = ["deaf", "hard_of_hearing", "speech", "anxiety", "other"];
+const MODES: Mode[] = ["always", "when_helpful", "never"];
+
+const REASON_COPY = {
+  no: {
+    title: "Fortell hvorfor jeg bruker Spoken", none: "Ikke satt", done: "Ferdig", clear: "Fjern",
+    hint: "Valgfritt. Sies bare i samtaler, og lagres først når du velger noe. Du kan fjerne det når som helst.",
+    why: "Grunn", when: "Når skal Spoken nevne det?", otherL: "Egen tekst", otherPh: "f.eks. har dysleksi", saveFail: "Fikk ikke lagret.",
+    reasons: { deaf: "Døv", hard_of_hearing: "Hørselshemmet", speech: "Talevansker", anxiety: "Telefonangst", other: "Annet" },
+    modes: { always: "Alltid", when_helpful: "Bare når det hjelper", never: "Aldri" },
+  },
+  en: {
+    title: "Tell why I use Spoken", none: "Not set", done: "Done", clear: "Remove",
+    hint: "Optional. Only said on calls, and stored only once you choose something. You can remove it any time.",
+    why: "Reason", when: "When should Spoken mention it?", otherL: "Your own words", otherPh: "e.g. has dyslexia", saveFail: "Couldn't save.",
+    reasons: { deaf: "Deaf", hard_of_hearing: "Hard of hearing", speech: "Speech", anxiety: "Phone anxiety", other: "Other" },
+    modes: { always: "Always", when_helpful: "Only when it helps", never: "Never" },
+  },
+} as const;
+
+/** Optional «why I use Spoken»: a collapsed row like the voice row, details in a sheet. Health data: only exists once the user sets it. */
+function ReasonSection() {
+  const { C } = useTheme();
+  const styles = useStyles();
+  const lang = useSpoken((s) => s.lang);
+  const c = REASON_COPY[lang];
+  const [st, setSt] = useState<ReasonState>({});
+  const [draft, setDraft] = useState("");
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api<ReasonState>("GET", "/api/profile").then((p) => { setSt({ reason: p.reason, reasonText: p.reasonText, reasonMode: p.reasonMode }); setDraft(p.reasonText ?? ""); }).catch(() => {});
+  }, []);
+
+  /** next = null clears all three; the server keeps the old value when the keys are absent. */
+  async function save(next: ReasonState | null) {
+    const prev = st;
+    const value = next ?? {};
+    setSt(value);
+    setError("");
+    try {
+      const cur = await api<Record<string, unknown>>("GET", "/api/profile");
+      await api("PUT", "/api/profile", {
+        hearCall: true, personality: "warm", ...cur, lang,
+        reason: value.reason ?? null, reasonText: value.reasonText ?? null, reasonMode: value.reasonMode ?? null,
+      });
+    } catch {
+      setSt(prev);
+      setError(c.saveFail);
+    }
+  }
+
+  const mode = st.reasonMode ?? "when_helpful";
+  const label = st.reason ? `${st.reason === "other" && st.reasonText ? st.reasonText : c.reasons[st.reason]} · ${c.modes[mode]}` : c.none;
+
+  return (
+    <>
+      <List>
+        <Row first icon="person" title={c.title} sub={label} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setOpen(true)} />
+      </List>
+      {error ? <Text style={styles.help} accessibilityLiveRegion="polite">{error}</Text> : null}
+      <VoiceSheet visible={open} title={c.title} closeLabel={c.done} onClose={() => setOpen(false)}>
+        <Text style={[styles.help, { marginBottom: 12 }]}>{c.hint}</Text>
+        <View style={styles.chips} accessibilityRole="radiogroup" accessibilityLabel={c.why}>
+          {REASONS.map((r) => {
+            const on = st.reason === r;
+            return (
+              <Pressable
+                key={r}
+                accessibilityRole="radio"
+                accessibilityLabel={c.reasons[r]}
+                accessibilityState={{ checked: on }}
+                onPress={() => void save({ reason: r, reasonMode: mode, reasonText: r === "other" ? draft.trim().slice(0, 60) || undefined : undefined })}
+                style={[styles.chip, on && { borderColor: C.accent, backgroundColor: C.accentSoft }]}
+              >
+                <T size={14} weight="medium" color={on ? C.accent : undefined}>{c.reasons[r]}</T>
+              </Pressable>
+            );
+          })}
+        </View>
+        {st.reason === "other" ? (
+          <Field
+            label={c.otherL}
+            placeholder={c.otherPh}
+            maxLength={60}
+            value={draft}
+            onChangeText={setDraft}
+            onBlur={() => draft.trim() !== (st.reasonText ?? "") && void save({ ...st, reasonText: draft.trim() || undefined })}
+            returnKeyType="done"
+            style={styles.input}
+          />
+        ) : null}
+        {st.reason ? (
+          <>
+            <Text style={[styles.help, { marginTop: 16, marginBottom: 8 }]}>{c.when}</Text>
+            <Seg<Mode> wide label={c.when} value={mode} onChange={(v) => void save({ ...st, reasonMode: v })} options={MODES.map((v) => ({ v, label: c.modes[v] }))} />
+            <Pressable accessibilityRole="button" accessibilityLabel={c.clear} onPress={() => { setDraft(""); void save(null); }} style={styles.clear}>
+              <T size={14} color={C.dim}>{c.clear}</T>
+            </Pressable>
+          </>
+        ) : null}
+      </VoiceSheet>
+    </>
+  );
+}
+
 const THEME_ICON: Record<ThemePref, IconName> = { system: "auto", light: "sun", dark: "moon" };
 
 /** An icon tile, a title with a note, and a switch named by the title. */
@@ -375,6 +489,9 @@ const useStyles = makeStyles((C) => ({
   tile: { width: 36, height: 36, borderRadius: 11, alignItems: "center", justifyContent: "center" },
   fieldRow: { flexDirection: "row", alignItems: "flex-end", gap: 10 },
   fieldTile: { width: 48, height: 48, borderRadius: 13, alignItems: "center", justifyContent: "center" },
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginBottom: 12 },
+  chip: { minHeight: 44, paddingHorizontal: 16, borderRadius: 999, borderWidth: 1, borderColor: C.line2, justifyContent: "center" },
+  clear: { minHeight: 44, marginTop: 12, alignSelf: "flex-start", justifyContent: "center" },
   divider: { height: 1, backgroundColor: C.line },
   state: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: -4 },
   stateText: { flex: 1, fontFamily: F.medium, fontSize: 13, lineHeight: 18 },

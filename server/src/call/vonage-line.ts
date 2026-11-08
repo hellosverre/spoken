@@ -12,6 +12,7 @@ import { audioHub, WHO_AGENT, WHO_CALLEE } from "./audio-hub.ts";
 import type { ServerWebSocket } from "bun";
 import { createSign } from "node:crypto";
 import { config } from "../config.ts";
+import { createDenoiser } from "../voice/denoise.ts";
 import { ScribeStream } from "../voice/scribe.ts";
 import { batchVerdict, meanConf } from "./batch-verdict.ts";
 import { peakLevel, SpeakerLevel } from "./loudness.ts";
@@ -134,6 +135,8 @@ export class VonageLine implements CallLine {
   private loudFrames = 0;
   private inBatch: Uint8Array[] = [];
   private rtConf = new Map<string, number>();
+  /** RNNoise + adaptive gate on the callee audio (null when DENOISE=0). */
+  private dn = createDenoiser();
   private lastVoicedAt = 0;
   private lastPartialAt = 0;
   private voicedSinceCommit = false;
@@ -228,9 +231,12 @@ export class VonageLine implements CallLine {
   }
 
   prefetch(texts: string[]) {
-    for (const t of texts) {
-      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, lang: this.lang, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
-    }
+    // One at a time: a burst of parallel requests hits ElevenLabs' concurrency limit (429).
+    void (async () => {
+      for (const t of texts) {
+        try { for await (const _ of tts(t, { voiceId: this.o.voiceId, lang: this.lang, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); }
+      }
+    })();
   }
 
   // ---------- event webhook (POST /vonage/event?call=…&t=<per-call token>, JSON) ----------
@@ -301,6 +307,8 @@ export class VonageLine implements CallLine {
   attach(ws: ServerWebSocket<any>) {
     this.ws = ws;
     this.scribe = new ScribeStream({
+      language: (code, text) => this.ev.calleeLanguage?.(code, text),
+      entities: (text, entities) => this.ev.calleeEntities?.(text, entities),
       partial: (text) => {
         const n = text.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").trim();
         if (n && this.lastCommittedNorm.startsWith(n) && Date.now() - this.lastCommitAt < 2000) return;
@@ -358,18 +366,48 @@ export class VonageLine implements CallLine {
     if (!this.streaming) { this.streaming = true; this.maybeConnected(); } // audio before the JSON hello
     if (raw.length < 4) return;
     audioHub.publish(this.o.callId, WHO_CALLEE, raw);
-    this.onFrame(down16to8(raw));
+    let voiced = true, audio = raw;
+    if (this.dn) { // denoise at 16 kHz, then down to the 8 kHz Scribe gets
+      const even = raw.length & ~1, pcm = new Int16Array(even >> 1);
+      new Uint8Array(pcm.buffer).set(raw.subarray(0, even));
+      const clean = this.dn.process(pcm, 16000);
+      voiced = this.dn.voiced;
+      // The gate always applies; Scribe hears the cleaned audio only with DENOISE_STT=1 (recognition untested on it).
+      if (process.env.DENOISE_STT === "1") audio = new Uint8Array(clean.buffer);
+    }
+    this.onFrame(down16to8(audio), voiced);
   }
 
-  private onFrame(pcm: Int16Array) {
+  private lastToneAt = 0;
+  toneMs() { return this.lastToneAt ? Date.now() - this.lastToneAt : Infinity; }
+
+  /** Ringback detection: a steady 400–450 Hz tone carries most of the frame's energy (Goertzel, 8 kHz). */
+  private isRingTone(pcm: Int16Array): boolean {
+    let total = 0;
+    for (let i = 0; i < pcm.length; i++) total += pcm[i]! * pcm[i]!;
+    if (total < pcm.length * 200 * 200) return false; // too quiet to be a tone
+    let best = 0;
+    for (const f of [400, 425, 440, 450]) {
+      const k = 2 * Math.cos((2 * Math.PI * f) / 8000);
+      let s1 = 0, s2 = 0;
+      for (let i = 0; i < pcm.length; i++) { const s0 = pcm[i]! + k * s1 - s2; s2 = s1; s1 = s0; }
+      best = Math.max(best, s1 * s1 + s2 * s2 - k * s1 * s2);
+    }
+    // Goertzel power vs. energy: a pure tone scores ≈ N/2 × total.
+    return best / (total * pcm.length) > 0.3;
+  }
+
+  private onFrame(pcm: Int16Array, voiced = true) {
+    if (this.isRingTone(pcm)) { this.lastToneAt = Date.now(); voiced = false; }
     const rms = pcmRms(pcm);
-    if (rms > VOICED_RMS) {
+    const vrms = voiced ? rms : 0; // gated frames (noise / distant voices) count as silence for VAD and barge-in
+    if (vrms > VOICED_RMS) {
       this.voicedSinceCommit = true;
       if (!this.segOnsetAt) this.segOnsetAt = Date.now();
       this.lastVoicedAt = Date.now();
       if (rms > this.speaker.floor()) this.lastLoudAt = this.lastVoicedAt;
     }
-    this.localVad(rms);
+    this.localVad(vrms);
     this.emitLevel("callee", rms);
     this.sttSamples += pcm.length;
     this.recent.push({ at: Date.now(), pcm, rms });
@@ -574,6 +612,7 @@ export class VonageLine implements CallLine {
   }
 
   private cleanup() {
+    this.dn?.destroy();
     clearTimeout(this.ringTimer);
     if (!this.costReported) {
       this.costReported = true;

@@ -127,8 +127,10 @@ export interface LiveIO extends CallIO {
   /** Suggested next instructions. */
   chips?(items: string[]): void;
   connected(): void;
+  /** The server's id for this call, as soon as it is known (the store persists it to resume after a restart). */
+  callId?(id: string): void;
   /** Where the store sends the user's mid-call messages, chips and hang-up. */
-  attach(sink: { instruction(text: string): void; hangup(): void } | null): void;
+  attach(sink: { instruction(text: string): void; hangup(): void; /** Socket is up. */ open(): boolean; /** Close the socket without ending the call (a newer connection replaces it). */ drop(): void } | null): void;
 }
 
 // Batch STT second opinion lands ~0.5–0.9 s after a callee line; wait this long for it.
@@ -199,16 +201,51 @@ function registerReal(plan: Plan, request: string, contactName?: string) {
     checks: plan.needsApprovalFor.slice(0, 3),
     opening: plan.opening,
   };
-  const sc: Scenario & { live: true; targets?: { name: string; phone: string }[] } = {
-    live: true,
+  setReal({
+    taskId: plan.taskId,
     init: initials(name),
     number: prettyPhone(plan.callee.phone),
-    en: lines,
-    no: lines,
+    lines,
     ...(plan.targets && plan.targets.length > 1 ? { targets: plan.targets } : {}),
-    run: (lang, io) => runRealCall(plan.taskId, lang, io as LiveIO),
+  });
+}
+
+/** What the plan card and call screen need from a real plan; small enough to persist across restarts. */
+export interface SavedReal {
+  taskId: string;
+  init: string;
+  number: string;
+  lines: { contact: string; request: string; goal: string; checks: string[]; opening: string };
+  targets?: { name: string; phone: string }[];
+}
+
+function setReal(r: SavedReal) {
+  const sc: Scenario & { live: true; saved: SavedReal; targets?: { name: string; phone: string }[] } = {
+    live: true,
+    saved: r,
+    init: r.init,
+    number: r.number,
+    en: r.lines,
+    no: r.lines,
+    ...(r.targets && r.targets.length > 1 ? { targets: r.targets } : {}),
+    run: (lang, io) => runRealCall(r.taskId, lang, io as LiveIO),
   };
   (SCENARIOS as Record<string, Scenario>).real = sc;
+}
+
+/** The current real plan, for persist.ts; undefined when there is none. */
+export function currentReal(): SavedReal | undefined {
+  return (SCENARIOS as Record<string, { saved?: SavedReal }>).real?.saved;
+}
+
+/** Put a persisted real plan back so its plan card and call screen work after a restart. */
+export function restoreReal(r: SavedReal) {
+  setReal(r);
+}
+
+/** Reconnect the store to a call that was running when the app closed: replays it, then ends with its result. */
+export function resumeRealCall(callId: string, lang: Lang, io: LiveIO): Promise<Outcome> {
+  return runRealCall(currentReal()?.taskId ?? "", lang, io, callId);
 }
 
 /** 2–3 places when the plan asks them in parallel (info only); undefined for a normal single call. */
@@ -221,19 +258,34 @@ export function isLive(key: ScenarioKey): boolean {
 }
 
 /** The live call: server events → say/ask; the user's messages → the server. */
-async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outcome> {
+async function runRealCall(taskId: string, lang: Lang, io: LiveIO, resume?: string): Promise<Outcome> {
   const code = settings.passcode.trim();
-  const { callId, mode, passcode: pc } = await http<{ callId: string; mode?: string; passcode?: string }>(
-    "POST", `/api/tasks/${encodeURIComponent(taskId)}/call`, { approved: true }, code ? { "X-Spoken-Passcode": code } : {},
-  );
+  let callId: string, mode: string | undefined, pc: string | undefined;
+  if (resume) {
+    // Already running (or finished) on the server: 404 means it is gone (kept 30 min).
+    callId = resume;
+    io.callId?.(callId);
+    const done = await http<CallResult & { inProgress?: boolean }>("GET", `/api/calls/${encodeURIComponent(callId)}`);
+    if (!done.inProgress) {
+      setReceipt(done.receipt);
+      return outcomeOf(done);
+    }
+  } else {
+    ({ callId, mode, passcode: pc } = await http<{ callId: string; mode?: string; passcode?: string }>(
+      "POST", `/api/tasks/${encodeURIComponent(taskId)}/call`, { approved: true }, code ? { "X-Spoken-Passcode": code } : {},
+    ));
+    io.callId?.(callId);
+  }
   if (pc === "wrong") {
     settings.onWrongPasscode();
     io.note(lang === "no" ? "Feil demo-kode, så dette er en øvingssamtale: ingen telefon ringer, og svarene er skriptet." : "Wrong demo code, so this is a practice call: no phone is ringing and the replies are scripted.");
   } else if (mode === "mock") {
     io.note(lang === "no" ? "Øvingssamtale: ingen telefon ringer, og svarene er skriptet. Legg inn demo-koden under Profil for ekte samtaler." : "Practice call: no phone is ringing and the replies are scripted. Add the demo code in Profile for real calls.");
   }
-  resetFacts();
-  setReceipt(null);
+  if (!resume) {
+    resetFacts();
+    setReceipt(null);
+  }
   // The session rides in the query: a websocket can't carry headers everywhere.
   const sessionToken = ((await authHeader()).Authorization ?? "").replace(/^Bearer /, "");
   const url = `${API.replace(/^http/, "ws")}/api/calls/${encodeURIComponent(callId)}/live?token=${encodeURIComponent(sessionToken)}`;
@@ -256,7 +308,23 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
     if (ws?.readyState === WebSocket.OPEN) ws.send(raw);
     else outbox.push(raw);
   };
-  io.attach({ instruction: (text) => send({ type: "instruction", text }), hangup: () => send({ type: "hangup" }) });
+  // Stops everything this run started; also how drop() lets a newer connection take over.
+  const cleanup = () => {
+    finished = true;
+    clearTimeout(retryTimer);
+    reconnectOnFocus?.remove();
+    stopKeepAlive();
+  };
+  io.attach({
+    instruction: (text) => send({ type: "instruction", text }),
+    hangup: () => send({ type: "hangup" }),
+    // Up, or reconnecting by itself: the store only starts over once this run has given up.
+    open: () => !finished,
+    drop: () => {
+      cleanup();
+      try { ws?.close(); } catch {}
+    },
+  });
 
   // Lines are shown one after another (say animates word by word); the approval sheet runs beside them.
   let chain: Promise<void> = Promise.resolve();
@@ -267,6 +335,7 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
   const noted = new Set<string>(); // notes already shown (at + text)
   let connected = false;
 
+  const startedAt = Date.now();
   const result = await new Promise<CallResult>((resolve, reject) => {
     const done = (r: CallResult) => {
       if (finished) return;
@@ -308,7 +377,8 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
           shown.set(t.id, t.text);
           const h = { first: t.text.trim(), text: t.text.trim(), revised: false };
           them.set(t.id, h);
-          const until = Date.now() + REVISION_WAIT_MS;
+          // Replayed lines after a reconnect are already final: don't wait for a correction.
+          const until = Date.now() + (resume && Date.now() - startedAt < 4000 ? 0 : REVISION_WAIT_MS);
           queue(async () => {
             while (!h.revised && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
             if (h.text) await io.say("them", h.text);
@@ -400,19 +470,21 @@ async function runRealCall(taskId: string, lang: Lang, io: LiveIO): Promise<Outc
     reconnectOnFocus = AppState.addEventListener("change", (state) => {
       if (state === "active" && !finished && !ws) connect();
     });
-  }).finally(() => {
-    finished = true;
-    clearTimeout(retryTimer);
-    reconnectOnFocus?.remove();
-    stopKeepAlive();
-  });
+  }).finally(cleanup);
 
   await chain;
   io.attach(null);
   // ws is reassigned inside the callbacks, which TypeScript's narrowing can't see.
   try { (ws as WebSocket | null)?.close(); } catch {}
-  const rows = Object.entries(result.details ?? {}).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as Row);
-  return { ok: result.outcome === "done", title: result.summary, rows };
+  return outcomeOf(result);
+}
+
+function outcomeOf(result: CallResult): Outcome {
+  // Keep the result short: the first sentence as the title and at most four key details.
+  const rows = Object.entries(result.details ?? {}).slice(0, 4).map(([k, v]) => [k.charAt(0).toUpperCase() + k.slice(1), v] as Row);
+  const first = (result.summary ?? "").split(/(?<=[.!?])\s+/)[0] ?? "";
+  const title = first.length > 110 ? first.slice(0, 107).replace(/\s+\S*$/, "") + "…" : first;
+  return { ok: result.outcome === "done", title, rows };
 }
 
 /** Feedback after a call or from Profile. Without real calls switched on there is no server to send to. */

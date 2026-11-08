@@ -140,12 +140,14 @@ export class SupabaseDb implements Db {
     return {
       name: r.name ?? "", phone: r.phone ?? undefined, address: r.address ?? undefined, email: r.email ?? undefined,
       allergies: r.allergies ?? undefined, hearCall: r.hear_call, voiceId: r.voice_id ?? undefined, personality: r.personality, lang: r.lang,
+      reason: r.reason ?? undefined, reasonText: r.reason_text ?? undefined, reasonMode: r.reason_mode ?? undefined,
     };
   }
   async putProfile(d: string, p: Profile) {
     await this.rest("POST", "profiles?on_conflict=device_id", {
       device_id: d, name: p.name, phone: p.phone ?? null, address: p.address ?? null, email: p.email ?? null, allergies: p.allergies ?? null,
-      hear_call: p.hearCall, voice_id: p.voiceId ?? null, personality: p.personality, lang: p.lang, updated_at: new Date().toISOString(),
+      hear_call: p.hearCall, voice_id: p.voiceId ?? null, personality: p.personality, lang: p.lang,
+      reason: p.reason ?? null, reason_text: p.reasonText ?? null, reason_mode: p.reasonMode ?? null, updated_at: new Date().toISOString(),
     }, "resolution=merge-duplicates,return=minimal");
   }
   async listContacts(d: string): Promise<Contact[]> {

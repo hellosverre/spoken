@@ -1,6 +1,7 @@
 // Shared contract between server/ and web/. Change only via the lead.
 
-export type Lang = "no" | "en";
+/** ISO-639-1 code. "no" and "en" are fully supported; any other code runs on the English prompt + "reply in <language>". UI language is always no|en. */
+export type Lang = "no" | "en" | (string & {});
 
 export interface TaskInput {
   text: string; // "Bestill en stor pepperoni fra Domino's Storo til 18:00"
@@ -106,7 +107,14 @@ export interface Profile {
   voiceId?: string;
   personality: "warm" | "neutral" | "short";
   lang: Lang;
+  // Optional "why I use Spoken". Health data (GDPR Art. 9): only stored when the user sets it,
+  // deletable (send reason: null). PUT without the key keeps the saved value.
+  reason?: ProfileReason;
+  reasonText?: string; // ≤ 60 chars, only for reason "other"
+  reasonMode?: ReasonMode; // default "when_helpful" if a reason is set, else "never"
 }
+export type ProfileReason = "deaf" | "hard_of_hearing" | "speech" | "anxiety" | "other";
+export type ReasonMode = "always" | "when_helpful" | "never";
 
 export interface Contact {
   id: string;
@@ -183,7 +191,7 @@ export interface CompareState {
 
 // Trust features. Fact strip: the price, time, address and reference number heard on the call, pinned above
 // the transcript. confirmed = a second source agrees (batch STT, the callee repeated it, or said yes to a read-back).
-export type FactKind = "price" | "time" | "address" | "ref";
+export type FactKind = "price" | "time" | "address" | "ref" | "phone" | "date" | "name"; // phone/date/name: Scribe entity detection
 export interface FactItem {
   kind: FactKind;
   value: string; // display text: «250 kr», «kl. 18:00», «Storgata 5», «A-1234»

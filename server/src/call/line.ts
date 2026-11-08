@@ -10,6 +10,10 @@ export type LineMetric =
   | { kind: "first_audio"; at: number };
 
 export interface LineEvents {
+  /** Scribe's audio-based language for the last committed segment. */
+  calleeLanguage?(code: string, text: string): void;
+  /** Entities Scribe found in the last committed segment. */
+  calleeEntities?(text: string, entities: import("../voice/scribe.ts").ScribeEntity[]): void;
   status(status: CallStatus, detail?: string): void;
   /** Callee started talking (VAD/partial): used for barge-in. */
   calleeSpeech(): void;
@@ -52,6 +56,8 @@ export interface CallLine {
   prefetch?(texts: string[]): void;
   /** ms since the callee's audio last had voice energy (Infinity if unknown). */
   silenceMs?(): number;
+  /** ms since a ringback tone (425 Hz «tuut») was last heard; Infinity if never. */
+  toneMs?(): number;
   /** ms of our own audio still to play (0 when quiet, Infinity while TTS is still arriving). */
   speechLeftMs?(): number;
   /** The call switched language mid-call (STT and TTS follow). */

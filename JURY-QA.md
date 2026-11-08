@@ -21,7 +21,7 @@ Short answers to the hard questions. Criteria (Saturday slides): functionality, 
 |---|---|---|
 | Mio shut down: people prefer to call themselves. Why you? | Mio served people who *can* call. For a Deaf person the call is impossible, not annoying. | Mio var for folk som *kan* ringe. For en døv er samtalen umulig, ikke bare ubehagelig. |
 | Nav already offers interpreters for free. | Nav's video interpreting service runs weekdays 08–20 and needs an approval first. A pharmacy question at 21:00 isn't worth an interpreter slot. We take the small calls. | Bildetolktjenesten er åpen hverdager 08–20 og krever vedtak. Et spørsmål til apoteket kl. 21 er ikke verdt en tolketime. Vi tar de små samtalene. |
-| Is it legal for an AI to call a business? | It says it's an AI in the first sentence (EU AI Act Art. 50), the user starts every call, and it never sells. Norwegian details: we're asking a lawyer. | Den sier at den er KI i første setning, brukeren starter hver samtale, og den selger aldri. Norske detaljer sjekker vi med advokat. |
+| Is it legal for an AI to call a business? | Yes. The EU's AI Act rule (Art. 50: say it's an AI) has applied in the EU since 2 Aug 2026, but isn't Norwegian law yet: Nkom expects the KI-lov in spring 2027. We follow it already: Spoken says it's an AI in its first sentence, the user starts every call, and it never sells. | Ja. EUs KI-forordning (art. 50: si at det er KI) gjelder i EU fra 2. august 2026, men er ikke norsk lov ennå; KI-loven ventes våren 2027 (Nkom). Vi følger den allerede: Spoken sier at den er KI i første setning, brukeren starter hver samtale, og den selger aldri. |
 | What about privacy? Health calls? | Data sits in the EU (Supabase, Ireland). No audio and no transcripts stored, only a short summary. Speech and AI run at ElevenLabs and OpenRouter, both outside the EU; that is in our data map. | Data lagres i EU. Ingen lyd og ingen transkripsjon lagres, bare et kort sammendrag. Tale og KI går via ElevenLabs og OpenRouter utenfor EU; det står i dataoversikten vår. |
 | What if it books the wrong thing? | It can't. Price, time and booking come back to you as YES/NO, with the live text in front of you. | Den kan ikke. Pris, tid og booking kommer tilbake til deg som JA/NEI, med live tekst. |
 | Can it be used for prank calls or harassment? | Emergency numbers are blocked, calls are rate-limited, and real calls go to approved numbers only. Production adds BankID login. | Nødnumre er sperret, antall samtaler er begrenset, og ekte samtaler går bare til godkjente numre. I drift kommer BankID-innlogging. |
@@ -31,8 +31,8 @@ Short answers to the hard questions. Criteria (Saturday slides): functionality, 
 | How can the shop call back? | Not yet. Next step: your own number, with replies as text. | Ikke ennå. Neste steg: ditt eget nummer, med svar som tekst. |
 | Does it actually work? | X of Y real test calls got the job done. **(verify: fill in after test calls)** | X av Y ekte testsamtaler fikk jobben gjort. **(verify)** |
 | Have Deaf people tested it? | One Deaf user gave feedback; the app now collects feedback after every call. Quote her only with her written OK. | Én døv bruker har gitt tilbakemelding; appen samler nå tilbakemelding etter hver samtale. |
-| How do you make money? | Pay per call, about 29 kr; our cost is about 2 kr. Later: hearing organisations and municipalities buy it for their members. | Betal per samtale, rundt 29 kr; kostnaden vår er rundt 2 kr. Senere: hørselsorganisasjoner og kommuner kjøper det til medlemmene. |
-| Does it scale? | Under 2 kr per call, nothing per user. Swedish and Danish need a new prompt. The home server is a hackathon choice. | Under 2 kr per samtale. Svensk og dansk krever bare ny prompt. Hjemmeserveren er et hackathon-valg. |
+| How do you make money? | Pay per call, about 29 kr; our cost is about 3 kr. Later: hearing organisations and municipalities buy it for their members. | Betal per samtale, rundt 29 kr; kostnaden vår er rundt 3 kr. Senere: hørselsorganisasjoner og kommuner kjøper det til medlemmene. |
+| Does it scale? | About 3 kr per call, nothing per user. Swedish and Danish need a new prompt. The home server is a hackathon choice. | Rundt 3 kr per samtale. Svensk og dansk krever bare ny prompt. Hjemmeserveren er et hackathon-valg. |
 
 ## Why "hand over to me" isn't built yet
 
@@ -48,3 +48,21 @@ The feature: Spoken makes the call, and when the user wants to talk themselves, 
 **Answer (EN):** "It's next on the list. We built for Deaf users first, and they can't take over a voice call. For people with phone anxiety, handing over is the natural next step, and the phone line we use already supports joining two calls."
 
 **Svar (NO):** «Det er neste på lista. Vi bygde for døve først, og de kan ikke ta over en talesamtale. For folk med telefonangst er det neste naturlige steg, og telefonlinja vi bruker kan allerede koble sammen to samtaler.»
+
+## How will NAV pay for it?
+
+**EN:** "Deaf users can already apply to Nav for the 2,000 kr app and subscription grant. Next we list Spoken on FinnHjelpemiddel, open a market dialogue with Nav before the next communication tender, and pilot it with the interpreter service for evenings and weekends, when Bildetolk is closed (it runs weekdays 08–20)."
+
+**NO:** «Døve kan allerede søke Nav om 2 000 kr til apper og abonnement. Neste steg er å legge Spoken inn i FinnHjelpemiddel, markedsdialog med Nav før neste anbud, og en pilot med tolketjenesten på kveld og helg, når bildetolken er stengt (den er åpen hverdager 08–20).»
+
+Source: nav.no/apper-og-programvare, nav.no/skjermtolk (checked 2026-11-07).
+
+## Team efficiency (say it at the end)
+
+**EN:** "Two people, 30 hours: 220+ commits, 300 automated tests, real calls through phone menus and queues, a web app and a phone app."
+**NO:** «To personer, 30 timer: over 220 commits, 300 automatiske tester, ekte samtaler gjennom telefonmenyer og køer, en nettapp og en mobilapp.»
+
+## Is the shop told the call is shown as text?
+
+**EN:** "They're told it's an AI calling for a person who follows along. We store no audio and no transcript, only a short summary."
+**NO:** «De får vite at det er en KI som ringer for en person som følger med. Vi lagrer ikke lyd eller transkripsjon, bare et kort sammendrag.»

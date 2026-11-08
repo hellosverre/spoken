@@ -21,6 +21,7 @@ export interface ReceiptData {
 
 let receipt: ReceiptData | null = null;
 const subs = new Set<() => void>();
+export function getReceipt() { return receipt; }
 export function setReceipt(next: ReceiptData | null | undefined) { receipt = next ?? null; subs.forEach((f) => f()); }
 const subscribe = (f: () => void) => { subs.add(f); return () => { subs.delete(f); }; };
 

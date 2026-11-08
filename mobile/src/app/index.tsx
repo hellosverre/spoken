@@ -1,5 +1,5 @@
-import { useEffect, type ReactNode } from "react";
-import { BackHandler, StyleSheet, View } from "react-native";
+import { useEffect, useState, type ReactNode } from "react";
+import { BackHandler, Keyboard, StyleSheet, View } from "react-native";
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from "react-native-reanimated";
 import { Call, confirmEndCall } from "../components/Call";
 import { Home } from "../components/Home";
@@ -21,7 +21,14 @@ export default function Device() {
   const store = useStore();
   const screen = useSpoken((s) => s.screen);
   const flashTick = useSpoken((s) => s.flashTick);
+  const tab = useSpoken((s) => s.tab);
   const styles = useStyles();
+
+  // Screens stay mounted under each other, so a focused field on the screen we just left kept the
+  // keyboard up with nothing visible to type into. Moving to another screen or tab closes it.
+  useEffect(() => {
+    Keyboard.dismiss();
+  }, [screen, tab]);
 
   useEffect(() => {
     store.start();
@@ -78,13 +85,22 @@ export default function Device() {
 function Layer({ name, screen, children }: { name: Screen; screen: Screen; children: ReactNode }) {
   const on = name === screen;
   const p = useSharedValue(on ? 1 : 0);
+  // Once faded out, a layer is taken out of layout: its KeyboardAvoidingView and inputs stop reacting
+  // to the keyboard (two stacked KeyboardAvoidingViews both padded and fought over focus).
+  const [gone, setGone] = useState(!on);
   useEffect(() => {
     p.value = withTiming(on ? 1 : 0, { duration: 300, easing: ease });
+    if (on) {
+      setGone(false);
+      return;
+    }
+    const id = setTimeout(() => setGone(true), 350);
+    return () => clearTimeout(id);
   }, [on, p]);
   const anim = useAnimatedStyle(() => ({ opacity: p.value, transform: [{ translateY: (1 - p.value) * 8 }] }));
   return (
     <Animated.View
-      style={[StyleSheet.absoluteFill, anim, { zIndex: on ? 2 : name === "intro" ? 1 : 0 }]}
+      style={[StyleSheet.absoluteFill, anim, { zIndex: on ? 2 : name === "intro" ? 1 : 0, display: gone ? "none" : "flex" }]}
       pointerEvents={on ? "auto" : "none"}
       accessibilityElementsHidden={!on}
       importantForAccessibility={on ? "auto" : "no-hide-descendants"}

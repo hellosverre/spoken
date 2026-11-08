@@ -17,8 +17,8 @@ describe("numbers", () => {
 
 describe("disclosure", () => {
   test("always first, even if the opening tries something else", () => {
-    expect(ensureDisclosure("Hei, det er Sverre her!", "Sverre")).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av Sverre, som følger med på samtalen.");
-    expect(ensureDisclosure("", "")).toStartWith("Hei, jeg er en KI-assistent som ringer på vegne av en bruker, som følger med på samtalen.");
+    expect(ensureDisclosure("Hei, det er Sverre her!", "Sverre")).toStartWith("Hei! Jeg er Spoken, en KI-assistent som ringer for Sverre.");
+    expect(ensureDisclosure("", "")).toStartWith("Hei! Jeg er Spoken, en KI-assistent som ringer for en bruker.");
   });
 });
 
@@ -48,8 +48,8 @@ describe("secrets", () => {
 describe("speakable", () => {
   test("numbers and times as words", () => {
     expect(toSpeakable("189 kr klokka 18:00")).toBe("hundre og åttini kroner klokka atten");
-    expect(toSpeakable("Ring 22 00 00 01")).toBe("Ring to to null null null null null en");
-    expect(toSpeakable("kl. 9.30")).toBe("klokka ni tretti");
+    expect(toSpeakable("Ring 22 00 00 01")).toBe("Ring tjueto, null null, null null, null en");
+    expect(toSpeakable("kl. 9.30")).toBe("klokka halv ti");
   });
 });
 

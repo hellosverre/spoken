@@ -8,7 +8,7 @@ import { config } from "../config.ts";
 import { mockSummary } from "../llm/mock.ts";
 import type { AgentContext, HistoryItem, LlmProvider, Tone, Usage } from "../llm/types.ts";
 import {
-  detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim,
+  detectSecretAsk, ensureDisclosure, filterOutgoing, isCommitment, isDoneClaim, reasonForPrompt,
 } from "../safety.ts";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -16,9 +16,10 @@ import type { CallLine, LineMetric } from "./line.ts";
 import { timeHint, timesIn, withoutTimes } from "../time.ts";
 import { isNumberish, numberHint } from "./numbers.ts";
 import { HoldFlow } from "./hold.ts";
-import { OnHoldDetector } from "./onhold.ts";
+import { HOLD_PHRASE, OnHoldDetector } from "./onhold.ts";
 import { suggestChips } from "./chips.ts";
-import { LINES, langFromText } from "./lines.ts";
+import { LINES, langFromText, langName, linesFor } from "./lines.ts";
+import { LangSwitcher } from "./langswitch.ts";
 import { uiText } from "./ui-text.ts";
 import { FactTracker } from "./facts.ts";
 import { buildReceipt, type ApprovalLogItem } from "./receipt.ts";
@@ -88,9 +89,13 @@ const OPENING_ECHO_CONF = Number(process.env.OPENING_ECHO_CONF ?? 0.6);
 const GREETING_WAIT_MS = Number(process.env.GREETING_WAIT_MS ?? 3000);
 const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
 // A recorded welcome message or phone menu answers first at many restaurants: wait it out.
-const ANNOUNCEMENT = /velkommen til|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
-const MENU = /trykk|tast(er)? \d|press \d|for (bestilling|reservasjon|å (snakke|prate))/i;
+const ANNOUNCEMENT = /velkommen til|gjelder (din )?henvendelse|her (vil|kan) du (alltid )?finne|for english|press \d|for norsk|beste priser|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
+const MENU = /trykk|tast(er)? \d|press (\d|zero|one|two|three|four|five|six|seven|eight|nine)|for (bestilling|reservasjon|å (snakke|prate))/i;
+// The menu named a way to reach a person: no need to hear the rest before pressing.
+const MENU_TARGET = /resepsjon|kundeservice|kundesenter|bestilling|reservasjon|bordbestilling|snakke med|prate med|operatør|sentralbord|reception|front desk|customer service|speak (to|with)|reservations?/i;
 const ANNOUNCEMENT_GAP_MS = 3500;
+// A person picking up after the recording: «Hallo», «Thon Hotel, det er Kari», «Hva kan jeg hjelpe deg med?».
+const HUMAN_PICKUP = /^(hallo|hei|god (kveld|morgen|dag|ettermiddag))\b.{0,60}$|\b(det er|du snakker med|snakker med)\s+\p{Lu}|hva kan jeg hjelpe|hvordan kan jeg hjelpe|how can i help|this is \p{Lu}/iu;
 const ANNOUNCEMENT_MAX_MS = 45_000; // a recorded message can run long; never talk over it
 const GREETING_MAX_MS = Number(process.env.GREETING_MAX_MS ?? 8000);
 // After the disclosure: give them a moment to answer («ja?», «nei takk») before stating the errand.
@@ -117,7 +122,10 @@ const FILLER_WORDS = new Set(["det", "den", "jeg", "du", "vi", "de", "ha", "har"
 // Start the LLM on a partial that has been stable this long (speculative turn).
 const SPEC_AFTER_MS = Number(process.env.SPEC_AFTER_MS ?? 200);
 // Callee text that sounds cut off mid-sentence: wait this long for more before answering.
-const HOLD_MS = 450;
+const HOLD_MS = 900; // after «Det blir…»: let them finish the sentence
+// A line without . ? ! may be a pause mid-sentence: wait until they've really stopped talking.
+const HOLD_OPEN_MS = Number(process.env.HOLD_OPEN_MS ?? 600);
+const DONE_SILENCE_MS = 700;
 // Word confidences arrive ~20 ms after the commit; batch revisions ~0.7 s.
 const WORDS_WAIT_MS = 250; // call #6: confidences came 130 ms after the commit
 const REVISION_WAIT_MS = Number(process.env.REVISION_WAIT_MS ?? 800);
@@ -137,11 +145,13 @@ const REFUSAL_HINT = "⟨svar på om de vil snakke med en KI⟩";
 const BARGE_TAIL_MS = Number(process.env.BARGE_TAIL_MS ?? 400);
 // Questions and normal sentences are finished even if they end in «det»/«den» («vi har ikke det.»).
 const CONNECTOR_END = /\b(og|eller|men|fordi|at|som|hvis|altså|eh|ehm|øh|liksom|til|med|for|om)[.…]?$/i;
+// Words that end a sentence only when nothing follows; with a full stop they are fine («Det går fint, det.»).
+const OPEN_END = /\b(så|da|den|det|en|et|på|i|av|klokka|kl|cirka|ca|rundt|kanskje|and|or|but|because|so|the|a|to|with|about|um|uh)[…,]?$/i;
 function soundsUnfinished(text: string): boolean {
   const t = text.trim();
   if (/\?$/.test(t)) return false;
   if (/(,|…|\.\.\.|-)$/.test(t)) return true;
-  if (CONNECTOR_END.test(t)) return true;
+  if (CONNECTOR_END.test(t) || OPEN_END.test(t)) return true;
   // «Det blir.» / «Det koster.» : a cut-off before the number
   return t.split(/\s+/).length <= 3 && /\b(blir|koster|er|var)[.]?$/i.test(t);
 }
@@ -222,7 +232,8 @@ export class CallSession {
   private tone: Tone = "friendly";
   /** Language spoken on the phone (Plan.callLang); the user can switch it mid-call. */
   private lang: Lang;
-  private get L() { return LINES[this.lang]; }
+  private get L() { return linesFor(this.lang); }
+  private switcher!: LangSwitcher;
   /** What the app shows the user, in the app language. */
   private get U() { return uiText(this.init.profile.lang); }
   private simpler = false;
@@ -243,6 +254,8 @@ export class CallSession {
   private lastGreeting = "";
   private greetAll = ""; // everything said before our opening (welcome message, menu)
   private menuTries = 0;
+  private lastPartialAt = 0; // last partial transcript while waiting to open
+  private announceMode = false; // a recording played (or we pressed a menu key): wait for a person
   private ended = false;
   private endTag?: { outcome: Outcome; summary: string };
   private voicemail = false;
@@ -314,6 +327,7 @@ export class CallSession {
     this.taskId = init.taskId;
     this.errand = parseErrand(init.plan.goal, init.profile.name);
     this.lang = init.plan.callLang ?? "no";
+    this.switcher = new LangSwitcher(this.lang, (to) => this.autoSwitch(to));
     this.onHold = new OnHoldDetector({
       onHold: (since) => { this.debug("on_hold"); this.emit({ type: "on_hold", since }); },
       holdOver: () => { this.debug("hold_over"); this.emit({ type: "hold_over", at: Date.now() }); },
@@ -398,6 +412,8 @@ export class CallSession {
         status: (s, detail) => this.onLineStatus(s, detail),
         calleeSpeech: () => this.onCalleeSpeech(),
         calleePartial: (id, text) => {
+          // Before our opening, half-finished words count too: a recording may still be talking.
+          if (this.openingPending) { this.lastPartialAt = Date.now(); if (ANNOUNCEMENT.test(text)) this.announceMode = true; }
           this.emit({ type: "transcript", id, who: "callee", text, final: false, at: Date.now() });
           this.onPartial(text);
         },
@@ -415,6 +431,9 @@ export class CallSession {
         calleeRevised: (id, text, words) => this.onRevised(id, text, words),
         calleeNoise: (id) => this.onNoise(id),
         calleeBatchDone: (id) => { const f = this.facts.batchAgrees(id); if (f) this.emit({ type: "facts", items: f, at: Date.now() }); this.releaseSpeech(id); },
+        // Recordings and phone menus are often bilingual: only a person's words may switch the language.
+        calleeLanguage: (code, text) => { if (!this.openingPending && !ANNOUNCEMENT.test(text) && !HOLD_PHRASE.test(text)) this.switcher.feedDetected(code, text); },
+        calleeEntities: (text, entities) => { const f = this.facts.observeEntities(text, entities); if (f) this.emit({ type: "facts", items: f, at: Date.now() }); },
         voicemail: () => this.onVoicemail(),
         ended: (reason) => void this.finish(reason),
         debug: (kind, data) => this.debug(kind, data),
@@ -449,7 +468,7 @@ export class CallSession {
     // The plan's opening is kept only if it is in the call's language; the disclosure is rebuilt.
     const other = this.lang === "en" ? /KI-assistent/i : /AI assistant/i;
     const op = this.init.plan.opening;
-    return ensureDisclosure(other.test(op) ? "" : op, this.init.profile.name, this.lang);
+    return ensureDisclosure(other.test(op) ? "" : op, this.init.profile, this.lang);
   }
 
   /** Telnyx (or the model) says a machine answered: hang up without leaving a message. */
@@ -483,6 +502,7 @@ export class CallSession {
       this.menuTries++;
       const menu = this.greetAll.trim();
       this.greetAll = "";
+      this.announceMode = true;
       this.debug("phone_menu", { menu });
       console.log(`[call] ${this.callId} phone menu heard, choosing a key`);
       this.openingPending = false;
@@ -519,12 +539,23 @@ export class CallSession {
         const quiet = this.init.line.silenceMs?.() ?? Infinity;
         const greeted = this.lastCalleeAt >= start;
         // «Hei, dette er …» stops mid-sentence: give them twice the gap to finish it.
-        const gap = ANNOUNCEMENT.test(this.greetAll) ? ANNOUNCEMENT_GAP_MS
+        if (ANNOUNCEMENT.test(this.greetAll)) this.announceMode = true;
+        const human = this.announceMode && HUMAN_PICKUP.test(this.lastGreeting);
+        // In a recording or queue, only a line that sounds like a person ends the wait.
+        const recorded = this.announceMode && !human && (ANNOUNCEMENT.test(this.lastGreeting) || HOLD_PHRASE.test(this.lastGreeting));
+        const gap = this.announceMode && !human ? ANNOUNCEMENT_GAP_MS
           : greeted && soundsUnfinished(this.lastGreeting) ? 2 * GREETING_GAP_MS : GREETING_GAP_MS;
+        // Speech recognition still hearing words (partials) means someone or something is talking.
+        const hearing = Date.now() - this.lastPartialAt < 1200;
+        // Still ringing («tuut … tuut», cadence 1 s on / 4 s off): nobody has picked up yet.
+        const ringing = (this.init.line.toneMs?.() ?? Infinity) < 5500 && !HUMAN_PICKUP.test(this.lastGreeting);
+        // A full menu with a way to reach a person, and it has gone quiet: press now.
+        const menuReady = MENU.test(this.greetAll) && MENU_TARGET.test(this.greetAll) && !hearing && quiet >= 1500;
         const done = this.ended
-          || (greeted && quiet >= gap)
-          || (!greeted && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
-          || waited >= (ANNOUNCEMENT.test(this.greetAll) ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
+          || menuReady
+          || (greeted && !recorded && !hearing && !ringing && quiet >= gap)
+          || (!greeted && !hearing && !ringing && !this.announceMode && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
+          || waited >= (this.announceMode || (this.init.line.toneMs?.() ?? Infinity) < 60_000 ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
         if (done) { clearInterval(tick); resolve(greeted); }
       }, 50);
     });
@@ -558,12 +589,14 @@ export class CallSession {
     clearTimeout(this.silenceTimer);
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: this.lastCalleeAt });
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
+    // The callee (or whoever they handed over to) speaks another language: switch before the reply.
+    if (!this.openingPending && !ANNOUNCEMENT.test(clean) && !HOLD_PHRASE.test(clean)) this.switcher.feed(clean);
     // Times are parsed in code and handed to the LLM as facts («⟨tid: 19:00⟩»).
     const hint = timeHint(clean);
     if (faint) this.faintIds.add(id);
-    // A bare «Nei» right after «Du kan gjerne si nei til å snakke med meg» is the answer to that.
+    // A bare «Nei» right after the opening («Jeg er Spoken, en KI-assistent …») is the answer to that.
     const prevAgent = [...this.history].reverse().find((h) => h.role === "agent")?.text ?? "";
-    const refusal = /\b(si nei til å snakke med meg|say no to talking to me)\b/i.test(prevAgent) && PLAIN_NO.test(clean) ? REFUSAL_HINT : "";
+    const refusal = /\b(Spoken, en KI-assistent|Spoken, an AI assistant|si nei til å snakke med meg|say no to talking to me)\b/i.test(prevAgent) && PLAIN_NO.test(clean) ? REFUSAL_HINT : "";
     const item: HistoryItem = { role: "callee", text: [clean, hint, refusal, faint ? FAINT_HINT : ""].filter(Boolean).join(" ") };
     this.history.push(item);
     this.segItems.set(id, item);
@@ -591,6 +624,14 @@ export class CallSession {
       this.history.pop(); // not part of the conversation
       this.scheduleResume(200);
       return;
+    }
+    // They cut us off and said something real: answer that, knowing what we didn't get to say.
+    if (this.cutLine && !this.cutLine.resumed && Date.now() - this.cutLine.at < 15_000) {
+      this.cutLine.resumed = true;
+      clearTimeout(this.cutTimer);
+      this.history.push({ role: "user", text: this.lang === "no"
+        ? `[instruks] Du ble avbrutt mens du sa: «${this.cutLine.text}». Svar på det de nettopp sa. Ta med resten bare hvis det fortsatt trengs, kort og naturlig, uten å gjenta deg.`
+        : `[instruks] You were cut off while saying: "${this.cutLine.text}". Answer what they just said. Bring up the rest only if it still matters, briefly and naturally, without repeating yourself.` });
     }
     if (this.speakHold && this.speakHold.id !== id) this.speakHold.release();
     if (this.speaking) this.onCalleeSpeech();
@@ -664,6 +705,19 @@ export class CallSession {
     if (soundsUnfinished(clean)) {
       this.debug("hold_unfinished", { text: clean });
       this.holdTimer = setTimeout(() => { this.holdTimer = undefined; if (this.segItems.has(id)) this.requestTurn(); }, HOLD_MS);
+      return;
+    }
+    // No closing . ? ! : maybe just a breath. Start only once the line has been quiet for a while.
+    if (!/[.?!]$/.test(clean.replace(/\s*⟨.*?⟩/g, "").trim()) && Number.isFinite(this.init.line.silenceMs?.() ?? Infinity)) {
+      this.debug("hold_open", { text: clean });
+      const id1 = id;
+      const check = () => {
+        this.holdTimer = undefined;
+        if (!this.segItems.has(id1) || this.ended) return;
+        if ((this.init.line.silenceMs?.() ?? Infinity) < DONE_SILENCE_MS) { this.holdTimer = setTimeout(check, 200); return; }
+        this.startGate(id1);
+      };
+      this.holdTimer = setTimeout(check, HOLD_OPEN_MS);
       return;
     }
     // «Okay?» / «Ja, men» on its own: give the callee a moment to go on before we answer.
@@ -810,7 +864,10 @@ export class CallSession {
       if ((this.init.line.silenceMs?.() ?? Infinity) < 500) { this.scheduleResume(400); return; }
       cut.resumed = true;
       this.debug("barge_in_resumed", { text: cut.text });
-      void this.say(cut.text, "say");
+      // Pick it up naturally instead of restarting word for word.
+      const lead = this.lang === "no" ? "Som jeg sa, " : "As I was saying, ";
+      const short = cut.text.split(/\s+/).length <= 4;
+      void this.say(short ? cut.text : lead + cut.text.charAt(0).toLowerCase() + cut.text.slice(1), "say");
     }, ms);
   }
 
@@ -917,6 +974,7 @@ export class CallSession {
       goal: this.init.plan.goal,
       calleeName: this.init.plan.callee.name,
       userName: p.name,
+      reason: reasonForPrompt(p),
       // Only what this call may share AND the profile actually has (fnr comes from the call request).
       willShare: share.filter((k) => k === "fnr" ? !!this.init.secrets?.fnr : k === "birthdate" ? false : k === "name" ? !!p.name : !!p[k as "phone" | "address" | "email" | "allergies"]),
       needsApprovalFor: this.init.plan.needsApprovalFor,
@@ -970,7 +1028,7 @@ export class CallSession {
     }, Math.max(0, backAfter - (Date.now() - t0))) : undefined;
     // Only fill silence when the reply is genuinely slow.
     const fillerTimer = setTimeout(() => {
-      if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending || this.fillers >= MAX_FILLERS) return;
+      if (spokeAnything || backchannel || stop || abort.signal.aborted || this.ended || this.pending || this.onHold.active || this.fillers >= MAX_FILLERS) return;
       this.fillers++;
       const f = this.L.fillers.find((x) => x !== this.lastFiller) ?? this.L.fillers[0]!;
       this.lastFiller = f;
@@ -1572,12 +1630,21 @@ export class CallSession {
     }
   }
 
-  /** «Speak English» / «snakk norsk» from the user: prompt, fixed lines, STT and TTS switch. */
-  setLang(lang: Lang) {
+  /** Detected from the callee's own speech (langswitch.ts): same switch, but the note says what happened. */
+  private autoSwitch(lang: Lang) {
+    this.setLang(lang, true);
+  }
+
+  /** «Speak English» / «snakk norsk» from the user, or a detected switch: prompt, fixed lines, STT and TTS follow. */
+  setLang(lang: Lang, auto = false) {
+    this.switcher?.set(lang);
     this.lang = lang;
     this.init.line.setLang?.(lang);
     this.debug("call_lang", { lang });
-    this.note(this.U.note.speaking(lang));
+    if (auto || (lang !== "no" && lang !== "en")) {
+      const ui = this.init.profile.lang;
+      this.note(ui === "en" ? `Switched to ${langName(lang, "en")}` : `Byttet til ${langName(lang, "no")}`);
+    } else this.note(this.U.note.speaking(lang));
   }
 
   private async userHangup() {
