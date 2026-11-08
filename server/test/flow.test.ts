@@ -23,7 +23,7 @@ describe("mock pizza order, end to end", () => {
   test("task → clarify → plan → call → live transcript → approval → result", async () => {
     const { clarify, plan } = await planFor("Bestill en stor pepperoni fra Domino's Storo til 18:00");
     expect(clarify.questions.length).toBeGreaterThan(0);
-    expect(clarify.questions.at(-1).id).toBe("confirm");
+    expect(clarify.questions.some((q: { id: string }) => q.id === "confirm")).toBe(false);
     expect(plan.callee.name).toBe("Domino's Storo");
     expect(plan.callee.phone).toMatch(/^\+47\d{8}$/);
     expect(plan.opening).toStartWith("Hei! Jeg er Spoken, en KI-assistent som ringer for Sverre, som følger med.");
