@@ -13,7 +13,7 @@ page.on("pageerror", (e) => errors.push(String(e)));
 await page.goto(pathToFileURL(join(here, "..", "intro.html")).href);
 await page.waitForFunction(() => window.__intro && window.__intro.ready);
 const info = await page.evaluate(() => ({ count: window.__intro.count, end: window.__intro.T_END }));
-const frames = (process.env.FRAMES || "1-start:-1,2-dissolve:0.62,3-flight:1.5,4-assembled:3.08,5-fill:3.6,6-final:6.2").split(",");
+const frames = (process.env.FRAMES || "1-start:-1,2-dissolve:0.7,3-flow:1.9,4-gather:3.35,5-assembled:4.2,6-fill:4.65,7-final:7.5").split(",");
 for (const f of frames) {
   const [name, t] = f.split(":");
   await page.evaluate((t) => window.__intro.seek(t), Number(t));
@@ -25,7 +25,7 @@ await page.waitForFunction(() => window.__intro && window.__intro.ready);
 await page.evaluate(() => { window.__dts = []; let last = performance.now(); const f = (n) => { window.__dts.push(n - last); last = n; if (window.__dts.length < 400) requestAnimationFrame(f); }; requestAnimationFrame(f); });
 await page.keyboard.press("Space");
 await page.waitForTimeout((info.end + 0.5) * 1000);
-const pacing = await page.evaluate(() => { const d = window.__dts.slice(2).sort((a, b) => a - b); return { frames: d.length, medianMs: +d[d.length >> 1].toFixed(1), p95Ms: +d[Math.floor(d.length * 0.95)].toFixed(1) }; });
+const pacing = await page.evaluate(() => { const raw = window.__dts.slice(2); let acc = 0; const slow = []; raw.forEach((d) => { acc += d; if (d > 25) slow.push(+(acc / 1000).toFixed(2)); }); const d = raw.slice().sort((a, b) => a - b); return { thin: window.__intro.quality(), frames: d.length, medianMs: +d[d.length >> 1].toFixed(1), p95Ms: +d[Math.floor(d.length * 0.95)].toFixed(1), slowAtS: slow.slice(0, 30) }; });
 await page.keyboard.press("r");
 const stats = await page.evaluate(() => window.__intro.stats);
 await browser.close();
