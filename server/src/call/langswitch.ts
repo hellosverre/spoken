@@ -79,7 +79,10 @@ export class LangSwitcher {
   feedDetected(code: string, text: string): Lang | undefined {
     const lang = normalizeLangCode(code);
     const n = norm(text);
-    if (!lang || n.split(" ").length < 2) return undefined; // «Ja.»: too little to trust either way
+    if (!lang || n.split(" ").length < 4) return undefined; // short lines are too easy to mishear
+    // Scribe's guess must agree with the words themselves before we switch.
+    const byText = detectLang(text).lang;
+    if (byText && byText !== lang) return undefined;
     if (this.handled === n && this.handledSure) return undefined;
     this.handled = n;
     this.handledSure = true;

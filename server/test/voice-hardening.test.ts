@@ -146,7 +146,7 @@ describe("scribe", () => {
       s.connect();
       const q = new URL(urls[0]!).searchParams;
       expect(q.get("include_language_detection")).toBe("true");
-      expect(q.getAll("secondary_languages")).toEqual(["en"]);
+      expect(q.getAll("secondary_languages")).toEqual([]); // off unless SCRIBE_SECONDARY=1
       expect(q.get("include_timestamps")).toBe("true");
       expect(q.has("filter_background_audio")).toBe(false);
       expect(q.has("no_verbatim")).toBe(false);
@@ -194,7 +194,7 @@ describe("language detection → LangSwitcher", () => {
     expect(sw.feed(text)).toBeUndefined();
     expect(sw.feedDetected("en", text)).toBeUndefined(); // 5 words < 6: needs a second segment
     expect(sw.feed("Okay great")).toBeUndefined();
-    expect(sw.feedDetected("eng", "Okay great")).toBe("en");
+    expect(sw.feedDetected("eng", "Okay that is great for me")).toBe("en");
     expect(log).toEqual(["en"]);
   });
   test("a confident text vote is not double counted by the detection event", () => {

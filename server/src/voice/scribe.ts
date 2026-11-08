@@ -93,7 +93,8 @@ export class ScribeStream {
     // no_verbatim stays off: «eh» is used for turn-taking.
     if (!this.plain) {
       q.set("include_language_detection", "true");
-      for (const l of secondaryLanguages(this.lang)) q.append("secondary_languages", l);
+      // Extra languages made Scribe hear unclear Norwegian as English: only with SCRIBE_SECONDARY=1.
+      if (process.env.SCRIBE_SECONDARY === "1") for (const l of secondaryLanguages(this.lang)) q.append("secondary_languages", l);
       for (const [k, v] of Object.entries(this.extraParams)) for (const x of Array.isArray(v) ? v : [v]) q.append(k, x);
       if (this.h.entities) q.set("entity_detection", "all");
     }
