@@ -37,6 +37,8 @@ function cacheKey(text: string, voiceId: string, model: string, extra = "") {
 }
 
 export interface TtsOptions {
+  /** Internal: a 429 was already retried once. */
+  retried429?: boolean;
   voiceId?: string;
   model?: string;
   signal?: AbortSignal;
@@ -139,9 +141,11 @@ async function* ttsOnce(text: string, opts: TtsOptions, model: string): AsyncGen
   if (!res.ok) {
     clearTimeout(timer);
     const body = await res.text();
+    // Too many requests at once: wait a moment and try the same key again (once).
+    if (res.status === 429 && !opts.retried429) { await Bun.sleep(350); yield* ttsOnce(text, { ...opts, retried429: true }, model); return; }
     if (elKeyFailed(res.status, body)) { yield* ttsOnce(text, opts, isV4(model) ? FLASH_MODEL : model); return; }
     // The free fallback key can't use the library voices added to the main account: say it in Brian.
-    if (elOnFallback() && voiceId !== FALLBACK_VOICE && /voice_not_found/i.test(body)) {
+    if (elOnFallback() && voiceId !== FALLBACK_VOICE && /voice_not_found|paid_plan_required|library voices/i.test(body)) {
       yield* ttsOnce(text, { ...opts, voiceId: FALLBACK_VOICE }, model); return;
     }
     // A dictionary that was deleted or has a stale version must not take speech down with it.
