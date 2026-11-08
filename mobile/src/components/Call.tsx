@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, type HostInstance } from "react-native";
+import { AccessibilityInfo, Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, useWindowDimensions, View, type HostInstance } from "react-native";
 import Animated, { FadeIn, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fill, type Row } from "../lib/i18n";
@@ -411,6 +411,7 @@ function Chips({ items }: { items: string[] }) {
 }
 
 function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask" }>; title: TitleRef }) {
+  const sheetMax = useWindowDimensions().height * 0.78;
   const store = useStore();
   const t = useCopy();
   const { C } = useTheme();
@@ -426,7 +427,7 @@ function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask"
   return (
     <>
       {/* The question scrolls at large text sizes; the answers below always stay on screen. */}
-      <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody}>
+      <ScrollView style={[styles.sheetScroll, { maxHeight: sheetMax }]} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
         {/* Not a live region: the timer would be read out every second. */}
         <Text style={styles.flagText}>
           {t.waiting} · <Waited since={sheet.since} />
@@ -459,6 +460,8 @@ function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask"
 }
 
 function ResultSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "result" }>; title: TitleRef }) {
+  const sheetMax = useWindowDimensions().height * 0.78;
+  useEffect(() => { Keyboard.dismiss(); }, []);
   const store = useStore();
   const t = useCopy();
   const lang = useSpoken((s) => s.lang);
@@ -473,7 +476,7 @@ function ResultSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "r
 
   return (
     // The comment box is in here too, so the keyboard insets keep it in view.
-    <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+    <ScrollView style={[styles.sheetScroll, { maxHeight: sheetMax }]} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" keyboardDismissMode="interactive" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator>
       {compact ? null : (
         <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={104} /> : <NothingAgreedArt width={104} />}</Animated.View>
       )}
@@ -568,7 +571,7 @@ export const useStyles = makeStyles((C) => ({
   sheetBody: { gap: 16, paddingBottom: 4 },
   pinned: { paddingTop: 14 },
   flagText: { fontFamily: F.medium, fontSize: 14, color: C.accent, marginBottom: -8 },
-  h3: { fontFamily: F.semibold, fontSize: 29, lineHeight: 32, letterSpacing: em(-0.02, 29), color: C.ink },
+  h3: { fontFamily: F.semibold, fontSize: 23, lineHeight: 28, letterSpacing: em(-0.02, 23), color: C.ink },
   dlRow: { flexDirection: "row", justifyContent: "space-between", gap: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.line },
   dd: { textAlign: "right", flexShrink: 1 },
   dlStack: { flexDirection: "column", gap: 2 },
