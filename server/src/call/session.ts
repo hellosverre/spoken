@@ -252,6 +252,7 @@ export class CallSession {
   private lastGreeting = "";
   private greetAll = ""; // everything said before our opening (welcome message, menu)
   private menuTries = 0;
+  private lastPartialAt = 0; // last partial transcript while waiting to open
   private announceMode = false; // a recording played (or we pressed a menu key): wait for a person
   private ended = false;
   private endTag?: { outcome: Outcome; summary: string };
@@ -409,6 +410,8 @@ export class CallSession {
         status: (s, detail) => this.onLineStatus(s, detail),
         calleeSpeech: () => this.onCalleeSpeech(),
         calleePartial: (id, text) => {
+          // Before our opening, half-finished words count too: a recording may still be talking.
+          if (this.openingPending) { this.lastPartialAt = Date.now(); if (ANNOUNCEMENT.test(text)) this.announceMode = true; }
           this.emit({ type: "transcript", id, who: "callee", text, final: false, at: Date.now() });
           this.onPartial(text);
         },
@@ -539,9 +542,11 @@ export class CallSession {
         const recorded = this.announceMode && !human && (ANNOUNCEMENT.test(this.lastGreeting) || HOLD_PHRASE.test(this.lastGreeting));
         const gap = this.announceMode && !human ? ANNOUNCEMENT_GAP_MS
           : greeted && soundsUnfinished(this.lastGreeting) ? 2 * GREETING_GAP_MS : GREETING_GAP_MS;
+        // Speech recognition still hearing words (partials) means someone or something is talking.
+        const hearing = Date.now() - this.lastPartialAt < 1200;
         const done = this.ended
-          || (greeted && !recorded && quiet >= gap)
-          || (!greeted && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
+          || (greeted && !recorded && !hearing && quiet >= gap)
+          || (!greeted && !hearing && !this.announceMode && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
           || waited >= (this.announceMode ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
         if (done) { clearInterval(tick); resolve(greeted); }
       }, 50);
