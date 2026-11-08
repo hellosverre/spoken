@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Keyboard, TextInput, View, type TextInputInstance } from "react-native";
 import { em, F, makeStyles, useTheme } from "../lib/theme";
 import { ContactsButton } from "./ContactPicker";
+import { ContactSuggestions, SaveContactChip } from "./ContactChip";
 import { Icon } from "./Icon";
 import { Press } from "./ui";
 
@@ -42,6 +43,9 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
   }, []);
 
   return (
+    <>
+    <ContactSuggestions draft={value} onPick={onChange} />
+    <SaveContactChip draft={value} />
     <View style={[styles.field, focused && { borderColor: C.accent }]}>
       <TextInput
         ref={ref}
@@ -66,6 +70,7 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
         <Icon name="send" color={C.inv} size={17} strokeWidth={2} />
       </Press>
     </View>
+    </>
   );
 }
 
