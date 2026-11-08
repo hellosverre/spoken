@@ -33,11 +33,11 @@ const SCRIPT_EN: typeof SCRIPT = {
 // What the agent said → the callee's next line, per language.
 const NEXT: Record<Lang, Record<string, RegExp>> = {
   no: {
-    declined: /nei takk|lar vi det være|avslutte/, bye: /ha det/, greet: /ki-assistent/, price: /jeg vil gjerne|bestille/,
+    declined: /nei takk|lar vi det være|avslutte/, bye: /ha det/, greet: /ki-assistent|en ki som|an ai calling/, price: /jeg vil gjerne|bestille/,
     card: /bekrefter|ja takk/, name: /kortnummer|betale ved henting|betalingslenke/, done: /står på|navnet er/, repeat: /si det en gang til|gjenta/, deaf: /døv|tekst/,
   },
   en: {
-    declined: /no thanks|leave it|end the call/, bye: /goodbye|\bbye\b/, greet: /ai assistant/, price: /i'd like|order/,
+    declined: /no thanks|leave it|end the call/, bye: /goodbye|\bbye\b/, greet: /ai assistant|an ai calling/, price: /i'd like|order/,
     card: /confirm|yes please/, name: /card number|pay at pickup|payment link/, done: /under|name is/, repeat: /say that again|repeat/, deaf: /deaf|text|typ/,
   },
 };

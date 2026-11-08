@@ -28,7 +28,7 @@ describe("picking the call language", () => {
 describe("safety rules in English", () => {
   test("disclosure is forced into the opening", () => {
     const o = ensureDisclosure("Hello there!", "Sverre", "en");
-    expect(o).toStartWith("Hi! I'm Spoken, an AI assistant calling for Sverre.");
+    expect(o).toStartWith("Hi, I'm an AI calling for Sverre.");
     expect(o).not.toContain("say no");
     expect(ensureDisclosure("Hei, jeg er en KI-assistent som ringer på vegne av Sverre.", "Sverre", "en")).not.toContain("KI-assistent");
   });
@@ -82,7 +82,7 @@ describe("switching language mid-call", () => {
     s.subscribe((e) => evs.push(e));
     await s.start();
     await Bun.sleep(30);
-    expect(line.spoken[0]).toStartWith("Hei! Jeg er Spoken, en KI-assistent");
+    expect(line.spoken[0]).toStartWith("Hei, jeg er en KI som ringer");
     s.command({ type: "instruction", text: "Speak English, they don't understand Norwegian" });
     expect(line.lang).toBe("en");
     expect(evs.some((e) => e.type === "note" && /engelsk/i.test(e.text))).toBe(true);

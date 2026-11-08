@@ -21,3 +21,4 @@ export function elKeyFailed(status: number, body = ""): boolean {
 }
 
 export function elOnFallback() { return onFallbackNow(); }
+export function resetElKeyForTests() { fallbackUntil = 0; }
