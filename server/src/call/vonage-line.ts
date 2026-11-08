@@ -231,9 +231,12 @@ export class VonageLine implements CallLine {
   }
 
   prefetch(texts: string[]) {
-    for (const t of texts) {
-      void (async () => { try { for await (const _ of tts(t, { voiceId: this.o.voiceId, lang: this.lang, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); } })();
-    }
+    // One at a time: a burst of parallel requests hits ElevenLabs' concurrency limit (429).
+    void (async () => {
+      for (const t of texts) {
+        try { for await (const _ of tts(t, { voiceId: this.o.voiceId, lang: this.lang, cache: true, onBilled: this.billed })) { /* drain */ } } catch (e) { console.warn("[tts] prefetch failed:", (e as Error).message); }
+      }
+    })();
   }
 
   // ---------- event webhook (POST /vonage/event?call=…&t=<per-call token>, JSON) ----------
