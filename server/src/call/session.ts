@@ -90,7 +90,9 @@ const GREETING_WAIT_MS = Number(process.env.GREETING_WAIT_MS ?? 3000);
 const GREETING_GAP_MS = Number(process.env.GREETING_GAP_MS ?? 600);
 // A recorded welcome message or phone menu answers first at many restaurants: wait it out.
 const ANNOUNCEMENT = /velkommen til|gjelder (din )?henvendelse|her (vil|kan) du (alltid )?finne|for english|press \d|for norsk|beste priser|trykk|tast(er)? \d|for å (snakke|prate|bestille|reservere)|samtalen (kan )?(bli|blir) (tatt opp|registrert)|du er nummer|vennligst vent|åpningstid|kontaktinformasjon|welcome to|press \d|please hold|your call (may|is|will)|you are (caller )?number/i;
-const MENU = /trykk|tast(er)? \d|press \d|for (bestilling|reservasjon|å (snakke|prate))/i;
+const MENU = /trykk|tast(er)? \d|press (\d|zero|one|two|three|four|five|six|seven|eight|nine)|for (bestilling|reservasjon|å (snakke|prate))/i;
+// The menu named a way to reach a person: no need to hear the rest before pressing.
+const MENU_TARGET = /resepsjon|kundeservice|kundesenter|bestilling|reservasjon|bordbestilling|snakke med|prate med|operatør|sentralbord|reception|front desk|customer service|speak (to|with)|reservations?/i;
 const ANNOUNCEMENT_GAP_MS = 3500;
 // A person picking up after the recording: «Hallo», «Thon Hotel, det er Kari», «Hva kan jeg hjelpe deg med?».
 const HUMAN_PICKUP = /^(hallo|hei|god (kveld|morgen|dag|ettermiddag))\b.{0,60}$|\b(det er|du snakker med|snakker med)\s+\p{Lu}|hva kan jeg hjelpe|hvordan kan jeg hjelpe|how can i help|this is \p{Lu}/iu;
@@ -429,7 +431,8 @@ export class CallSession {
         calleeRevised: (id, text, words) => this.onRevised(id, text, words),
         calleeNoise: (id) => this.onNoise(id),
         calleeBatchDone: (id) => { const f = this.facts.batchAgrees(id); if (f) this.emit({ type: "facts", items: f, at: Date.now() }); this.releaseSpeech(id); },
-        calleeLanguage: (code, text) => { this.switcher.feedDetected(code, text); },
+        // Recordings and phone menus are often bilingual: only a person's words may switch the language.
+        calleeLanguage: (code, text) => { if (!this.openingPending && !ANNOUNCEMENT.test(text) && !HOLD_PHRASE.test(text)) this.switcher.feedDetected(code, text); },
         calleeEntities: (text, entities) => { const f = this.facts.observeEntities(text, entities); if (f) this.emit({ type: "facts", items: f, at: Date.now() }); },
         voicemail: () => this.onVoicemail(),
         ended: (reason) => void this.finish(reason),
@@ -546,7 +549,10 @@ export class CallSession {
         const hearing = Date.now() - this.lastPartialAt < 1200;
         // Still ringing («tuut … tuut», cadence 1 s on / 4 s off): nobody has picked up yet.
         const ringing = (this.init.line.toneMs?.() ?? Infinity) < 5500 && !HUMAN_PICKUP.test(this.lastGreeting);
+        // A full menu with a way to reach a person, and it has gone quiet: press now.
+        const menuReady = MENU.test(this.greetAll) && MENU_TARGET.test(this.greetAll) && !hearing && quiet >= 1500;
         const done = this.ended
+          || menuReady
           || (greeted && !recorded && !hearing && !ringing && quiet >= gap)
           || (!greeted && !hearing && !ringing && !this.announceMode && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
           || waited >= (this.announceMode || (this.init.line.toneMs?.() ?? Infinity) < 60_000 ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
@@ -584,7 +590,7 @@ export class CallSession {
     this.emit({ type: "transcript", id, who: "callee", text: clean, final: true, words, at: this.lastCalleeAt });
     this.transcript.push({ who: "callee", text: clean, at: this.lastCalleeAt });
     // The callee (or whoever they handed over to) speaks another language: switch before the reply.
-    this.switcher.feed(clean);
+    if (!this.openingPending && !ANNOUNCEMENT.test(clean) && !HOLD_PHRASE.test(clean)) this.switcher.feed(clean);
     // Times are parsed in code and handed to the LLM as facts («⟨tid: 19:00⟩»).
     const hint = timeHint(clean);
     if (faint) this.faintIds.add(id);
