@@ -31,8 +31,8 @@ Short answers to the hard questions. Criteria (Saturday slides): functionality, 
 | How can the shop call back? | Not yet. Next step: your own number, with replies as text. | Ikke ennå. Neste steg: ditt eget nummer, med svar som tekst. |
 | Does it actually work? | X of Y real test calls got the job done. **(verify: fill in after test calls)** | X av Y ekte testsamtaler fikk jobben gjort. **(verify)** |
 | Have Deaf people tested it? | One Deaf user gave feedback; the app now collects feedback after every call. Quote her only with her written OK. | Én døv bruker har gitt tilbakemelding; appen samler nå tilbakemelding etter hver samtale. |
-| How do you make money? | Pay per call, about 29 kr; our cost is about 2 kr. Later: hearing organisations and municipalities buy it for their members. | Betal per samtale, rundt 29 kr; kostnaden vår er rundt 2 kr. Senere: hørselsorganisasjoner og kommuner kjøper det til medlemmene. |
-| Does it scale? | Under 2 kr per call, nothing per user. Swedish and Danish need a new prompt. The home server is a hackathon choice. | Under 2 kr per samtale. Svensk og dansk krever bare ny prompt. Hjemmeserveren er et hackathon-valg. |
+| How do you make money? | Pay per call, about 29 kr; our cost is about 3 kr. Later: hearing organisations and municipalities buy it for their members. | Betal per samtale, rundt 29 kr; kostnaden vår er rundt 3 kr. Senere: hørselsorganisasjoner og kommuner kjøper det til medlemmene. |
+| Does it scale? | About 3 kr per call, nothing per user. Swedish and Danish need a new prompt. The home server is a hackathon choice. | Rundt 3 kr per samtale. Svensk og dansk krever bare ny prompt. Hjemmeserveren er et hackathon-valg. |
 
 ## Why "hand over to me" isn't built yet
 
@@ -56,3 +56,13 @@ The feature: Spoken makes the call, and when the user wants to talk themselves, 
 **NO:** «Døve kan allerede søke Nav om 2 000 kr til apper og abonnement. Neste steg er å legge Spoken inn i FinnHjelpemiddel, markedsdialog med Nav før neste anbud, og en pilot med tolketjenesten på kveld og helg, når bildetolken er stengt (den er åpen hverdager 08–20).»
 
 Source: nav.no/apper-og-programvare, nav.no/skjermtolk (checked 2026-11-07).
+
+## Team efficiency (say it at the end)
+
+**EN:** "Two people, 30 hours: 220+ commits, 300 automated tests, real calls through phone menus and queues, a web app and a phone app."
+**NO:** «To personer, 30 timer: over 220 commits, 300 automatiske tester, ekte samtaler gjennom telefonmenyer og køer, en nettapp og en mobilapp.»
+
+## Is the shop told the call is shown as text?
+
+**EN:** "They're told it's an AI calling for a person who follows along. We store no audio and no transcript, only a short summary."
+**NO:** «De får vite at det er en KI som ringer for en person som følger med. Vi lagrer ikke lyd eller transkripsjon, bare et kort sammendrag.»

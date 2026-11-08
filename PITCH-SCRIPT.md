@@ -26,7 +26,7 @@ Samtalen går **uten lyd i rommet**. Juryen følger live-teksten på skjermen, o
 «Her foreslår de en pris. Spoken godtar aldri noe uten meg.» *Trykk JA.*
 
 **[Samtalen er ferdig → resultatkort]**
-«Ferdig. Jeg får resultatet og hele samtalen som tekst. Kundene våre er Nav og kommunene, som et hjelpemiddel. En samtale koster oss rundt to kroner.»
+«Ferdig. Jeg får resultatet og hele samtalen som tekst. Kundene våre er Nav og kommunene, som et hjelpemiddel. En samtale koster oss rundt tre kroner.»
 
 **[Avslutning]**
 «Bygd for døve, nyttig for alle. Du skriver, vi snakker.»
