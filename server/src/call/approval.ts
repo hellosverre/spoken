@@ -23,6 +23,9 @@ const YES_NO = /^(ja|nei|yes|no)$/i;
 export function fixCardOptions(question: string, options: string[]): string[] {
   const opts = options.map((o) => o.trim()).filter(Boolean);
   const yesNo = opts.length > 0 && opts.every((o) => YES_NO.test(o));
+  // «Stor eller medium cola?» with JA / NEI buttons: offer the two choices instead.
+  const choice = yesNo ? splitChoice(question) : null;
+  if (choice) return [...choice, WRITE];
   if (yesNo && !isOpenQuestion(question)) return opts;
   if (/\b(hvor mange|how many)\b/i.test(question) && !opts.some((o) => /\d/.test(o))) return ["1", "2", WRITE];
   const kept = yesNo ? [] : opts.filter((o) => !/^(flere|noen|mange|annet)$/i.test(o));
@@ -40,4 +43,18 @@ export function priceWarning(question: string, agentLines: string[]): string {
   if (!/\b\d[\d .]*\s*(kr|kroner|,-)/i.test(question) && !/\b(kr|kroner)\b/i.test(question)) return "";
   const pushedBack = agentLines.some((l) => /\b(er (veldig |litt )?mye|veldig dyrt|virker (høyt|dyrt|mye|urimelig)|sjekke prisen|stemmer (det|prisen)\?)/i.test(l));
   return pushedBack ? "Obs: prisen virker høy. " : "";
+}
+
+/** «Vil du ha stor eller medium cola?» → ["Stor cola", "Medium cola"]; null when it isn't an either/or. */
+export function splitChoice(question: string): [string, string] | null {
+  const q = stripLead(question).replace(/[?.!]+\s*$/, "").trim();
+  const m = q.match(/(?:^|\s)([\p{L}\d][\p{L}\d'’-]*)\s+(?:eller|or)\s+([\p{L}\d][^,?;]{0,40})$/iu);
+  if (!m) return null;
+  const left = m[1]!, right = m[2]!.trim();
+  const words = right.split(/\s+/);
+  if (words.length > 4 || /^(ja|nei|yes|no|ikke|not)$/i.test(left)) return null;
+  // A shared noun after the second choice belongs to both: «stor eller medium cola».
+  const tail = words.length >= 2 ? " " + words.slice(1).join(" ") : "";
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  return [cap(left + tail), cap(right)];
 }
