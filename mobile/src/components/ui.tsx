@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import {
+  Keyboard,
+  Platform,
   Pressable,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -205,6 +207,23 @@ export function Field({ label, error, style, ...rest }: TextInputProps & { ref?:
         </View>
       ) : null}
     </View>
+  );
+}
+
+/** How a chat's scroll view lets the keyboard go: dragged down with the finger on iOS, on any drag on Android. */
+export const CHAT_KEYBOARD_DISMISS = Platform.OS === "ios" ? "interactive" : "on-drag";
+
+/**
+ * A chat's content: a tap anywhere that isn't a button closes the keyboard. ScrollView's own
+ * "handled" dismissal skips taps a child claims (drawings do), and the multiline composer has no
+ * key that closes it, so without this the keyboard could stay up for the whole chat.
+ * Not a control for screen readers: they never bring up the keyboard this way.
+ */
+export function TapToDismiss({ style, children }: { style?: StyleProp<ViewStyle>; children: ReactNode }) {
+  return (
+    <Pressable accessible={false} onPress={Keyboard.dismiss} style={style}>
+      {children}
+    </Pressable>
   );
 }
 

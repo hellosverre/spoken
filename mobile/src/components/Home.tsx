@@ -12,7 +12,7 @@ import { CHAT_HERO_RATIO, ChatHero } from "./drawings/ChatHero";
 import { Icon, Wordmark, type IconName } from "./Icon";
 import { Presets } from "./Presets";
 import { Profile } from "./Profile";
-import { Btn, Dots, JumpToLatest, Press, Rise, T, useSpeechLang, useStickToEnd } from "./ui";
+import { Btn, CHAT_KEYBOARD_DISMISS, Dots, JumpToLatest, Press, Rise, T, TapToDismiss, useSpeechLang, useStickToEnd } from "./ui";
 
 // The tabbed part of the app, as web/src/components/Home.tsx: Home (presets and
 // demos; the web's Demo tab), the chat with Spoken, and Profile, switched by the
@@ -103,15 +103,16 @@ function ChatPane({ screenOn }: { screenOn: boolean }) {
           style={styles.grow}
           contentContainerStyle={styles.chatScroll}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={CHAT_KEYBOARD_DISMISS}
         >
           {threaded ? (
-            <View style={styles.thread}>
+            <TapToDismiss style={[styles.thread, styles.grow]}>
               {thread.map((item) => (
                 <ThreadEntry key={item.id} item={item} />
               ))}
-            </View>
+            </TapToDismiss>
           ) : (
-            <View style={styles.empty}>
+            <TapToDismiss style={[styles.empty, styles.grow]}>
               <Rise i={0} on={screenOn}>
                 <ChatHeader title={t.ask} lede={t.askSub} />
               </Rise>
@@ -122,7 +123,7 @@ function ChatPane({ screenOn }: { screenOn: boolean }) {
                   <Example key={k} icon={k} text={SCENARIOS[k][lang].request} onPress={() => store.preset(k)} />
                 ))}
               </Rise>
-            </View>
+            </TapToDismiss>
           )}
         </ScrollView>
         <JumpToLatest on={stick.behind} onPress={() => stick.toEnd()} />

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View, type HostInstance } from "react-native";
+import { AccessibilityInfo, Alert, findNodeHandle, Keyboard, KeyboardAvoidingView, ScrollView, StyleSheet, Text, View, type HostInstance } from "react-native";
 import Animated, { FadeIn, useAnimatedStyle, useReducedMotion, useSharedValue, withDelay, withRepeat, withSequence, withTiming } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fill, type Row } from "../lib/i18n";
@@ -17,7 +17,7 @@ import { CallFeedback } from "./Feedback";
 import { FactStrip } from "./FactStrip";
 import { Receipt } from "./Receipt";
 import { Icon, Mark } from "./Icon";
-import { Btn, JumpToLatest, Press, T, useSpeechLang, useStickToEnd } from "./ui";
+import { Btn, CHAT_KEYBOARD_DISMISS, JumpToLatest, Press, T, TapToDismiss, useSpeechLang, useStickToEnd } from "./ui";
 import { MultiCall } from "./Compare";
 
 // The live call, as web/src/components/Call.tsx: who you're calling, who is
@@ -204,53 +204,55 @@ function Transcript() {
       <ScrollView
         {...stick.props}
         style={styles.grow}
-        contentContainerStyle={styles.transcript}
+        contentContainerStyle={styles.transcriptScroll}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        keyboardDismissMode={CHAT_KEYBOARD_DISMISS}
       >
-        {lines.map((line) => {
-          if (line.kind === "sys")
-            return (
-              <Text key={line.id} style={styles.sysText}>
-                {line.text}
-              </Text>
-            );
-          if (line.kind === "you")
+        <TapToDismiss style={styles.transcript}>
+          {lines.map((line) => {
+            if (line.kind === "sys")
+              return (
+                <Text key={line.id} style={styles.sysText}>
+                  {line.text}
+                </Text>
+              );
+            if (line.kind === "you")
+              return (
+                <Animated.View
+                  key={line.id}
+                  entering={FadeIn.duration(300)}
+                  style={[styles.msg, styles.right]}
+                  accessible
+                  accessibilityLabel={`${m.youLabel}: ${line.text}`}
+                  accessibilityLanguage={speechLang}
+                >
+                  <Text style={styles.who}>{m.youLabel}</Text>
+                  <View style={[styles.txt, styles.youTxt]}>
+                    <T size={14} color={C.muted}>
+                      {line.text}
+                    </T>
+                  </View>
+                </Animated.View>
+              );
+            const ai = line.kind === "ai";
+            const text = line.words.join(" ");
             return (
               <Animated.View
                 key={line.id}
                 entering={FadeIn.duration(300)}
-                style={[styles.msg, styles.right]}
+                style={[styles.msg, ai ? styles.right : styles.left]}
                 accessible
-                accessibilityLabel={`${m.youLabel}: ${line.text}`}
+                accessibilityLabel={`${ai ? m.aiLabel : contact}: ${text}`}
                 accessibilityLanguage={speechLang}
               >
-                <Text style={styles.who}>{m.youLabel}</Text>
-                <View style={[styles.txt, styles.youTxt]}>
-                  <T size={14} color={C.muted}>
-                    {line.text}
-                  </T>
+                <Text style={styles.who}>{ai ? m.aiLabel : contact}</Text>
+                <View style={[styles.txt, ai ? styles.aiTxt : styles.themTxt]}>
+                  <Text style={[styles.lineText, ai && { color: C.inv }]}>{text}</Text>
                 </View>
               </Animated.View>
             );
-          const ai = line.kind === "ai";
-          const text = line.words.join(" ");
-          return (
-            <Animated.View
-              key={line.id}
-              entering={FadeIn.duration(300)}
-              style={[styles.msg, ai ? styles.right : styles.left]}
-              accessible
-              accessibilityLabel={`${ai ? m.aiLabel : contact}: ${text}`}
-              accessibilityLanguage={speechLang}
-            >
-              <Text style={styles.who}>{ai ? m.aiLabel : contact}</Text>
-              <View style={[styles.txt, ai ? styles.aiTxt : styles.themTxt]}>
-                <Text style={[styles.lineText, ai && { color: C.inv }]}>{text}</Text>
-              </View>
-            </Animated.View>
-          );
-        })}
+          })}
+        </TapToDismiss>
       </ScrollView>
       <JumpToLatest on={stick.behind} onPress={() => stick.toEnd()} />
     </View>
@@ -498,7 +500,9 @@ export const useStyles = makeStyles((C) => ({
   wave: { flex: 1, flexDirection: "row", gap: 5, justifyContent: "center", alignItems: "center", height: 36 },
   bar: { width: 4, height: 36, borderRadius: 2 },
   speakerLabel: { fontFamily: F.medium, fontSize: 13.5, textAlign: "center", color: C.dim, minHeight: 18 },
-  transcript: { gap: 12, paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 16 },
+  // The tap-to-close area fills the scroll view even while the transcript is short.
+  transcriptScroll: { flexGrow: 1 },
+  transcript: { flexGrow: 1, gap: 12, paddingHorizontal: PAD, paddingTop: 10, paddingBottom: 16 },
   msg: { maxWidth: "88%", gap: 4 },
   left: { alignSelf: "flex-start" },
   right: { alignSelf: "flex-end", alignItems: "flex-end" },
