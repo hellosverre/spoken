@@ -66,3 +66,8 @@ Source: nav.no/apper-og-programvare, nav.no/skjermtolk (checked 2026-11-07).
 
 **EN:** "They're told it's an AI calling for a person who follows along. We store no audio and no transcript, only a short summary."
 **NO:** «De får vite at det er en KI som ringer for en person som følger med. Vi lagrer ikke lyd eller transkripsjon, bare et kort sammendrag.»
+
+## Can I delete my data?
+
+**EN:** "Yes. Profile → Delete my account erases your profile, contacts, call history and feedback on our server at once, and logs you out. We never stored audio or transcripts to begin with."
+**NO:** «Ja. Profil → Slett kontoen min sletter profil, kontakter, samtalehistorikk og tilbakemeldinger på serveren med en gang, og logger deg ut. Lyd og transkripsjon har vi aldri lagret.»
