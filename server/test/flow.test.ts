@@ -186,10 +186,10 @@ describe("REST basics", () => {
   test("voices and profile", async () => {
     const v = await s.get("/api/voices");
     expect(v.data.filter((x: any) => x.preset).length).toBe(8);
-    const p = await fetch(`${s.base}/api/profile`, { method: "PUT", body: JSON.stringify({ name: "Ingvild", hearCall: false, personality: "short", lang: "no" }) });
-    expect((await p.json() as any).name).toBe("Ingvild");
+    const p = await fetch(`${s.base}/api/profile`, { method: "PUT", body: JSON.stringify({ name: "Kari", hearCall: false, personality: "short", lang: "no" }) });
+    expect((await p.json() as any).name).toBe("Kari");
     const { plan } = await planFor("Bestill pizza fra Peppes til 19:00");
-    expect(plan.opening).toStartWith("Hei, jeg er en KI som ringer for Ingvild");
+    expect(plan.opening).toStartWith("Hei, jeg er en KI som ringer for Kari");
     await fetch(`${s.base}/api/profile`, { method: "PUT", body: JSON.stringify({ name: "Sverre", hearCall: true, personality: "warm", lang: "no" }) });
   });
 

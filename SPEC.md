@@ -59,7 +59,6 @@ Decisions from Sverre's 100-question page, 2026-11-06 20:42. Product decisions. 
 - Order the team's Domino's (Sat 18:00) with the app: **ask Domino's first**.
 - Show live typing briefly, a safety moment ("it refused"), and the "Built with ElevenLabs" panel.
 - Four people pitch, each with spoken lines. Closing: «Spoken. Du skriver, vi snakker.» Prepare the 5–10 min final version separately.
-- Use Ingvild's words only with her written OK. Market numbers from research tonight.
 - Money: free minutes, then pay per minute. NAV hjelpemiddel later. One line on businesses. Norway first. Continue if it goes well.
 
 ## Build
