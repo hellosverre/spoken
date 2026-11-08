@@ -14,7 +14,7 @@ export interface ReceiptInput {
   lang: Lang;
 }
 
-const DISCLOSES_AI = /\b(ki-assistent|ki assistent|kunstig intelligens|ai[- ]assistant|ai assistant|an ai\b|a\.i\.|virtual assistant|digital assistent)/i;
+const DISCLOSES_AI = /\b(en ki som|ki-assistent|ki assistent|kunstig intelligens|ai[- ]assistant|ai assistant|an ai\b|a\.i\.|virtual assistant|digital assistent)/i;
 const NO_CHOICE = /^\s*(nei|no|avslå|avslå\b.*|decline|reject|nope)\s*$/i;
 const squash = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 const digitsOf = (s: string) => s.replace(/\D/g, "");

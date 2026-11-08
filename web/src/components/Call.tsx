@@ -9,7 +9,7 @@ import { cx, useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { MultiCall } from "./Compare";
 import { DoneArt, NothingAgreedArt } from "./Art";
 import { Composer } from "./Composer";
-import { FactStrip } from "./FactStrip";
+import { FactStrip, getFacts } from "./FactStrip";
 import { HoldBanner } from "./HoldBanner";
 import { Icon } from "./Icon";
 import { SpeakerToggle } from "./SpeakerToggle";
@@ -248,30 +248,37 @@ function Rows({ rows, id }: { rows: Row[]; id?: string }) {
   );
 }
 
+function Chips({ items, label }: { items: string[]; label?: string }) {
+  if (!items.length) return null;
+  return (
+    <ul className="rchips" aria-label={label}>
+      {items.map((v, i) => <li key={`${i}-${v}`}>{v}</li>)}
+    </ul>
+  );
+}
+
 function AskSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "ask" }> }) {
   const store = useStore();
   const t = useCopy();
   const { cfg, pressed } = sheet;
   const many = cfg.options.length > 1;
+  // Key facts (price, time …) as at most three chips instead of a table.
+  const facts = cfg.rows.map(([, v]) => v).filter(Boolean).slice(0, 3);
 
   return (
     <>
-      <span className="flag">{t.waiting}</span>
-      <h3 id="sheetTitle">{cfg.title}</h3>
-      <Rows rows={cfg.rows} id="sheetDesc" />
-      <p className="hold">
-        {t.holdSaid} <q>{cfg.hold}</q>
-      </p>
+      <style>{SHEET_CSS}</style>
+      <h3 id="sheetTitle" className="qline">{cfg.title}</h3>
+      <div id="sheetDesc"><Chips items={facts} /></div>
       <div className="acts">
-        <div className={many ? "optrow" : undefined}>
+        <div className={many ? "optrow big" : "big"}>
           {cfg.options.map((o) => (
             <button
               key={o.v}
-              className={cx("btn primary block", pressed === o.v && "pressed")}
+              className={cx("btn primary block tall", pressed === o.v && "pressed")}
               data-v={o.v}
               onClick={() => store.choose(o.v)}
             >
-              {!many && <Icon name="check" />}
               {o.label}
             </button>
           ))}
@@ -280,6 +287,9 @@ function AskSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "ask" }> }) 
           {cfg.decline}
         </button>
       </div>
+      <p className="hold small">
+        {t.holdSaid} <q>{cfg.hold}</q>
+      </p>
     </>
   );
 }
@@ -287,22 +297,42 @@ function AskSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "ask" }> }) 
 function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" }> }) {
   const store = useStore();
   const t = useCopy();
+  const lang = useSpoken((s) => s.lang);
+  const rows = sheet.rows.slice(0, 4);
+  const facts = getFacts().map((f) => f.value).filter((v) => !rows.some(([, rv]) => rv === v)).slice(0, 4);
 
   return (
     <>
+      <style>{SHEET_CSS}</style>
       {sheet.ok ? <DoneArt /> : <NothingAgreedArt />}
       <h3 id="sheetTitle">{sheet.title}</h3>
-      <Rows rows={sheet.rows} id="sheetDesc" />
-      <Receipt />
+      <Rows rows={rows} id="sheetDesc" />
+      <Chips items={facts} />
+      <details className="rdet">
+        <summary>{lang === "en" ? "Details" : "Detaljer"}</summary>
+        <Receipt />
+      </details>
       <CallFeedback />
       <div className="acts">
-        <button className="btn primary block" data-back onClick={() => store.goHome()}>
+        <button className="btn primary block tall" data-back onClick={() => store.goHome()}>
           {t.back}
         </button>
-        <button className="btn ghost block" onClick={() => store.closeSheet()}>
+        <button className="linkbtn" onClick={() => store.closeSheet()}>
           {t.readT}
         </button>
       </div>
     </>
   );
 }
+
+const SHEET_CSS = `
+.qline{font-size:1.5rem !important;line-height:1.2 !important}
+.rchips{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:0.375rem}
+.rchips li{height:1.875rem;display:inline-flex;align-items:center;padding:0 0.75rem;border-radius:62.4375rem;border:1px solid var(--line-2);font-size:0.875rem;font-weight:510}
+.sheet .big .btn{min-height:3.5rem;font-size:1.125rem}
+.sheet .optrow.big{gap:0.75rem}
+.hold.small{font-size:0.75rem;text-align:center}
+.rdet>summary{cursor:pointer;min-height:2.75rem;display:flex;align-items:center;color:var(--muted);font-size:0.9375rem;border-top:1px solid var(--line)}
+.rdet details{margin:0 0 0.5rem !important}
+.linkbtn{min-height:2.75rem;color:var(--muted);font-size:0.9375rem;text-decoration:underline;text-underline-offset:0.2rem}
+`;

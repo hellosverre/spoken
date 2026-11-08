@@ -44,6 +44,8 @@ export interface Db {
   deleteSession(tokenHash: string): Promise<void>;
   /** Copy what `from` has (contacts, profile if `to` has none, call history) onto `to`. */
   mergeDevice(from: string, to: string): Promise<void>;
+  /** Erase everything about an account: profile, contacts, call history and feedback (on every linked device), links, sessions and the account itself. Throws if it could not be erased. */
+  deleteAccount(accountId: string): Promise<void>;
 }
 
 export const isDeviceId = (s: string | null | undefined): s is string =>
@@ -96,6 +98,17 @@ export class MemoryDb implements Db {
     return s && a ? { ...a, expiresAt: s.expiresAt } : null;
   }
   async deleteSession(h: string) { this.sessions.delete(h); }
+  async deleteAccount(accountId: string) {
+    const acct = [...this.accounts.values()].find((a) => a.id === accountId);
+    const devices = new Set<string>(acct ? [acct.primaryDevice] : []);
+    for (const l of this.links) if (l.startsWith(`${accountId}:`)) { devices.add(l.slice(accountId.length + 1)); this.links.delete(l); }
+    for (const d of devices) {
+      this.profiles.delete(d); this.contacts.delete(d); this.results.delete(d);
+      for (let i = this.feedback.length - 1; i >= 0; i--) if (this.feedback[i]!.device === d) this.feedback.splice(i, 1);
+    }
+    for (const [h, s] of this.sessions) if (s.accountId === accountId) this.sessions.delete(h);
+    if (acct) this.accounts.delete(acct.phone);
+  }
   async mergeDevice(from: string, to: string) {
     if (from === to) return;
     const have = new Set((this.contacts.get(to) ?? []).map((c) => c.phone));
@@ -203,6 +216,22 @@ export class SupabaseDb implements Db {
   async deleteSession(h: string) {
     if (/^[0-9a-f]{64}$/.test(h)) await this.rest("DELETE", `sessions?token_hash=eq.${h}`, undefined, "return=minimal");
   }
+  async deleteAccount(accountId: string) {
+    if (!isDeviceId(accountId)) throw new Error("bad account id");
+    const acct = (await this.rest("GET", `accounts?id=eq.${accountId}&select=primary_device`))?.[0];
+    const linked: any[] = (await this.rest("GET", `account_devices?account_id=eq.${accountId}&select=device_id`)) ?? [];
+    const devices = [...new Set<string>([...(acct ? [acct.primary_device] : []), ...linked.map((r) => r.device_id)])].filter(isDeviceId);
+    if (devices.length) {
+      const inList = `in.(${devices.join(",")})`;
+      for (const table of ["profiles", "contacts", "call_results", "feedback"]) {
+        await this.rest("DELETE", `${table}?device_id=${inList}`, undefined, "return=minimal");
+      }
+    }
+    // Sessions and links first, the account row last (they reference it).
+    await this.rest("DELETE", `sessions?account_id=eq.${accountId}`, undefined, "return=minimal");
+    await this.rest("DELETE", `account_devices?account_id=eq.${accountId}`, undefined, "return=minimal");
+    await this.rest("DELETE", `accounts?id=eq.${accountId}`, undefined, "return=minimal");
+  }
   async mergeDevice(from: string, to: string) {
     if (from === to) return;
     const have = new Set((await this.listContacts(to)).map((c) => c.phone));
@@ -272,6 +301,11 @@ export class FallbackDb implements Db {
   async deleteSession(h: string) {
     await this.mem.deleteSession(h);
     await this.tryBoth("deleteSession", (db) => db.deleteSession(h), async () => {});
+  }
+  /** Memory first, then Supabase. A Supabase failure is NOT swallowed: we must not say "deleted" when it is not. */
+  async deleteAccount(accountId: string) {
+    await this.mem.deleteAccount(accountId);
+    if (this.primary) await this.primary.deleteAccount(accountId);
   }
   async mergeDevice(from: string, to: string) {
     await this.mem.mergeDevice(from, to);

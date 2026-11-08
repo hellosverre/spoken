@@ -41,7 +41,7 @@ function session(reply = "Jeg vil gjerne bestille en stor pepperoni til henting.
   const s = new CallSession({ callId: `o_${Math.random()}`, taskId: "t", plan: { ...plan }, profile: { name: "Sverre", hearCall: true, personality: "warm", lang: "no" }, line, llm });
   return { s, line, llmCalls: () => calls, seen };
 }
-const isDisclosure = (t: string) => /KI-assistent/.test(t);
+const isDisclosure = (t: string) => /KI-assistent|en KI som|an AI calling/.test(t);
 
 test("waits for «Hei, dette er Dominos» before the disclosure, and doesn't answer the greeting first", async () => {
   const { s, line } = session();

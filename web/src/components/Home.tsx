@@ -10,6 +10,7 @@ import { Composer } from "./Composer";
 import { Icon, Wordmark, type IconName } from "./Icon";
 import { Presets } from "./Presets";
 import { Profile } from "./Profile";
+import { QuestionSheet } from "./QuestionSheet";
 
 export function Home({ on }: { on: boolean }) {
   const store = useStore();
@@ -37,6 +38,7 @@ export function Home({ on }: { on: boolean }) {
         </Pane>
       </div>
       <TabBar tab={tab} />
+      <QuestionSheet />
     </section>
   );
 }

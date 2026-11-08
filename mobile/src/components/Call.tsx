@@ -14,7 +14,7 @@ import { HoldBanner } from "./HoldBanner";
 import { ReplyChips } from "./ReplyChips";
 import { DoneArt, NothingAgreedArt } from "./drawings/ResultArt";
 import { CallFeedback } from "./Feedback";
-import { FactStrip } from "./FactStrip";
+import { FactStrip, getFacts } from "./FactStrip";
 import { Receipt } from "./Receipt";
 import { Icon, Mark } from "./Icon";
 import { Btn, CHAT_KEYBOARD_DISMISS, JumpToLatest, Press, T, TapToDismiss, useSpeechLang, useStickToEnd } from "./ui";
@@ -394,6 +394,22 @@ function Waited({ since }: { since: number }) {
   return <>{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`}</>;
 }
 
+/** Key facts (price, time …) as chips instead of a table, read out as one list. */
+function Chips({ items }: { items: string[] }) {
+  const { C } = useTheme();
+  const styles = useStyles();
+  if (!items.length) return null;
+  return (
+    <View style={styles.chipRow} accessible accessibilityLabel={items.join(", ")}>
+      {items.map((v, i) => (
+        <View key={`${i}-${v}`} style={styles.rchip}>
+          <T size={14} weight="medium" color={C.ink}>{v}</T>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask" }>; title: TitleRef }) {
   const store = useStore();
   const t = useCopy();
@@ -404,6 +420,8 @@ function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask"
   const { cfg, pressed } = sheet;
   // Times side by side, unless the text is too big for them to fit.
   const many = cfg.options.length > 1 && !stack;
+  // Key facts (price, time …) as at most three chips instead of a table.
+  const facts = cfg.rows.map(([, v]) => v).filter(Boolean).slice(0, 3);
 
   return (
     <>
@@ -413,13 +431,10 @@ function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask"
         <Text style={styles.flagText}>
           {t.waiting} · <Waited since={sheet.since} />
         </Text>
-        <Text ref={title} style={styles.h3} accessibilityRole="header" accessibilityLanguage={speechLang} maxFontSizeMultiplier={HEADING_SCALE}>
+        <Text ref={title} style={[styles.h3, styles.askH]} accessibilityRole="header" accessibilityLanguage={speechLang} maxFontSizeMultiplier={HEADING_SCALE}>
           {cfg.title}
         </Text>
-        <Rows rows={cfg.rows} />
-        <Text style={styles.hold}>
-          {t.holdSaid} <Text style={{ color: C.muted }}>“{cfg.hold}”</Text>
-        </Text>
+        <Chips items={facts} />
       </ScrollView>
       <View style={[styles.acts, styles.pinned]}>
         <View style={many ? styles.optrow : styles.acts}>
@@ -429,13 +444,15 @@ function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask"
               block
               label={o.label}
               pressed={pressed === o.v}
-              icon={many ? undefined : <Icon name="check" color={C.inv} />}
               onPress={() => store.choose(o.v)}
-              style={many ? styles.grow : undefined}
+              style={[styles.bigBtn, many ? styles.grow : null]}
             />
           ))}
         </View>
-        <Btn kind="ghost" block label={cfg.decline} icon={<Icon name="x" color={C.ink} size={18} />} onPress={() => store.choose("no")} />
+        <Btn kind="ghost" block label={cfg.decline} onPress={() => store.choose("no")} />
+        <Text style={[styles.hold, styles.holdSmall]}>
+          {t.holdSaid} <Text style={{ color: C.muted }}>“{cfg.hold}”</Text>
+        </Text>
       </View>
     </>
   );
@@ -444,25 +461,41 @@ function AskSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "ask"
 function ResultSheet({ sheet, title }: { sheet: Extract<SheetContent, { kind: "result" }>; title: TitleRef }) {
   const store = useStore();
   const t = useCopy();
+  const lang = useSpoken((s) => s.lang);
+  const { C } = useTheme();
   const styles = useStyles();
   const compact = useLargeText();
   const speechLang = useSpeechLang();
+  const [more, setMore] = useState(false);
+  const rows = sheet.rows.slice(0, 4);
+  const facts = getFacts().map((f) => f.value).filter((v) => !rows.some(([, rv]) => rv === v)).slice(0, 4);
+  const details = lang === "en" ? "Details" : "Detaljer";
 
   return (
     // The comment box is in here too, so the keyboard insets keep it in view.
     <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetBody} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
       {compact ? null : (
-        <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={132} /> : <NothingAgreedArt width={132} />}</Animated.View>
+        <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={104} /> : <NothingAgreedArt width={104} />}</Animated.View>
       )}
       <Text ref={title} style={styles.h3} accessibilityRole="header" accessibilityLanguage={speechLang} maxFontSizeMultiplier={HEADING_SCALE}>
         {sheet.title}
       </Text>
-      <Rows rows={sheet.rows} />
-      <Receipt />
+      <Rows rows={rows} />
+      <Chips items={facts} />
+      <Press onPress={() => setMore(!more)} accessibilityRole="button" accessibilityState={{ expanded: more }} accessibilityLabel={details} style={styles.detToggle}>
+        <T size={15} color={C.muted}>
+          {details} {more ? "▴" : "▾"}
+        </T>
+      </Press>
+      {more ? <Receipt /> : null}
       <CallFeedback />
       <View style={styles.acts}>
-        <Btn block label={t.back} onPress={() => store.goHome()} />
-        <Btn kind="ghost" block label={t.readT} onPress={() => store.closeSheet()} />
+        <Btn block label={t.back} onPress={() => store.goHome()} style={styles.bigBtn} />
+        <Press onPress={() => store.closeSheet()} accessibilityRole="button" accessibilityLabel={t.readT} style={styles.detToggle}>
+          <T size={15} color={C.muted} style={{ textDecorationLine: "underline" }}>
+            {t.readT}
+          </T>
+        </Press>
       </View>
     </ScrollView>
   );
@@ -541,6 +574,12 @@ export const useStyles = makeStyles((C) => ({
   dlStack: { flexDirection: "column", gap: 2 },
   hold: { fontFamily: F.regular, fontSize: 13.5, lineHeight: 20, color: C.dim },
   acts: { gap: 8 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  rchip: { minHeight: 30, paddingVertical: 4, paddingHorizontal: 12, borderRadius: 15, borderWidth: 1, borderColor: C.line2, justifyContent: "center" },
+  askH: { fontSize: 24, lineHeight: 29 },
+  holdSmall: { fontSize: 12, lineHeight: 17, textAlign: "center" },
+  bigBtn: { minHeight: 56 },
+  detToggle: { minHeight: 44, justifyContent: "center", alignItems: "center" },
   optrow: { flexDirection: "row", gap: 8 },
   badge: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: C.accent },
 }));

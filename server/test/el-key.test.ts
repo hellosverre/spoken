@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
 import { config } from "../src/config.ts";
 import { tts } from "../src/voice/tts.ts";
+import { resetElKeyForTests } from "../src/voice/el-key.ts";
 
 test("TTS falls back to the second ElevenLabs key when the first is rejected", async () => {
   const saved = { a: config.elevenlabs.apiKey, b: config.elevenlabs.fallbackKey, f: globalThis.fetch };
   config.elevenlabs.apiKey = "primary-test";
   config.elevenlabs.fallbackKey = "fallback-test";
+  resetElKeyForTests();
   const used: string[] = [];
   globalThis.fetch = (async (_url: any, init: any) => {
     used.push(init.headers["xi-api-key"]);

@@ -9,7 +9,7 @@ import { FeedbackSheet } from "./Feedback";
 import { AccountSection, useAccountCopy } from "./Account";
 import { ContactsSection, useContactCopy } from "./ContactPicker";
 import { VoicePicker } from "./VoicePicker";
-import { Field } from "./ui";
+import { Confirm, Field } from "./ui";
 import { api } from "@/lib/account";
 import { VoiceSheet } from "./VoiceSheet";
 import { historyCount, HistorySheet } from "./History";
@@ -175,6 +175,66 @@ const useCanVibrate = () =>
     () => typeof navigator.vibrate === "function" && matchMedia("(pointer: coarse)").matches,
     () => false,
   );
+
+const DELETE_COPY = {
+  no: {
+    row: "Slett kontoen min", sub: "Fjerner alt om deg fra Spoken", title: "Slette kontoen?",
+    body: "Alt om deg slettes: profil, kontakter og samtalehistorikk. Kan ikke angres.", cancel: "Avbryt", confirm: "Slett alt",
+    failed: "Kunne ikke slette kontoen. Prøv igjen.",
+  },
+  en: {
+    row: "Delete my account", sub: "Removes everything about you from Spoken", title: "Delete your account?",
+    body: "Everything about you is deleted: profile, contacts and call history. This can't be undone.", cancel: "Cancel", confirm: "Delete everything",
+    failed: "Couldn't delete the account. Try again.",
+  },
+} as const;
+
+/** Profile → bottom: erase the account on the server, then forget everything on this device. */
+function DeleteAccount() {
+  const store = useStore();
+  const lang = useSpoken((s) => s.lang);
+  const c = DELETE_COPY[lang];
+  const [ask, setAsk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function erase() {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api("DELETE", "/api/account");
+    } catch {
+      setAsk(false);
+      setBusy(false);
+      setError(c.failed);
+      return;
+    }
+    try {
+      // The account is gone on the server; drop every Spoken key on this device (chat, token, device id).
+      for (const k of Object.keys(localStorage)) if (k.toLowerCase().startsWith("spoken")) localStorage.removeItem(k);
+    } catch { /* private mode: nothing stored */ }
+    await store.logout();
+  }
+
+  return (
+    <>
+      <ul className="list">
+        <li>
+          <button className="row danger" onClick={() => setAsk(true)} disabled={busy}>
+            <span className="ic"><Icon name="logout" /></span>
+            <span className="tx">
+              <b>{c.row}</b>
+              <span>{c.sub}</span>
+            </span>
+          </button>
+        </li>
+      </ul>
+      {error && <p className="help" role="alert">{error}</p>}
+      {ask && <Confirm title={c.title} body={c.body} cancel={c.cancel} confirm={c.confirm} onCancel={() => setAsk(false)} onConfirm={() => void erase()} />}
+    </>
+  );
+}
 
 /** The Profile tab: who you are, the theme, language and the rest of the old settings. */
 export function Profile() {
@@ -429,6 +489,7 @@ export function Profile() {
           ))}
         </ul>
         <p className="about">{t.foot}</p>
+        <DeleteAccount />
       </div>
       {feedbackOpen && <FeedbackSheet onClose={() => setFeedbackOpen(false)} />}
       {historyOpen && <HistorySheet onClose={() => setHistoryOpen(false)} />}

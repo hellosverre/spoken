@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Pressable, ScrollView, Switch, Text, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Alert, Pressable, ScrollView, Switch, Text, View } from "react-native";
 import { api } from "../lib/account";
 import type { ThemePref } from "../lib/store";
 import { em, F, HEADING_SCALE, makeStyles, PAD, small, useTheme } from "../lib/theme";
@@ -7,6 +8,7 @@ import { useCopy, useMobileCopy, useSpoken, useStore } from "../lib/use-spoken";
 import { Glow } from "./Art";
 import { AccountSection, useAccountCopy } from "./Account";
 import { ContactsSection } from "./ContactPicker";
+import { resetContactCache } from "./ContactChip";
 import { FeedbackSheet } from "./Feedback";
 import { historyCount, HistorySheet } from "./History";
 import { MinutesCard } from "./Minutes";
@@ -17,6 +19,28 @@ import { List, Row, Seg } from "./List";
 import { Field, T } from "./ui";
 import { VoicePicker } from "./VoicePicker";
 import { VoiceSheet } from "./VoiceSheet";
+
+const DELETE_COPY = {
+  no: {
+    row: "Slett kontoen min", sub: "Fjerner alt om deg fra Spoken", title: "Slette kontoen?",
+    body: "Alt om deg slettes: profil, kontakter og samtalehistorikk. Kan ikke angres.", cancel: "Avbryt", confirm: "Slett alt",
+    failedT: "Kunne ikke slette kontoen", failed: "Prøv igjen.",
+  },
+  en: {
+    row: "Delete my account", sub: "Removes everything about you from Spoken", title: "Delete your account?",
+    body: "Everything about you is deleted: profile, contacts and call history. This can't be undone.", cancel: "Cancel", confirm: "Delete everything",
+    failedT: "Couldn't delete the account", failed: "Try again.",
+  },
+} as const;
+
+/** Erase the account on the server, then forget everything on this device and log out. */
+async function eraseAccount(logout: () => Promise<void>) {
+  await api("DELETE", "/api/account");
+  const keys = (await AsyncStorage.getAllKeys().catch(() => [])).filter((k) => k.toLowerCase().startsWith("spoken"));
+  await AsyncStorage.multiRemove(keys).catch(() => {});
+  resetContactCache();
+  await logout();
+}
 
 /**
  * The Profile tab: who you are, how the app looks, how calls are made, and the
@@ -257,10 +281,30 @@ export function Profile() {
         <Row icon="replay" title={t.replay} sub={t.replayS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => store.replay()} />
         <Row icon="bubble" title={m.fbRowT} sub={m.fbRowS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setFeedbackOpen(true)} />
         <Row icon="doc" title={m.termsL} sub={m.termsS} go={<Icon name="chevron" color={C.dim} size={16} />} onPress={() => setTermsOpen(true)} />
-        <Row title={m.logout} icon="logout" tone="danger" onPress={() => store.logout()} />
+        <Row title={m.logout} icon="logout" tone="danger" onPress={() => { resetContactCache(); void store.logout(); }} />
       </List>
 
       <Text style={styles.about}>{t.foot}</Text>
+      <List>
+        <Row
+          first
+          title={DELETE_COPY[lang].row}
+          sub={DELETE_COPY[lang].sub}
+          icon="logout"
+          tone="danger"
+          onPress={() => {
+            const d = DELETE_COPY[lang];
+            Alert.alert(d.title, d.body, [
+              { text: d.cancel, style: "cancel" },
+              {
+                text: d.confirm,
+                style: "destructive",
+                onPress: () => eraseAccount(() => store.logout()).catch(() => Alert.alert(d.failedT, d.failed)),
+              },
+            ]);
+          }}
+        />
+      </List>
       {feedbackOpen ? <FeedbackSheet onClose={() => setFeedbackOpen(false)} /> : null}
       <TermsSheet open={termsOpen} onClose={() => setTermsOpen(false)} />
     </ScrollView>

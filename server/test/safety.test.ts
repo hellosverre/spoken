@@ -17,8 +17,8 @@ describe("numbers", () => {
 
 describe("disclosure", () => {
   test("always first, even if the opening tries something else", () => {
-    expect(ensureDisclosure("Hei, det er Sverre her!", "Sverre")).toStartWith("Hei! Jeg er Spoken, en KI-assistent som ringer for Sverre.");
-    expect(ensureDisclosure("", "")).toStartWith("Hei! Jeg er Spoken, en KI-assistent som ringer for en bruker.");
+    expect(ensureDisclosure("Hei, det er Sverre her!", "Sverre")).toStartWith("Hei, jeg er en KI som ringer for Sverre.");
+    expect(ensureDisclosure("", "")).toStartWith("Hei, jeg er en KI som ringer for en bruker.");
   });
 });
 

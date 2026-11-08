@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { ContactsButton } from "./ContactPicker";
 import { Icon } from "./Icon";
+import { CONTACT_CHIP_CSS, ContactSuggestions, SaveContactChip } from "./ContactChip";
 
 interface Props {
   value: string;
@@ -34,6 +35,10 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
   }, [focusTick]);
 
   return (
+    <>
+      <style>{CONTACT_CHIP_CSS}</style>
+      <ContactSuggestions draft={value} onPick={onChange} />
+      <SaveContactChip draft={value} />
     <form
       className="field"
       onSubmit={(e) => {
@@ -60,5 +65,6 @@ export function Composer({ value, onChange, onSubmit, placeholder, label, sendLa
         <Icon name="send" />
       </button>
     </form>
+    </>
   );
 }

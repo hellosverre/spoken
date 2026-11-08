@@ -596,7 +596,7 @@ export class CallSession {
     if (faint) this.faintIds.add(id);
     // A bare «Nei» right after the opening («Jeg er Spoken, en KI-assistent …») is the answer to that.
     const prevAgent = [...this.history].reverse().find((h) => h.role === "agent")?.text ?? "";
-    const refusal = /\b(Spoken, en KI-assistent|Spoken, an AI assistant|si nei til å snakke med meg|say no to talking to me)\b/i.test(prevAgent) && PLAIN_NO.test(clean) ? REFUSAL_HINT : "";
+    const refusal = /\b(en KI som ringer|an AI calling|Spoken, en KI-assistent|Spoken, an AI assistant|si nei til å snakke med meg|say no to talking to me)\b/i.test(prevAgent) && PLAIN_NO.test(clean) ? REFUSAL_HINT : "";
     const item: HistoryItem = { role: "callee", text: [clean, hint, refusal, faint ? FAINT_HINT : ""].filter(Boolean).join(" ") };
     this.history.push(item);
     this.segItems.set(id, item);

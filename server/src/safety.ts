@@ -97,19 +97,16 @@ export function disclosureLine(who: DisclosureWho, lang: Lang = "no"): string {
   const p = typeof who === "string" ? { name: who, hearCall: false } as const : who;
   const name = p.name.trim() || (lang === "en" ? "a user" : "en bruker");
   const reason = effectiveReasonMode(p) === "always" ? reasonClause(p, lang) : undefined;
-  const follows = p.hearCall ? (lang === "en" ? "following along" : "følger med") : undefined;
-  let clause = "";
-  if (reason && follows) clause = `, ${reason} ${lang === "en" ? "and is" : "og"} ${follows}`;
-  else if (reason) clause = `, ${reason}`;
-  else if (follows) clause = lang === "en" ? ", who's following along" : ", som følger med";
+  // Short on purpose (Sverre: the intro was far too long). The reason only when the user chose «always».
+  const clause = reason ? `, ${reason}` : "";
   return lang === "en"
-    ? `Hi! I'm Spoken, an AI assistant calling for ${name}${clause}.`
-    : `Hei! Jeg er Spoken, en KI-assistent som ringer for ${name}${clause}.`;
+    ? `Hi, I'm an AI calling for ${name}${clause}.`
+    : `Hei, jeg er en KI som ringer for ${name}${clause}.`;
 }
 
 /** The first spoken line always starts with the disclosure, whatever the plan or model said. */
 export function ensureDisclosure(opening: string, who: DisclosureWho, lang: Lang = "no"): string {
-  const rest = opening.replace(/^.*?(KI-assistent|AI assistant)[^.!?]*[.!?]\s*/i, "").trim();
+  const rest = opening.replace(/^.*?(KI-assistent|AI assistant|en KI som|an AI calling)[^.!?]*[.!?]\s*/i, "").trim();
   return `${disclosureLine(who, lang)}${rest ? " " + rest : ""}`;
 }
 

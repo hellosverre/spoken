@@ -55,10 +55,10 @@ Decisions from Sverre's 100-question page, 2026-11-06 20:42. Product decisions. 
 ## Pitch
 
 - Jury questions and evidence checklist: [PITCH.md](PITCH.md). 2-minute script (Norwegian): [PITCH-SCRIPT.md](PITCH-SCRIPT.md).
-- Opening: «Nå ringer jeg en av dere, og jeg sier ikke et ord.» Live call to a juror + a recorded backup.
+- Pitch order (user update, 8 Nov): introduce Spoken first, then «Og nå skal vi ringe en av dere, uten å si et ord selv.» Live speakerphone call to a willing juror + a labelled recorded backup.
 - Order the team's Domino's (Sat 18:00) with the app: **ask Domino's first**.
 - Show live typing briefly, a safety moment ("it refused"), and the "Built with ElevenLabs" panel.
-- Two people pitch. Prepare the 5–10 min final version Sat night.
+- Four people pitch, each with spoken lines; see PITCH-SCRIPT.md for timing. Closing: «Spoken. Du skriver, vi snakker.» Prepare the 5–10 min final version separately.
 - Use Ingvild's words only with her written OK. Market numbers from research tonight.
 - Money: free minutes, then pay per minute. NAV hjelpemiddel later. One line on businesses. Norway first. Continue if it goes well.
 

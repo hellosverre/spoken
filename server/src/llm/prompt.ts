@@ -84,9 +84,18 @@ Tone: ${TONES[ctx.tone]}${ctx.simpler ? "\nSnakk ekstra enkelt og sakte: korte o
 }
 
 export function clarifyPrompt(task: TaskForLlm): string {
+  const en = task.lang === "en";
+  const L = en ? "engelsk" : "norsk";
+  const ex = en
+    ? `«Tonight 19:00», «Tomorrow», «2», «Pickup 18:00»`
+    : `«I kveld 19:00», «I morgen», «2», «Henting 18:00»`;
   return `Brukeren vil at du ringer for dem. Oppgave: «${task.text}»${task.phone ? ` (nummer: ${task.phone})` : ""}.
-Still 1–4 korte oppklaringsspørsmål på ${task.lang === "en" ? "engelsk" : "norsk"} (tid, antall, pris-grense, henting/levering, osv.). Det siste skal alltid bekrefte detaljene.
-Svar som JSON: {"summary": "én linje på ${task.lang === "en" ? "engelsk" : "norsk"} om hva du skal gjøre", "questions": [{"id": "kort_id", "text": "...", "options": ["...", "..."]}]}`;
+Hver spørsmål vises som et lite kort der brukeren trykker et svar, ett om gangen. Spør om alt samtalen trenger som oppgaven mangler, på ${L}:
+- Booking/reservasjon/time (bord, frisør, lege …): dato, klokkeslett og antall personer (navn bare hvis det trengs og ikke står i profilen).
+- Bestilling (mat, varer): hva, hvor mange, og hentetid (levering hvis det er aktuelt).
+- Ren forespørsel (åpningstid, pris, finnes det …): ingen ekstra spørsmål.
+Spør ALDRI om noe oppgaven allerede sier (står det «kl 19», ikke spør om tid). Maks 4 spørsmål, ett kort spørsmål hver (maks ca. 8 ord). Gi 2–4 korte svarvalg per spørsmål som kan trykkes, med fornuftige standardvalg (${ex}). Siste spørsmål er IKKE en bekreftelse; planen er bekreftelsen. Er alt oppgitt, svar med tom questions-liste.
+Svar som JSON: {"summary": "én linje på ${L} om hva du skal gjøre", "questions": [{"id": "kort_id", "text": "...", "options": ["...", "..."]}]}`;
 }
 
 export function planPrompt(task: TaskForLlm, answers: Record<string, string>): string {
