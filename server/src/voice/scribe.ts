@@ -85,7 +85,9 @@ export class ScribeStream {
     // Norwegian/English keep the explicit code (best accuracy). Other languages, and SCRIBE_AUTO_LANG=1,
     // let Scribe auto-detect.
     if ((this.lang === "no" || this.lang === "en") && process.env.SCRIBE_AUTO_LANG !== "1") q.set("language_code", this.lang);
-    for (const k of this.keyterms.slice(0, 20)) q.append("keyterms", k);
+    // Scribe rejects the whole session if one keyterm is longer than 20 characters: split long ones into words.
+    const terms = [...new Set(this.keyterms.flatMap((k) => (k.length <= 20 ? [k] : k.split(/[\s-]+/))).map((k) => k.trim()).filter((k) => k.length >= 2 && k.length <= 20))];
+    for (const k of terms.slice(0, 20)) q.append("keyterms", k);
     // Language detection is the primary signal for call/langswitch. filter_background_audio is NOT set:
     // it cannot be combined with include_timestamps, which we need for per-word confidences.
     // no_verbatim stays off: «eh» is used for turn-taking.
