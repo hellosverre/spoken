@@ -36,7 +36,7 @@ function numberOf(token: string): number | undefined {
 }
 
 /** Numbers the STT gave below this confidence get a «heard X or Y» hint (c_28dd: «15.» at 0.41). */
-const NUMBER_SURE = 0.8;
+const NUMBER_SURE = Number(process.env.NUMBER_SURE ?? 0.45); // 0.8 asked «15 eller 50» far too often on clear lines
 
 /** «⟨uklart tall: 15 eller 50⟩» for each unsure -ten/-ti number in the line, or "". */
 export function numberHint(words: Word[]): string {

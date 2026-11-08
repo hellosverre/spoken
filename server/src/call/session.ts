@@ -1599,7 +1599,8 @@ export class CallSession {
       return;
     }
     // If the callee was asked to hold, thank them first («Takk for at du ventet!»), then go on.
-    void this.hold.resume().then(() => this.requestTurn());
+    // Never wait more than 2.5 s for the hold to resume: the answer must always lead to speech.
+    void Promise.race([this.hold.resume(), new Promise((r) => setTimeout(r, 2500))]).then(() => { if (!this.ended && !this.speaking) this.requestTurn(); });
   }
 
   // ---------- client commands ----------
