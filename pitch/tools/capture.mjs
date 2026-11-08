@@ -13,7 +13,7 @@ page.on("pageerror", (e) => errors.push(String(e)));
 await page.goto(pathToFileURL(join(here, "..", "intro.html")).href);
 await page.waitForFunction(() => window.__intro && window.__intro.ready);
 const info = await page.evaluate(() => ({ count: window.__intro.count, end: window.__intro.T_END }));
-const frames = (process.env.FRAMES || "1-start:-1,2-dissolve:0.7,3-flow:1.9,4-gather:3.35,5-assembled:4.2,6-fill:4.65,7-final:7.5").split(",");
+const frames = (process.env.FRAMES || "1-start:-1,2-dissolve:0.7,3-ribbons:1.35,4-drive:2.45,5-tracing:3.9,6-assembled:5.45,7-fill:5.85,8-final:8.5").split(",");
 for (const f of frames) {
   const [name, t] = f.split(":");
   await page.evaluate((t) => window.__intro.seek(t), Number(t));

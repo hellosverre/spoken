@@ -4,7 +4,7 @@
 
 | Key | Action |
 |---|---|
-| Click / Space / → / Enter | Play: title slide → flowing strands → app on a phone (~6 s) |
+| Click / Space / → / Enter | Play: title slide → flowing strands → pens trace the app → real screen (~7.2 s) |
 | R | Reset to the title slide |
 | F | Jump to the final frame (stage fallback) |
 
