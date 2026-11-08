@@ -1,3 +1,4 @@
+import { askQuestions } from "@/components/QuestionSheet";
 import { ApiError, authHeader, getToken, sessionLost } from "./account";
 import { beginLiveAudio, endLiveAudio } from "./live-audio";
 import type { Lang, Row } from "./i18n";
@@ -16,7 +17,7 @@ import { setReceipt, type ReceiptData } from "@/components/Receipt";
 const API = process.env.NEXT_PUBLIC_SPOKEN_API ?? "";
 
 /** Ask the server's clarify questions in the chat before planning. */
-const ASK_QUESTIONS = false;
+const ASK_QUESTIONS = true;
 
 export const REAL: ScenarioKey = "real" as ScenarioKey;
 
@@ -167,12 +168,12 @@ export async function planRealCall(
   const phone = opts.contact?.phone?.replace(/[ \-]/g, "") || text.match(/\+?\d[\d \-]{6,16}\d/)?.[0].replace(/[ \-]/g, "");
   const c = await http<Clarify>("POST", "/api/tasks", { text, lang, ...(phone ? { phone } : {}) });
   const answers: Record<string, string> = {};
-  // Questions are off for now: the server plans from the request alone.
+  // Questions are cards in a bottom sheet (QuestionSheet), one at a time; the chat only gets a one-line summary.
   if (ASK_QUESTIONS && c.questions.length) {
-    await chat.bot(c.summary);
-    for (const q of c.questions) {
-      const opts = q.options?.length ? `\n${q.options.map((o, i) => `${i + 1}. ${o}`).join("   ")}` : "";
-      answers[q.id] = pickOption(await chat.askUser(q.text + opts), q.options);
+    const given = await askQuestions(c.questions);
+    if (given) {
+      c.questions.forEach((q, i) => { if (given[i]) answers[q.id] = given[i]!; });
+      await chat.bot(given.filter(Boolean).join(" · "));
     }
   }
   const plan = await http<Plan>("POST", `/api/tasks/${encodeURIComponent(c.taskId)}/answers`, { answers });

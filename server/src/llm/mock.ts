@@ -40,6 +40,10 @@ function isFood(text: string) {
 const isDelivery = (a?: string) => /^(levering|delivery)$/i.test(a ?? "");
 const isAsap = (a?: string) => /^(så fort som mulig|as soon as possible)$/i.test(a ?? "");
 
+const isBooking = (t: string) => /\b(bord|time|timeavtale|lege|frisør|reserver\w*|book\w*|table|appointment|doctor|haircut|reservation)\b/i.test(t);
+const hasTime = (t: string) => /\d{1,2}[:.]\d{2}|\bkl\b|klokka|\d\s*(am|pm)\b|\bat \d/i.test(t);
+const hasDate = (t: string) => /i dag|i kveld|i morgen|imorgen|mandag|tirsdag|onsdag|torsdag|fredag|lørdag|søndag|\d{1,2}\.\s?\d{1,2}|today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday/i.test(t);
+
 function mockClarifyEn(task: TaskForLlm): ClarifyOut {
   const t = task.text;
   const qs: Question[] = [];
@@ -50,10 +54,11 @@ function mockClarifyEn(task: TaskForLlm): ClarifyOut {
     if (!/hent|lever|pick ?up|deliver/i.test(t)) qs.push({ id: "pickup", text: "Pickup or delivery?", options: ["Pickup", "Delivery"] });
     if (!/\d{1,2}[:.]\d{2}|\bkl\b|klokka|\d\s*(am|pm)\b/i.test(t)) qs.push({ id: "time", text: "When do you want it?", options: ["As soon as possible", "18:00", "19:00"] });
     qs.push({ id: "maxPrice", text: "How much can it cost? I'll ask you before I agree anyway.", options: ["Up to 250 kr", "Up to 400 kr", "Always ask me"] });
-  } else if (/time|lege|frisør|book|appointment|doctor|haircut/i.test(t)) {
-    qs.push({ id: "when", text: "What times work for you?", options: ["Morning", "Afternoon", "Any time"] });
+  } else if (isBooking(t)) {
+    if (!hasDate(t)) qs.push({ id: "date", text: "Which day?", options: ["Today", "Tomorrow", "Saturday"] });
+    if (!hasTime(t)) qs.push({ id: "time", text: "What time?", options: ["17:00", "18:00", "19:00", "20:00"] });
+    if (!/\b\d+\s*(people|persons|guests)\b|\bfor\s+(one|two|three|four|five|six|\d+)\b/i.test(t)) qs.push({ id: "people", text: "How many people?", options: ["1", "2", "4", "6"] });
   }
-  qs.push({ id: "confirm", text: `So I'll ${what}, right?`, options: ["Yes", "No, change it"] });
   return { summary: `Call ${hit?.name ?? task.phone ?? "a number"} to ${what}.`, questions: qs };
 }
 
@@ -67,10 +72,11 @@ export function mockClarify(task: TaskForLlm): ClarifyOut {
     if (!/hent|lever/i.test(t)) qs.push({ id: "pickup", text: "Henting eller levering?", options: ["Henting", "Levering"] });
     if (!/\d{1,2}[:.]\d{2}|\bkl\b|klokka/i.test(t)) qs.push({ id: "time", text: "Når vil du ha den?", options: ["Så fort som mulig", "18:00", "19:00"] });
     qs.push({ id: "maxPrice", text: "Hvor mye kan den koste? Jeg spør deg uansett før jeg sier ja.", options: ["Opptil 250 kr", "Opptil 400 kr", "Spør meg alltid"] });
-  } else if (/time|lege|frisør|book/i.test(t)) {
-    qs.push({ id: "when", text: "Hvilke tider passer?", options: ["Formiddag", "Ettermiddag", "Hva som helst"] });
+  } else if (isBooking(t)) {
+    if (!hasDate(t)) qs.push({ id: "date", text: "Hvilken dag?", options: ["I dag", "I morgen", "Lørdag"] });
+    if (!hasTime(t)) qs.push({ id: "time", text: "Hvilket klokkeslett?", options: ["17:00", "18:00", "19:00", "20:00"] });
+    if (!/\b\d+\s*(personer|pers)\b|\bfor\s+(en|to|tre|fire|fem|seks|\d+)\b/i.test(t)) qs.push({ id: "people", text: "Hvor mange personer?", options: ["1", "2", "4", "6"] });
   }
-  qs.push({ id: "confirm", text: `Stemmer det at jeg skal ${goalSentence(t)}?`, options: ["Ja", "Nei, endre"] });
   return { summary: `Ringe ${hit?.name ?? task.phone ?? "et nummer"} for å ${goalSentence(t)}.`, questions: qs };
 }
 
@@ -79,6 +85,9 @@ export function mockPlan(task: TaskForLlm, answers: Record<string, string>): Pla
   const en = task.callLang === "en";
   let goal = en ? goalSentenceEn(task.text) : goalSentence(task.text);
   if (en) {
+    if (answers.date && !hasDate(goal)) goal += ` ${answers.date.toLowerCase()}`;
+    if (answers.time && !hasTime(goal) && !answers.pickup && !isAsap(answers.time)) goal += ` at ${answers.time}`;
+    if (answers.people) goal += ` for ${answers.people}`;
     if (answers.pickup && !/pick ?up|deliver/i.test(goal)) goal += isDelivery(answers.pickup) ? " for delivery" : " for pickup";
     if (answers.time && !/\d/.test(goal) && !isAsap(answers.time)) goal += ` at ${answers.time}`;
   } else if (answers.pickup && !/hent|lever/i.test(goal)) {
@@ -86,6 +95,9 @@ export function mockPlan(task: TaskForLlm, answers: Record<string, string>): Pla
     const t = /\s+(til|klokka|kl\.?)\s+(\d{1,2}[:.]\d{2})/i;
     goal = t.test(goal) ? goal.replace(t, ` ${how} klokka $2`) : `${goal} ${how}`;
   }
+  if (!en && answers.date && !hasDate(goal)) goal += ` ${answers.date.toLowerCase()}`;
+  if (!en && answers.time && !hasTime(goal) && !answers.pickup && !isAsap(answers.time)) goal += ` klokka ${answers.time}`;
+  if (!en && answers.people) goal += ` til ${answers.people} ${answers.people === "1" ? "person" : "personer"}`;
   if (!en && answers.time && !/\d{1,2}[:.]\d{2}/.test(goal) && !isAsap(answers.time)) goal += ` klokka ${answers.time}`;
   const willShare: Shareable[] = ["name"];
   if (isDelivery(answers.pickup)) willShare.push("address");

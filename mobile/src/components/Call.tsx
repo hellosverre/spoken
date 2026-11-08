@@ -13,7 +13,7 @@ import { HoldBanner } from "./HoldBanner";
 import { ReplyChips } from "./ReplyChips";
 import { DoneArt, NothingAgreedArt } from "./drawings/ResultArt";
 import { CallFeedback } from "./Feedback";
-import { FactStrip } from "./FactStrip";
+import { FactStrip, getFacts } from "./FactStrip";
 import { Receipt } from "./Receipt";
 import { Icon, Mark } from "./Icon";
 import { Btn, Press, T } from "./ui";
@@ -353,6 +353,21 @@ function Rows({ rows }: { rows: Row[] }) {
   );
 }
 
+function Chips({ items }: { items: string[] }) {
+  const { C } = useTheme();
+  const styles = useStyles();
+  if (!items.length) return null;
+  return (
+    <View style={styles.chipRow} accessible accessibilityLabel={items.join(", ")}>
+      {items.map((v, i) => (
+        <View key={`${i}-${v}`} style={styles.rchip}>
+          <T size={14} weight="medium" color={C.ink}>{v}</T>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 function AskSheet({ sheet, first }: { sheet: Extract<SheetContent, { kind: "ask" }>; first: React.RefObject<HostInstance | null> }) {
   const store = useStore();
   const t = useCopy();
@@ -360,19 +375,15 @@ function AskSheet({ sheet, first }: { sheet: Extract<SheetContent, { kind: "ask"
   const styles = useStyles();
   const { cfg, pressed } = sheet;
   const many = cfg.options.length > 1;
+  // Key facts (price, time …) as at most three chips instead of a table.
+  const facts = cfg.rows.map(([, v]) => v).filter(Boolean).slice(0, 3);
 
   return (
     <>
-      <Text style={styles.flagText} accessibilityRole="alert">
-        {t.waiting}
-      </Text>
-      <Text style={styles.h3} accessibilityRole="header">
+      <Text style={[styles.h3, { fontSize: 24, lineHeight: 29 }]} accessibilityRole="header">
         {cfg.title}
       </Text>
-      <Rows rows={cfg.rows} />
-      <Text style={styles.hold}>
-        {t.holdSaid} <Text style={{ color: C.muted }}>“{cfg.hold}”</Text>
-      </Text>
+      <Chips items={facts} />
       <View style={styles.acts}>
         <View ref={first} style={many ? styles.optrow : undefined}>
           {cfg.options.map((o) => (
@@ -381,14 +392,16 @@ function AskSheet({ sheet, first }: { sheet: Extract<SheetContent, { kind: "ask"
               block
               label={o.label}
               pressed={pressed === o.v}
-              icon={many ? undefined : <Icon name="check" color={C.inv} />}
               onPress={() => store.choose(o.v)}
-              style={many ? styles.grow : undefined}
+              style={[styles.bigBtn, many ? styles.grow : null]}
             />
           ))}
         </View>
-        <Btn kind="ghost" block label={cfg.decline} icon={<Icon name="x" color={C.ink} size={18} />} onPress={() => store.choose("no")} />
+        <Btn kind="ghost" block label={cfg.decline} onPress={() => store.choose("no")} />
       </View>
+      <Text style={[styles.hold, { fontSize: 12, textAlign: "center" }]}>
+        {t.holdSaid} <Text style={{ color: C.muted }}>“{cfg.hold}”</Text>
+      </Text>
     </>
   );
 }
@@ -396,21 +409,37 @@ function AskSheet({ sheet, first }: { sheet: Extract<SheetContent, { kind: "ask"
 function ResultSheet({ sheet }: { sheet: Extract<SheetContent, { kind: "result" }> }) {
   const store = useStore();
   const t = useCopy();
+  const lang = useSpoken((s) => s.lang);
   const { C } = useTheme();
   const styles = useStyles();
+  const [more, setMore] = useState(false);
+  const rows = sheet.rows.slice(0, 4);
+  const facts = getFacts().map((f) => f.value).filter((v) => !rows.some(([, rv]) => rv === v)).slice(0, 4);
 
   return (
     <>
-      <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={132} /> : <NothingAgreedArt width={132} />}</Animated.View>
+      <Animated.View entering={FadeIn.duration(350)}>{sheet.ok ? <DoneArt width={104} /> : <NothingAgreedArt width={104} />}</Animated.View>
       <Text style={styles.h3} accessibilityRole="header">
         {sheet.title}
       </Text>
-      <Rows rows={sheet.rows} />
-      <Receipt />
+      <Rows rows={rows} />
+      <Chips items={facts} />
+      <Press
+        onPress={() => setMore(!more)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: more }}
+        accessibilityLabel={lang === "en" ? "Details" : "Detaljer"}
+        style={styles.detToggle}
+      >
+        <T size={15} color={C.muted}>{lang === "en" ? "Details" : "Detaljer"} {more ? "▴" : "▾"}</T>
+      </Press>
+      {more ? <Receipt /> : null}
       <CallFeedback />
       <View style={styles.acts}>
-        <Btn block label={t.back} onPress={() => store.goHome()} />
-        <Btn kind="ghost" block label={t.readT} onPress={() => store.closeSheet()} />
+        <Btn block label={t.back} onPress={() => store.goHome()} style={styles.bigBtn} />
+        <Press onPress={() => store.closeSheet()} accessibilityRole="button" accessibilityLabel={t.readT} style={styles.detToggle}>
+          <T size={15} color={C.muted} style={{ textDecorationLine: "underline" }}>{t.readT}</T>
+        </Press>
       </View>
     </>
   );
@@ -483,6 +512,10 @@ export const useStyles = makeStyles((C) => ({
   dd: { textAlign: "right", flexShrink: 1 },
   hold: { fontFamily: F.regular, fontSize: 13.5, lineHeight: 20, color: C.dim },
   acts: { gap: 8 },
+  chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  rchip: { height: 30, paddingHorizontal: 12, borderRadius: 15, borderWidth: 1, borderColor: C.line2, justifyContent: "center" },
+  bigBtn: { minHeight: 56 },
+  detToggle: { minHeight: 44, justifyContent: "center", alignItems: "center" },
   optrow: { flexDirection: "row", gap: 8 },
   badge: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: C.accent },
 }));
