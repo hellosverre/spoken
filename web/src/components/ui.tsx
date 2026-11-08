@@ -3,19 +3,26 @@
 import { useEffect, useId, useRef, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "@/lib/use-spoken";
+import { Icon } from "./Icon";
 
 // Shared pieces for the phone-UI screens: labelled inputs, a page sheet, a confirm dialog.
 
-type FieldProps = { label: string; help?: string; error?: boolean } & (
+type FieldProps = { label: string; help?: string; error?: boolean | string } & (
   | ({ multiline?: false } & InputHTMLAttributes<HTMLInputElement>)
   | ({ multiline: true } & TextareaHTMLAttributes<HTMLTextAreaElement>)
 );
 
-/** A labelled input in the composer's look: surface, hairline, accent on focus. */
+/**
+ * A labelled input in the composer's look: surface, hairline, accent on focus.
+ * `error` as text is written under the field with an icon and read out with it, so a mistake
+ * is never shown by the red border alone.
+ */
 export function Field({ label, help, error, className, ...rest }: FieldProps) {
   const id = useId();
-  const helpId = help ? `${id}-help` : undefined;
-  const common = { id, "aria-invalid": error || undefined, "aria-describedby": helpId };
+  const message = typeof error === "string" && error ? error : null;
+  const helpId = help && !message ? `${id}-help` : undefined;
+  const errId = message ? `${id}-err` : undefined;
+  const common = { id, "aria-invalid": !!error || undefined, "aria-describedby": errId ?? helpId };
   return (
     <div className={cx("fld", className)}>
       <label htmlFor={id}>{label}</label>
@@ -24,10 +31,17 @@ export function Field({ label, help, error, className, ...rest }: FieldProps) {
       ) : (
         <input {...common} {...omitMultiline(rest)} className={cx("input", error && "bad")} />
       )}
-      {help && (
-        <p className="help" id={helpId}>
-          {help}
+      {message ? (
+        <p className="fld-err" id={errId}>
+          <Icon name="alert" />
+          {message}
         </p>
+      ) : (
+        help && (
+          <p className="help" id={helpId}>
+            {help}
+          </p>
+        )
       )}
     </div>
   );
@@ -63,17 +77,22 @@ export function PageSheet({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Callers pass a new onClose each render; focus moves only when the sheet opens.
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
 
   useEffect(() => {
     const el = ref.current;
     const first = el?.querySelector<HTMLElement>(".page-body input, .page-body textarea, .page-body button");
     first?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") close.current();
     };
     el?.addEventListener("keydown", onKey);
     return () => el?.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <InDevice>

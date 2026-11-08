@@ -4,8 +4,10 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { ApiError, startLogin, verifyLogin } from "@/lib/account";
 import { toE164 } from "@/lib/phone";
 import type { Lang } from "@/lib/i18n";
-import { cx, useSpoken, useStore } from "@/lib/use-spoken";
+import { TERMS_VERSION } from "@/lib/terms";
+import { cx, useAppCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { Wordmark } from "./Icon";
+import { TermsAgree, TermsSheet } from "./Terms";
 import { Field } from "./ui";
 
 /**
@@ -37,6 +39,8 @@ const T = {
     offline: "Får ikke kontakt med Spoken. Sjekk nettet og prøv igjen.",
     other: "Noe gikk galt. Prøv igjen.",
     hint: "Meldingspriser fra mobilselskapet kan gjelde.",
+    finishH: "Siste steg: telefonnummeret ditt",
+    finishSub: "Kontoen din er knyttet til telefonnummeret. Bekreft det med en kode på SMS, så er du i gang.",
   },
   en: {
     h: "Log in with your phone number",
@@ -62,6 +66,8 @@ const T = {
     offline: "Can't reach Spoken. Check your connection and try again.",
     other: "Something went wrong. Try again.",
     hint: "Your carrier's message rates may apply.",
+    finishH: "Last step: your phone number",
+    finishSub: "Your account is your phone number. Confirm it with a code by text, and you're in.",
   },
 } as const;
 type Copy = (typeof T)[Lang];
@@ -92,6 +98,14 @@ export function Login({ on }: { on: boolean }) {
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
   const [wait, setWait] = useState(0);
+  const m = useAppCopy();
+  // From sign-up and a plan: this is the last step. Terms: agreed (this version) or a checkbox.
+  const finishing = useSpoken((s) => s.signupPending);
+  const terms = useSpoken((s) => s.terms);
+  const termsOk = terms?.version === TERMS_VERSION;
+  const [agreed, setAgreed] = useState(false);
+  const [needTerms, setNeedTerms] = useState(false);
+  const [reading, setReading] = useState(false);
 
   // Resend countdown.
   useEffect(() => {
@@ -113,8 +127,10 @@ export function Login({ on }: { on: boolean }) {
   const e164 = toE164(phone);
 
   async function sendCode(again = false) {
-    if (busy || !e164) {
-      if (!e164) setError(c.badPhone);
+    if (busy) return;
+    if (!termsOk && !agreed) return setNeedTerms(true);
+    if (!e164) {
+      setError(c.badPhone);
       return;
     }
     setBusy(true);
@@ -141,7 +157,7 @@ export function Login({ on }: { on: boolean }) {
     try {
       await verifyLogin(e164, code);
       setCode("");
-      store.signedIn();
+      store.signedIn(agreed);
     } catch (e) {
       setError(explain(e, "code", c));
       setCode("");
@@ -166,8 +182,8 @@ export function Login({ on }: { on: boolean }) {
         >
           <span className="mark big rise" style={{ "--i": 0 } as CSSProperties} />
           <div className="rise" style={{ "--i": 1 } as CSSProperties}>
-            <h1 className="greet">{step === "phone" ? c.h : c.codeH}</h1>
-            <p className="lede">{step === "phone" ? c.sub : c.codeSub(e164 || phone.trim())}</p>
+            <h1 className="greet">{step === "phone" ? (finishing ? c.finishH : c.h) : c.codeH}</h1>
+            <p className="lede">{step === "phone" ? (finishing ? c.finishSub : c.sub) : c.codeSub(e164 || phone.trim())}</p>
           </div>
           <div className="login-fields rise" style={{ "--i": 2 } as CSSProperties}>
             {step === "phone" ? (
@@ -206,6 +222,20 @@ export function Login({ on }: { on: boolean }) {
             <p className="bad-msg" role="alert" hidden={!error}>
               {error}
             </p>
+            {step === "phone" && !termsOk && (
+              <>
+                {terms && <p className="hint">{m.termsChanged}</p>}
+                <TermsAgree
+                  checked={agreed}
+                  onChange={(v) => {
+                    setAgreed(v);
+                    setNeedTerms(false);
+                  }}
+                  onRead={() => setReading(true)}
+                  error={needTerms ? m.termsNeeded : undefined}
+                />
+              </>
+            )}
             <p className="hint" role="status" hidden={!note}>
               {note}
             </p>
@@ -235,9 +265,23 @@ export function Login({ on }: { on: boolean }) {
               </>
             )}
             <p className="hint">{c.hint}</p>
+            {step === "phone" && !finishing && (
+              <p className="switch">
+                {m.newHere}
+                <button type="button" className="link" onClick={() => store.openSignup()}>
+                  {m.createAccount}
+                </button>
+              </p>
+            )}
+            {termsOk && (
+              <button type="button" className="link center" onClick={() => setReading(true)}>
+                {m.termsL}
+              </button>
+            )}
           </div>
         </form>
       </div>
+      {reading && <TermsSheet onClose={() => setReading(false)} />}
     </section>
   );
 }

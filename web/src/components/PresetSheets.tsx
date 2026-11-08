@@ -180,7 +180,7 @@ export function PresetEditor({ preset, onClose }: { preset: Preset | null; onClo
           value={draft.title}
           placeholder={m.presetNamePh}
           onChange={(e) => patch({ title: e.target.value })}
-          error={invalid && !draft.title.trim()}
+          error={invalid && !draft.title.trim() ? m.needTitle : false}
         />
 
         <div className="group">
@@ -261,7 +261,7 @@ export function PresetEditor({ preset, onClose }: { preset: Preset | null; onClo
             const el = e.currentTarget;
             sel.current = { start: el.selectionStart, end: el.selectionEnd };
           }}
-          error={invalid && !draft.template.trim()}
+          error={invalid && !draft.template.trim() ? m.needTemplate : false}
           help={named.length ? m.templateS : undefined}
         />
         {named.length > 0 && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { ThemePref } from "@/lib/store";
 import { useAppCopy, useCopy, useSpoken, useStore } from "@/lib/use-spoken";
 import { HeroDuet } from "./Art";
@@ -12,6 +12,9 @@ import { VoicePicker } from "./VoicePicker";
 import { Field } from "./ui";
 import { api } from "@/lib/account";
 import { VoiceSheet } from "./VoiceSheet";
+import { historyCount, HistorySheet } from "./History";
+import { MinutesCard } from "./Minutes";
+import { TermsSheet } from "./Terms";
 
 const THEMES: { v: ThemePref; icon: IconName }[] = [
   { v: "system", icon: "auto" },
@@ -140,6 +143,39 @@ const REASON_CSS = `
 .rs-clear{margin-top:1rem;min-height:2.5rem;background:none;border:0;color:var(--muted);font:inherit;font-size:0.875rem;text-decoration:underline;cursor:pointer}
 `;
 
+/** A row with an icon tile, a title with a note, and a switch named by the title. */
+function SwitchRow({ icon, title, sub, on, disabled, onChange }: { icon: IconName; title: string; sub: string; on: boolean; disabled?: boolean; onChange(v: boolean): void }) {
+  return (
+    <label className="switch-row">
+      <span className="tile small" aria-hidden>
+        <Icon name={icon} />
+      </span>
+      <span className="tx">
+        <b>{title}</b>
+        <span>{sub}</span>
+      </span>
+      <input type="checkbox" role="switch" className="toggle" checked={on} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+    </label>
+  );
+}
+
+const CONTRAST_Q = "(prefers-contrast: more)";
+const onContrast = (fn: () => void) => {
+  const q = matchMedia(CONTRAST_Q);
+  q.addEventListener("change", fn);
+  return () => q.removeEventListener("change", fn);
+};
+/** The device's own "increase contrast", which Profile's switch adds to but can't turn off. */
+const useSysContrast = () => useSyncExternalStore(onContrast, () => matchMedia(CONTRAST_Q).matches, () => false);
+
+/** Only phones whose browser can vibrate get the vibration switch (not iPhone Safari, not desktops). */
+const useCanVibrate = () =>
+  useSyncExternalStore(
+    () => () => {},
+    () => typeof navigator.vibrate === "function" && matchMedia("(pointer: coarse)").matches,
+    () => false,
+  );
+
 /** The Profile tab: who you are, the theme, language and the rest of the old settings. */
 export function Profile() {
   const store = useStore();
@@ -152,6 +188,13 @@ export function Profile() {
   const cc = useContactCopy();
   const ac = useAccountCopy();
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const calls = useSpoken((s) => s.history.length);
+  const highContrast = useSpoken((s) => s.highContrast);
+  const haptics = useSpoken((s) => s.haptics);
+  const sysContrast = useSysContrast();
+  const canVibrate = useCanVibrate();
 
   // Local drafts, saved on blur. Re-sync when the stored profile changes.
   const [prev, setPrev] = useState(profile);
@@ -192,6 +235,27 @@ export function Profile() {
           <b>{profile.name || m.you}</b>
           <span className="handle">@demo</span>
         </div>
+
+        {/* Past calls and their transcripts, saved in this browser. */}
+        <ul className="list hist-row">
+          <li>
+            <button className="row" onClick={() => setHistoryOpen(true)}>
+              <span className="ic">
+                <Icon name="history" />
+              </span>
+              <span className="tx">
+                <b>{m.historyL}</b>
+                <span>{historyCount(calls, m)}</span>
+              </span>
+              <span className="go">
+                <Icon name="chevron" />
+              </span>
+            </button>
+          </li>
+        </ul>
+
+        <SectionTitle icon="phone">{m.minutesH}</SectionTitle>
+        <MinutesCard />
 
         <SectionTitle icon="person">{m.you}</SectionTitle>
         <div className="group">
@@ -260,6 +324,16 @@ export function Profile() {
               </button>
             ))}
           </div>
+          {/* With the device's contrast setting on it is on here too, and only the device turns it off. */}
+          <SwitchRow
+            icon="sun"
+            title={m.contrastL}
+            sub={sysContrast ? m.contrastSys : m.contrastS}
+            on={highContrast || sysContrast}
+            disabled={sysContrast}
+            onChange={(v) => store.setHighContrast(v)}
+          />
+          {canVibrate && <SwitchRow icon="phone" title={m.hapticsL} sub={m.hapticsS} on={haptics} onChange={(v) => store.setHaptics(v)} />}
         </div>
 
         <SectionTitle icon="bubble">{m.general}</SectionTitle>
@@ -274,7 +348,7 @@ export function Profile() {
             </span>
             <div className="seg" role="group" aria-label={t.langL}>
               {(["en", "no"] as const).map((l) => (
-                <button key={l} aria-pressed={lang === l} onClick={() => store.setLang(l)}>
+                <button key={l} aria-pressed={lang === l} aria-label={l === "en" ? "English" : "Norsk"} onClick={() => store.setLang(l)}>
                   {l.toUpperCase()}
                 </button>
               ))}
@@ -318,6 +392,20 @@ export function Profile() {
             </button>
           </li>
           <li>
+            <button className="row" onClick={() => setTermsOpen(true)}>
+              <span className="ic">
+                <Icon name="doc" />
+              </span>
+              <span className="tx">
+                <b>{m.termsL}</b>
+                <span>{m.termsS}</span>
+              </span>
+              <span className="go">
+                <Icon name="chevron" />
+              </span>
+            </button>
+          </li>
+          <li>
             <button className="row danger" onClick={() => store.logout()}>
               <span className="ic">
                 <Icon name="logout" />
@@ -343,6 +431,8 @@ export function Profile() {
         <p className="about">{t.foot}</p>
       </div>
       {feedbackOpen && <FeedbackSheet onClose={() => setFeedbackOpen(false)} />}
+      {historyOpen && <HistorySheet onClose={() => setHistoryOpen(false)} />}
+      {termsOpen && <TermsSheet onClose={() => setTermsOpen(false)} />}
     </div>
   );
 }
