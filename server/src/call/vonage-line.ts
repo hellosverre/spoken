@@ -379,6 +379,7 @@ export class VonageLine implements CallLine {
   }
 
   private lastToneAt = 0;
+  private toneRun = 0;
   toneMs() { return this.lastToneAt ? Date.now() - this.lastToneAt : Infinity; }
 
   /** Ringback detection: a steady 400–450 Hz tone carries most of the frame's energy (Goertzel, 8 kHz). */
@@ -398,7 +399,8 @@ export class VonageLine implements CallLine {
   }
 
   private onFrame(pcm: Int16Array, voiced = true) {
-    if (this.isRingTone(pcm)) { this.lastToneAt = Date.now(); voiced = false; }
+    // Only a steady tone (≥ 0.4 s in a row) is a ringback; a voice can look tonal for a frame or two.
+    if (this.isRingTone(pcm)) { if (++this.toneRun >= 20) { this.lastToneAt = Date.now(); voiced = false; } } else this.toneRun = 0;
     const rms = pcmRms(pcm);
     const vrms = voiced ? rms : 0; // gated frames (noise / distant voices) count as silence for VAD and barge-in
     if (vrms > VOICED_RMS) {
