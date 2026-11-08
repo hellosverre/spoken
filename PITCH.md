@@ -8,7 +8,7 @@ Source: Oslo Sprint, *Saturday morning* presentation, 7 November 2026, slides 4â
 
 - Open round: 2 minutes of demo + 1 minute of questions. Criteria: functionality, a real problem, innovation, design, and team efficiency. No numerical weights are specified.
 - Final: top 10 teams, 5â€“10 minutes of pitch plus questions. Each juror scores their own field. The questions below adapt those fields to Spoken; they are preparation prompts, not a guaranteed jury script.
-- Show the working core flow. Label mock calls and recorded backups clearly. Separate tested behaviour from plans.
+- Show the working core flow live with two willing jurors: one uses the app and one answers on speakerphone. No recording or mock fallback is available for this pitch. If the call fails, say so and show only the available app screens. Separate tested behaviour from plans.
 
 ## Questions to prepare
 
@@ -39,4 +39,4 @@ For each field, prepare a short answer with one concrete example. Assign a speak
 - [ ] Test a failure and describe only the recovery the build actually supports.
 - [ ] Fill gaps in user evidence honestly; obtain permission for quotes or recordings.
 - [ ] Resolve the privacy discrepancy and distinguish open legal questions from reviewed conclusions.
-- [ ] Prepare a labelled recorded backup and agree when to switch to it.
+- [ ] Rehearse the live-only demo and the honest failure response; no recording or mock fallback.
