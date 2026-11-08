@@ -56,6 +56,8 @@ export interface CallLine {
   prefetch?(texts: string[]): void;
   /** ms since the callee's audio last had voice energy (Infinity if unknown). */
   silenceMs?(): number;
+  /** ms since a ringback tone (425 Hz «tuut») was last heard; Infinity if never. */
+  toneMs?(): number;
   /** ms of our own audio still to play (0 when quiet, Infinity while TTS is still arriving). */
   speechLeftMs?(): number;
   /** The call switched language mid-call (STT and TTS follow). */

@@ -378,7 +378,27 @@ export class VonageLine implements CallLine {
     this.onFrame(down16to8(audio), voiced);
   }
 
+  private lastToneAt = 0;
+  toneMs() { return this.lastToneAt ? Date.now() - this.lastToneAt : Infinity; }
+
+  /** Ringback detection: a steady 400–450 Hz tone carries most of the frame's energy (Goertzel, 8 kHz). */
+  private isRingTone(pcm: Int16Array): boolean {
+    let total = 0;
+    for (let i = 0; i < pcm.length; i++) total += pcm[i]! * pcm[i]!;
+    if (total < pcm.length * 200 * 200) return false; // too quiet to be a tone
+    let best = 0;
+    for (const f of [400, 425, 440, 450]) {
+      const k = 2 * Math.cos((2 * Math.PI * f) / 8000);
+      let s1 = 0, s2 = 0;
+      for (let i = 0; i < pcm.length; i++) { const s0 = pcm[i]! + k * s1 - s2; s2 = s1; s1 = s0; }
+      best = Math.max(best, s1 * s1 + s2 * s2 - k * s1 * s2);
+    }
+    // Goertzel power vs. energy: a pure tone scores ≈ N/2 × total.
+    return best / (total * pcm.length) > 0.3;
+  }
+
   private onFrame(pcm: Int16Array, voiced = true) {
+    if (this.isRingTone(pcm)) { this.lastToneAt = Date.now(); voiced = false; }
     const rms = pcmRms(pcm);
     const vrms = voiced ? rms : 0; // gated frames (noise / distant voices) count as silence for VAD and barge-in
     if (vrms > VOICED_RMS) {

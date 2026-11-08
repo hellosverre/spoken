@@ -544,10 +544,12 @@ export class CallSession {
           : greeted && soundsUnfinished(this.lastGreeting) ? 2 * GREETING_GAP_MS : GREETING_GAP_MS;
         // Speech recognition still hearing words (partials) means someone or something is talking.
         const hearing = Date.now() - this.lastPartialAt < 1200;
+        // Still ringing («tuut … tuut», cadence 1 s on / 4 s off): nobody has picked up yet.
+        const ringing = (this.init.line.toneMs?.() ?? Infinity) < 5500 && !HUMAN_PICKUP.test(this.lastGreeting);
         const done = this.ended
-          || (greeted && !recorded && !hearing && quiet >= gap)
-          || (!greeted && !hearing && !this.announceMode && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
-          || waited >= (this.announceMode ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
+          || (greeted && !recorded && !hearing && !ringing && quiet >= gap)
+          || (!greeted && !hearing && !ringing && !this.announceMode && waited >= GREETING_WAIT_MS && quiet >= GREETING_GAP_MS)
+          || waited >= (this.announceMode || (this.init.line.toneMs?.() ?? Infinity) < 60_000 ? ANNOUNCEMENT_MAX_MS : GREETING_MAX_MS);
         if (done) { clearInterval(tick); resolve(greeted); }
       }, 50);
     });
