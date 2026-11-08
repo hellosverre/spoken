@@ -1,3 +1,4 @@
+import { askQuestions } from "../components/QuestionSheet";
 import { ApiError, authHeader, sessionLost } from "./account";
 import type { Lang, Row } from "./i18n";
 import { SCENARIOS, type AskConfig, type CallIO, type Outcome, type Scenario, type ScenarioKey } from "./scenarios";
@@ -16,7 +17,7 @@ import { setReceipt, type ReceiptData } from "../components/Receipt";
 const API = (process.env.EXPO_PUBLIC_SPOKEN_API ?? "https://spoken-api.hellosverre.com").replace(/\/$/, "");
 
 /** Ask the server's clarify questions in the chat before planning. Off on the web too, for now. */
-const ASK_QUESTIONS = false;
+const ASK_QUESTIONS = true;
 
 /** Give up on a REST call after this long (phones drop between networks). */
 const TIMEOUT_MS = 20_000;
@@ -173,12 +174,12 @@ export async function planRealCall(
   const number = (opts.contact?.phone || typed || "").replace(/[ \-]/g, "");
   const c = await http<Clarify>("POST", "/api/tasks", { text, lang, ...(number ? { phone: number } : {}) });
   const answers: Record<string, string> = {};
-  // Questions are off for now: the server plans from the request alone.
+  // Questions are cards in a bottom sheet (QuestionSheet), one at a time; the chat only gets a one-line summary.
   if (ASK_QUESTIONS && c.questions.length) {
-    await chat.bot(c.summary);
-    for (const q of c.questions) {
-      const opts = q.options?.length ? `\n${q.options.map((o, i) => `${i + 1}. ${o}`).join("   ")}` : "";
-      answers[q.id] = pickOption(await chat.askUser(q.text + opts), q.options);
+    const given = await askQuestions(c.questions);
+    if (given) {
+      c.questions.forEach((q, i) => { if (given[i]) answers[q.id] = given[i]!; });
+      await chat.bot(given.filter(Boolean).join(" · "));
     }
   }
   const plan = await http<Plan>("POST", `/api/tasks/${encodeURIComponent(c.taskId)}/answers`, { answers });

@@ -13,6 +13,7 @@ import { Icon, Wordmark, type IconName } from "./Icon";
 import { Presets } from "./Presets";
 import { Profile } from "./Profile";
 import { Btn, Dots, Press, Rise, T } from "./ui";
+import { QuestionSheet } from "./QuestionSheet";
 
 // The tabbed part of the app, as web/src/components/Home.tsx: Home (presets and
 // demos; the web's Demo tab), the chat with Spoken, and Profile, switched by the
@@ -52,6 +53,7 @@ export function Home() {
         ) : null}
       </View>
       <TabBar tab={tab} />
+      <QuestionSheet />
     </KeyboardAvoidingView>
   );
 }
