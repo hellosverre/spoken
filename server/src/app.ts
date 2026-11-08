@@ -547,6 +547,12 @@ export function createApp(llm: LlmProvider = createLlm(), db: Db = new FallbackD
       return err(404, "not found");
     }
 
+    // Erase the account and all its data (GDPR). Bearer token only; 204 on success.
+    if (path === "/api/account" && m === "DELETE") {
+      const r = await auth.deleteAccount(req.headers.get("authorization"));
+      return r.ok ? new Response(null, { status: 204, headers: CORS }) : err(r.status, r.error);
+    }
+
     if (path === "/api/feedback" && m === "POST") {
       if (overLimit(`feedback:${userKey(req, server)}`, 20, 10 * 60_000)) return err(429, "For mange tilbakemeldinger. Prøv igjen senere.");
       const device = deviceOf(req);
