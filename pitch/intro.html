@@ -36,6 +36,8 @@ body{cursor:default;-webkit-font-smoothing:antialiased}
   <canvas id="fx"></canvas>
 </div>
 <script>
+const SPEED = Number(new URLSearchParams(location.search).get("speed")) || 2.4; // Sverre: «way faster» (7.2 s → ~3 s)
+
 (() => {
 "use strict";
 const W = 1920, H = 1080;
@@ -549,8 +551,8 @@ function render(t) {
 
 function currentT() {
   if (state === "idle" || state === "loading") return -1;
-  if (state === "done") return Math.max(T_END + 10, (performance.now() - t0) / 1000);
-  return (performance.now() - t0) / 1000;
+  if (state === "done") return Math.max(T_END + 10, (performance.now() - t0) / 1000 * SPEED);
+  return (performance.now() - t0) / 1000 * SPEED;
 }
 
 function frame(now) {
