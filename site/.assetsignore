@@ -1,0 +1,5 @@
+.vercel
+.wrangler
+wrangler.jsonc
+README.md
+.assetsignore
